@@ -338,7 +338,7 @@ export const styles: Record<string, React.CSSProperties> = {
   },
 
   tabContent: {
-    marginTop: 12,
+    marginTop: 0,
     display: "flex",
     flexDirection: "column",
     gap: 12,

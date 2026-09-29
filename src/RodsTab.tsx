@@ -2,7 +2,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { styles } from "./styles";
 import { loadJson, saveJson } from "./utils/storage";
-import rodsData from "./data/rods.json";
+import fishingPlanner from "./data/fishingPlanner.json";
 import { rodFishData } from "./utils/phoenixData";
 import { calculateRodRisk, getRodHiddenSuccessBonus } from "./utils/fishingSkillup";
 
@@ -37,10 +37,12 @@ type BreakFish = {
   ranking: number;
   size: string;
   legendary: boolean;
+  item?: boolean;
 };
 
-const RODS: Rod[] = rodsData as Rod[];
-const BREAK_FISH: BreakFish[] = rodFishData as BreakFish[];
+const RODS: Rod[] = fishingPlanner.rods as Rod[];
+const PLANNER_FISH = fishingPlanner.fish as Record<string, BreakFish>;
+const BREAK_FISH: BreakFish[] = rodFishData.map(row => PLANNER_FISH[row.fish] ?? row);
 
 const SKILL_KEY = "ffxi_rod_skill_v1";
 const RODS_UI_KEY = "ffxi_rods_ui_v1";
@@ -147,8 +149,8 @@ const MATRIX_COLUMNS: { key: MatrixKey; label: string }[] = [
   { key: "ranking", label: "Ranking" },
   { key: "size", label: "Size" },
   { key: "legendary", label: "Legendary" },
-  { key: "snapPct", label: "Snap %" },
-  { key: "breakPct", label: "Break %" },
+  { key: "snapPct", label: "Snap Roll %" },
+  { key: "breakPct", label: "Break Roll %" },
   { key: "escapePct", label: "Escape %" },
   { key: "okPct", label: "No Mishap %" },
 ];
@@ -196,7 +198,6 @@ const clickableRowStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-/** Fish Sense thresholds: <30 minor, 30-44 bad, 45+ terrible. */
 function riskColor(pct: number): React.CSSProperties {
   if (pct <= 0) return { color: "#8af6b0", fontWeight: 800 };
   if (pct < 30) return { color: "#D8B04B", fontWeight: 700 };
@@ -209,7 +210,7 @@ function okColor(pct: number): React.CSSProperties {
   return { color: "#ff9c7a", fontWeight: 800 };
 }
 
-export default function RodsTab() {
+export default function RodsTab({ mode: activeMode }: { mode?: Mode } = {}) {
   type RodsUiState = {
     mode: Mode;
     mGlobal: string;
@@ -255,7 +256,8 @@ export default function RodsTab() {
     rSortDir: loaded.rSortDir === "asc" ? "asc" : "desc",
   };
 
-  const [mode, setMode] = useState<Mode>(initialUi.mode);
+  const [savedMode, setMode] = useState<Mode>(initialUi.mode);
+  const mode = activeMode ?? savedMode;
 
   // ---- Fishing skill (persisted) ----
   const [skillInput, setSkillInput] = useState(() => String(loadJson<number>(SKILL_KEY, 100)));
@@ -471,7 +473,7 @@ export default function RodsTab() {
       </div>
 
       <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {activeMode === undefined && <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             style={mode === "matrix" ? styles.buttonPrimaryCompact : styles.buttonCompact}
             onClick={() => setMode("matrix")}
@@ -484,7 +486,7 @@ export default function RodsTab() {
           >
             Rod stats
           </button>
-        </div>
+        </div>}
 
         {mode === "matrix" ? (
           <div style={styles.subCard}>
@@ -551,10 +553,10 @@ export default function RodsTab() {
             </div>
 
             <div style={{ marginTop: 8, ...styles.sub }}>
-              Server formulas (LSB). Skill only matters two ways: +2 durability when skill+10
-              &gt; the fish&apos;s cap, and the low-skill escape chance. Breakage is driven by fish Ranking vs rod
-              Durability. Rolls are sequential: escape, then snap (lose bait), then break (rod becomes its broken
-              version). No Mishap % = chance none of those three failures fire.
+              Phoenix public-source formulas and rod durability. Skill affects escape, not snap/break durability.
+              Rolls are sequential: escape, then line snap (lose bait), then rod break.
+              Snap Roll % applies after surviving escape; Break Roll % applies after surviving both earlier rolls.
+              No Mishap % is the combined chance to land a completed fight, excluding minigame failures.
             </div>
           </div>
         ) : (

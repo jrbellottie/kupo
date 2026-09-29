@@ -1,16 +1,24 @@
 // src/BaitTab.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { styles } from "./styles";
-import { baitData, fishData, rodFishData, phoenixFish } from "./utils/phoenixData";
-import rodsData from "./data/rods.json";
+import { baitData, fishData, phoenixFish } from "./utils/phoenixData";
+import fishingPlanner from "./data/fishingPlanner.json";
 import { loadJson, saveJson } from "./utils/storage";
 import { formatVendorPrice, getVendorPriceEach } from "./utils/vendorPrice";
+import { getFishingVendorOptions } from "./utils/fishingVendor";
 import {
   SkillupFish,
   SkillupRod,
   calculateRodRisk,
   calculateSkillup,
   getRodHiddenSuccessBonus,
+  calculateCastOdds,
+  calculatePoolSkillup,
+  calculateCatchTime,
+  formatCatchTime,
+  groupSkillupRows,
+  isCityFishingZone,
 } from "./utils/fishingSkillup";
 
 type BaitEntry = {
@@ -49,12 +57,14 @@ type FishZoneEntry = {
 
 const BAIT: BaitEntry[] = baitData as BaitEntry[];
 const FISH_ZONES: FishZoneEntry[] = fishData as FishZoneEntry[];
-const SKILLUP_FISH: SkillupFish[] = rodFishData as SkillupFish[];
-const SKILLUP_RODS: SkillupRod[] = (rodsData as SkillupRod[]).filter(
+const SKILLUP_RODS: SkillupRod[] = (fishingPlanner.rods as SkillupRod[]).filter(
   (rod) => rod.era === "TOAU" && rod.rod !== "Judges Rod" && rod.rod !== "Goldfish Basket"
 );
 const SKILLUP_ROD_NAMES = SKILLUP_RODS.map((rod) => rod.rod);
-const SKILLUP_FISH_BY_NAME = new Map(SKILLUP_FISH.map((fish) => [fish.fish, fish]));
+const PLANNER_FISH = fishingPlanner.fish as Record<string, SkillupFish & { rarity: number; shellfish: boolean; item: boolean; restricted: boolean }>;
+const PLANNER_BAITS = fishingPlanner.baits as Record<string, { poorFish: boolean; shellfishBait: boolean; fish: Record<string, number> }>;
+const PLANNER_AREAS = fishingPlanner.areas as Record<string, { difficulty: number; hasMobs: boolean; members: string[] }>;
+const normalizeFishingName = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /** Rarity like "x0.35" → 0.35; "-" (no penalty) = 1. */
 function rarityValue(rarity: string): number {
@@ -134,13 +144,20 @@ type Mode = "affinity" | "spots" | "skillup";
 type AffinityKey = "fish" | "lvl" | "size" | "bait" | "kind" | "bite" | "hookBonus" | "vendorPriceEach" | "best" | "note";
 type SpotKey = "zone" | "area" | "fish" | "lvl" | "bait" | "kind" | "bite" | "hookBonus" | "vendorPriceEach" | "sharePct" | "competingCount";
 type SkillupKey =
-  | "expectedLandedGain"
+  | "catchTimeSeconds"
+  | "bestVendorPrice"
+  | "targetGain"
   | "fish"
   | "fishLevel"
   | "levelDifference"
   | "skillupChancePct"
   | "sharePct"
   | "landPct"
+  | "fishPct"
+  | "itemPct"
+  | "mobPct"
+  | "nothingPct"
+  | "targetPct"
   | "rod"
   | "effectiveSkill"
   | "zone"
@@ -150,6 +167,7 @@ type SortDir = "asc" | "desc";
 type RodAccess = "ebisu" | "luShang" | "standard";
 
 type SkillupRow = PoolEntry & {
+  catchTimeSeconds: number | null;
   fishLevel: number;
   levelDifference: number;
   skillupChancePct: number;
@@ -161,6 +179,13 @@ type SkillupRow = PoolEntry & {
   snapPct: number;
   breakPct: number;
   escapePct: number;
+  fishPct: number;
+  itemPct: number;
+  mobPct: number;
+  nothingPct: number;
+  targetPct: number;
+  targetGain: number;
+  itemHazards: string;
 };
 
 const AFFINITY_COLUMNS: { key: AffinityKey; label: string }[] = [
@@ -191,13 +216,20 @@ const SPOT_COLUMNS: { key: SpotKey; label: string }[] = [
 ];
 
 const SKILLUP_COLUMNS: { key: SkillupKey; label: string }[] = [
-  { key: "expectedLandedGain", label: "Est. Gain / 100 Fish Hooks" },
+  { key: "targetGain", label: "Target Gain / 100 Casts" },
+  { key: "catchTimeSeconds", label: "Time / 200 fish" },
+  { key: "bestVendorPrice", label: "Max NPC gross / fish" },
   { key: "fish", label: "Fish" },
   { key: "fishLevel", label: "Fish Lvl" },
   { key: "levelDifference", label: "+Lvl" },
   { key: "skillupChancePct", label: "Skill-up Chance" },
-  { key: "sharePct", label: "Pool Share" },
-  { key: "landPct", label: "Land Chance" },
+  { key: "sharePct", label: "Share of Fish Bites" },
+  { key: "fishPct", label: "Fish / Cast" },
+  { key: "itemPct", label: "Item / Cast" },
+  { key: "mobPct", label: "Monster / Cast" },
+  { key: "nothingPct", label: "Nothing / Cast" },
+  { key: "targetPct", label: "Target / Cast" },
+  { key: "landPct", label: "Land / Target Hook" },
   { key: "rod", label: "Rod" },
   { key: "effectiveSkill", label: "Success Skill" },
   { key: "zone", label: "Zone" },
@@ -206,6 +238,18 @@ const SKILLUP_COLUMNS: { key: SkillupKey; label: string }[] = [
 ];
 
 const MAX_VISIBLE_ROWS = 300;
+const COMPACT_SKILLUP_COLUMNS: { key: SkillupKey; label: string; width: string }[] = [
+  { key: "targetGain", label: "Target gain / 100 casts", width: "9%" },
+  { key: "fish", label: "Fish", width: "12%" },
+  { key: "bestVendorPrice", label: "Max NPC gross / fish", width: "14%" },
+  { key: "catchTimeSeconds", label: "Time / 200 fish", width: "10%" },
+  { key: "targetPct", label: "Target / cast", width: "8%" },
+  { key: "landPct", label: "Land / hook", width: "8%" },
+  { key: "rod", label: "Rod", width: "12%" },
+  { key: "zone", label: "Location", width: "15%" },
+  { key: "bait", label: "Bait", width: "12%" },
+];
+const CATCH_TIME_ASSUMPTIONS = "Expected time to land 200 target fish, rounded up to a minute. All fish attempts (including competing fish and failed landings): 30s. Monster, item and empty casts canceled: 12s. Includes target bite odds, escapes, line snaps and rod breaks. Fixed current odds; excludes fatigue, daily limits and repair / resupply downtime.";
 const BAIT_UI_KEY = "ffxi_bait_ui_v1";
 
 function uniqueSorted(values: (string | null)[]): string[] {
@@ -282,8 +326,20 @@ function shareColor(pct: number | null): React.CSSProperties {
   return { color: "#ff9c7a", fontWeight: 700 };
 }
 
-export default function BaitTab() {
+export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mode; onModeChange?: (mode: Mode) => void } = {}) {
   const rodsDropdownRef = useRef<HTMLDetailsElement | null>(null);
+  const [expandedSkillupKey, setExpandedSkillupKey] = useState<string | null>(null);
+  const [expandedVendorKey, setExpandedVendorKey] = useState<string | null>(null);
+  const [expandedSkillupGroups, setExpandedSkillupGroups] = useState<Set<string>>(() => new Set());
+  function toggleSkillupGroup(key: string) {
+    setExpandedSkillupGroups(previous => {
+      const next = new Set(previous);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+  const skillupCellStyle: React.CSSProperties = { ...tdStyle, whiteSpace: "normal", overflowWrap: "anywhere", verticalAlign: "top" };
 
   type BaitUiState = {
     mode: Mode;
@@ -355,7 +411,7 @@ export default function BaitTab() {
     uZone: "",
     uBait: "",
     uMinShare: "",
-    uSortKey: "expectedLandedGain",
+    uSortKey: "targetGain",
     uSortDir: "desc",
   };
 
@@ -391,7 +447,12 @@ export default function BaitTab() {
     uSortDir: loaded.uSortDir === "asc" ? "asc" : "desc",
   };
 
-  const [mode, setMode] = useState<Mode>(initialUi.mode);
+  const [savedMode, setSavedMode] = useState<Mode>(initialUi.mode);
+  const mode = activeMode ?? savedMode;
+  function setMode(next: Mode) {
+    setSavedMode(next);
+    onModeChange?.(next);
+  }
 
   // ---- Affinity (Fish x Bait) filters ----
   const [aGlobal, setAGlobal] = useState(initialUi.aGlobal);
@@ -541,7 +602,9 @@ export default function BaitTab() {
     else {
       setUSortKey(key);
       setUSortDir(
-        key === "expectedLandedGain" ||
+        key === "targetGain" ||
+          key === "bestVendorPrice" ||
+          key === "targetPct" ||
           key === "fishLevel" ||
           key === "levelDifference" ||
           key === "skillupChancePct" ||
@@ -585,7 +648,7 @@ export default function BaitTab() {
     setUMinShare("");
     setUIncludeCop(true);
     setUIncludeToau(true);
-    setUSortKey("expectedLandedGain");
+    setUSortKey("targetGain");
     setUSortDir("desc");
   }
 
@@ -788,29 +851,65 @@ export default function BaitTab() {
     const availableRods = SKILLUP_RODS.filter((rod) => selectedRodNames.has(rod.rod));
 
     const rows: SkillupRow[] = [];
+    const estimates = new Map<string, {
+      fishPct: number; itemPct: number; mobPct: number; nothingPct: number;
+      targetPct: number[]; names: string[]; gains: number[]; totalGain: number; itemHazards: string;
+    }>();
     for (const pool of POOLS) {
       if (pool.lvl === null) continue;
-      const fish = SKILLUP_FISH_BY_NAME.get(pool.fish);
+      const fish = PLANNER_FISH[pool.fish];
       if (!fish) continue;
+      const areaKey = `${normalizeFishingName(pool.zone)}|${normalizeFishingName(pool.area)}`;
+      const area = PLANNER_AREAS[areaKey];
+      const bait = PLANNER_BAITS[pool.bait];
+      if (!area || !bait) continue;
       if (!uIncludeCop && COP_LOCKED_ZONES.has(pool.zone)) continue;
       if (!uIncludeToau && TOAU_LOCKED_ZONES.has(pool.zone)) continue;
       if (uZone && pool.zone !== uZone) continue;
       if (fishQuery && !pool.fish.toLowerCase().includes(fishQuery)) continue;
       if (baitQuery && !pool.bait.toLowerCase().includes(baitQuery)) continue;
-      if (minimumShare !== null && Number.isFinite(minimumShare) && pool.sharePct < minimumShare) continue;
 
       for (const rod of availableRods) {
         const hiddenRodSkill = getRodHiddenSuccessBonus(rod.rod);
         const effectiveSkill = Math.floor(baseSkill) + bonusSkill + hiddenRodSkill;
-        const skillup = calculateSkillup(baseSkill, pool.lvl, pool.zone, rod.rod);
+        const skillup = calculateSkillup(baseSkill, fish.skillCap, pool.zone, rod.rod);
         if (!skillup.eligible) continue;
 
+        const estimateKey = `${areaKey}|${pool.bait}|${rod.rod}`;
+        let estimate = estimates.get(estimateKey);
+        if (!estimate) {
+          const members = area.members.map(name => PLANNER_FISH[name]).filter(member => member && !member.item && bait.fish[member.fish] !== undefined)
+            .map(member => ({ ...member, hookBonus: bait.fish[member.fish] }));
+          const items = area.members.map(name => PLANNER_FISH[name]).filter(member => member?.item);
+          const odds = calculateCastOdds(effectiveSkill, rod, members, {
+            city: isCityFishingZone(pool.zone), hasItems: items.length > 0, hasMobs: area.hasMobs,
+            difficulty: area.difficulty, poorFish: bait.poorFish, shellfishBait: bait.shellfishBait,
+          });
+          const gains = calculatePoolSkillup(baseSkill, effectiveSkill, pool.zone, rod, members, odds.targetPct);
+          const itemHazards = items.filter(item => calculateRodRisk(effectiveSkill, item, rod).breakPct > 0).map(item => item.fish).join(", ");
+          estimate = { ...odds, ...gains, names: members.map(member => member.fish), itemHazards };
+          estimates.set(estimateKey, estimate);
+        }
+        const targetIndex = estimate.names.indexOf(pool.fish);
+        if (targetIndex < 0) continue;
+        const targetPct = estimate.targetPct[targetIndex];
+        const sharePct = estimate.fishPct ? 100 * targetPct / estimate.fishPct : 0;
+        if (minimumShare !== null && Number.isFinite(minimumShare) && sharePct < minimumShare) continue;
         const risk = calculateRodRisk(effectiveSkill, fish, rod);
-        const expectedResolvedGain = skillup.expectedGainPerTargetHook * (pool.sharePct / 100) * 100;
-        const expectedLandedGain = expectedResolvedGain * (risk.skillupResolvePct / 100);
+        const expectedResolvedGain = skillup.expectedGainPerTargetHook * targetPct;
+        const expectedLandedGain = estimate.totalGain;
         const candidate: SkillupRow = {
           ...pool,
-          fishLevel: pool.lvl,
+          catchTimeSeconds: calculateCatchTime({ fishPct: estimate.fishPct, targetPct, landPct: risk.landPct }),
+          sharePct,
+          fishPct: estimate.fishPct,
+          itemPct: estimate.itemPct,
+          mobPct: estimate.mobPct,
+          nothingPct: estimate.nothingPct,
+          targetPct,
+          targetGain: estimate.gains[targetIndex],
+          itemHazards: estimate.itemHazards,
+          fishLevel: fish.skillCap,
           levelDifference: skillup.difference,
           skillupChancePct: skillup.chancePct,
           expectedResolvedGain,
@@ -843,20 +942,35 @@ export default function BaitTab() {
 
     return rows.sort((a, b) => {
       let comparison = 0;
-      if (
-        uSortKey === "expectedLandedGain" ||
+      if (uSortKey === "catchTimeSeconds") {
+        if (a.catchTimeSeconds === null && b.catchTimeSeconds !== null) return 1;
+        if (b.catchTimeSeconds === null && a.catchTimeSeconds !== null) return -1;
+        comparison = (a.catchTimeSeconds ?? 0) - (b.catchTimeSeconds ?? 0);
+      } else if (uSortKey === "bestVendorPrice") {
+        const first = getFishingVendorOptions(a.fish).bestPrice;
+        const second = getFishingVendorOptions(b.fish).bestPrice;
+        if (first === null && second !== null) return 1;
+        if (second === null && first !== null) return -1;
+        comparison = (first ?? 0) - (second ?? 0);
+      } else if (
+        uSortKey === "targetGain" ||
         uSortKey === "fishLevel" ||
         uSortKey === "levelDifference" ||
         uSortKey === "skillupChancePct" ||
         uSortKey === "sharePct" ||
         uSortKey === "landPct" ||
+        uSortKey === "fishPct" ||
+        uSortKey === "itemPct" ||
+        uSortKey === "mobPct" ||
+        uSortKey === "nothingPct" ||
+        uSortKey === "targetPct" ||
         uSortKey === "effectiveSkill"
       ) {
         comparison = a[uSortKey] - b[uSortKey];
       } else {
         comparison = a[uSortKey].localeCompare(b[uSortKey]);
       }
-      if (comparison === 0) comparison = b.expectedLandedGain - a.expectedLandedGain;
+      if (comparison === 0) return b.targetGain - a.targetGain;
       return uSortDir === "asc" ? comparison : -comparison;
     });
   }, [
@@ -874,9 +988,22 @@ export default function BaitTab() {
     uSortDir,
   ]);
 
-  const skillupTop = skillupResults[0] ?? null;
+  const skillupGroups = useMemo(() => groupSkillupRows(skillupResults), [skillupResults]);
+  const visibleSkillupRows = useMemo(() => {
+    const entries: { row: SkillupRow; group?: { key: string; rows: SkillupRow[] }; nested: boolean }[] = [];
+    for (const group of skillupGroups.slice(0, MAX_VISIBLE_ROWS)) {
+      if (group.rows.length === 1) entries.push({ row: group.rows[0], nested: false });
+      else {
+        entries.push({ row: group.rows[0], group, nested: false });
+        if (expandedSkillupGroups.has(group.key)) {
+          entries.push(...group.rows.map(row => ({ row, nested: true })));
+        }
+      }
+    }
+    return entries;
+  }, [skillupGroups, expandedSkillupGroups]);
 
-  const results = mode === "affinity" ? affinityResults : mode === "spots" ? spotResults : skillupResults;
+  const results = mode === "affinity" ? affinityResults : mode === "spots" ? spotResults : skillupGroups;
   const visibleCount = Math.min(results.length, MAX_VISIBLE_ROWS);
 
   const selectFilter = (
@@ -930,14 +1057,15 @@ export default function BaitTab() {
               : "Fishing Skill-up Planner"}
         </h3>
         <div style={styles.sub}>
-          {results.length.toLocaleString()} of{" "}
-          {(mode === "affinity" ? BAIT.length : POOLS.length).toLocaleString()} entries
+          {mode === "skillup"
+            ? `${skillupGroups.length.toLocaleString()} location groups / ${skillupResults.length.toLocaleString()} combinations`
+            : `${results.length.toLocaleString()} of ${(mode === "affinity" ? BAIT.length : POOLS.length).toLocaleString()} entries`}
           {results.length > MAX_VISIBLE_ROWS ? ` (showing first ${MAX_VISIBLE_ROWS} — refine filters)` : ""}
         </div>
       </div>
 
       <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {activeMode === undefined && <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             style={mode === "affinity" ? styles.buttonPrimaryCompact : styles.buttonCompact}
             onClick={() => setMode("affinity")}
@@ -956,7 +1084,7 @@ export default function BaitTab() {
           >
             Skill-up planner
           </button>
-        </div>
+        </div>}
 
         {mode === "affinity" ? (
           <div style={styles.subCard}>
@@ -1238,21 +1366,6 @@ export default function BaitTab() {
               </button>
             </div>
 
-            <div style={{ marginTop: 8, ...styles.sub }}>
-              Neutral-moon estimate per 100 fish-pool hooks, not per cast. Line snaps and rod breaks can still
-              skill up; escape cannot. Guild rank caps, fatigue, quests, special gear, and time-dependent hook weights are not modeled. Base skill alone controls eligibility and the skill-up roll. Gear/support and the
-              selected bonus skill only improve success. Hidden rod success bonus is applied automatically: Lu Shang
-              rods use +10, Ebisu rods use +15. City fishing receives the server&apos;s lower skill-up rate, and Lu
-              Shang&apos;s under-50 skill-up penalty is applied.
-            </div>
-
-            {skillupTop ? (
-              <div style={{ marginTop: 10, ...styles.sub }}>
-                Best combination: <span style={{ color: "#8af6b0", fontWeight: 800 }}>{skillupTop.fish}</span> with{" "}
-                <strong>{skillupTop.bait}</strong> and <strong>{skillupTop.rod}</strong> at {skillupTop.zone} /{" "}
-                {skillupTop.area} — {skillupTop.expectedLandedGain.toFixed(3)} expected skill per 100 pool hooks.
-              </div>
-            ) : null}
           </div>
         )}
 
@@ -1381,62 +1494,149 @@ export default function BaitTab() {
               </tbody>
             </table>
           ) : (
-            <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1050, tableLayout: "fixed" }} aria-label="Fishing skill-up combinations">
+              <colgroup>
+                <col style={{ width: 56 }} />
+                {COMPACT_SKILLUP_COLUMNS.map(column => <col key={column.key} style={{ width: column.width }} />)}
+              </colgroup>
               <thead>
                 <tr>
-                  {SKILLUP_COLUMNS.map((column) => {
+                  <th style={{ ...thStyle, cursor: "default", padding: 4 }} aria-label="Details" />
+                  {COMPACT_SKILLUP_COLUMNS.map((column) => {
                     const active = column.key === uSortKey;
                     return (
                       <th
                         key={column.key}
-                        style={{ ...thStyle, ...(active ? { color: "#8af6b0" } : {}) }}
+                        style={{ ...thStyle, whiteSpace: "normal", overflowWrap: "anywhere", ...(active ? { color: "#8af6b0" } : {}) }}
                         onClick={() => onSkillupHeader(column.key)}
-                        title={`Sort by ${column.label}`}
+                        title={column.key === "catchTimeSeconds" ? CATCH_TIME_ASSUMPTIONS : `Sort by ${column.label}`}
                       >
                         {column.label}
                         {active ? (uSortDir === "asc" ? " ▲" : " ▼") : ""}
                       </th>
                     );
                   })}
-                  <th style={{ ...thStyle, cursor: "default" }}>Risk Details</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleCount === 0 ? (
                   <tr>
-                    <td style={{ ...tdStyle, opacity: 0.7 }} colSpan={SKILLUP_COLUMNS.length + 1}>
+                    <td style={{ ...tdStyle, opacity: 0.7 }} colSpan={COMPACT_SKILLUP_COLUMNS.length + 1}>
                       No eligible combinations. Check the base skill, rod access, or filters.
                     </td>
                   </tr>
                 ) : (
-                  skillupResults.slice(0, MAX_VISIBLE_ROWS).map((row, index) => {
-                    const rowKey = `skillup|${row.zone}|${row.area}|${row.fish}|${row.bait}|${row.rod}|${index}`;
+                  visibleSkillupRows.map(({ row, group, nested }, index) => {
+                    const rowKey = group ? `group|${group.key}` : `skillup|${row.zone}|${row.area}|${row.fish}|${row.bait}|${row.rod}`;
                     const selected = selectedRowKey === rowKey;
+                    const vendor = getFishingVendorOptions(row.fish);
+                    const vendorExpanded = expandedVendorKey === rowKey;
+                    const detailKey = `${row.zone}|${row.area}|${row.fish}|${row.bait}|${row.rod}`;
+                    const expanded = group ? expandedSkillupGroups.has(group.key) : expandedSkillupKey === detailKey;
+                    const areas = group ? [...new Set(group.rows.map(member => member.area))] : [];
+                    const baits = group ? [...new Set(group.rows.map(member => member.bait))] : [];
+                    const itemHazards = group ? [...new Set(group.rows.map(member => member.itemHazards).filter(Boolean))].join("; ") : row.itemHazards;
                     return (
+                      <React.Fragment key={rowKey}>
                       <tr
-                        key={rowKey}
-                        onClick={() => setSelectedRowKey(rowKey)}
-                        style={{ ...clickableRowStyle, ...(selected ? selectedRowStyle : {}) }}
-                        title="Click to highlight this row"
+                        onClick={() => group ? toggleSkillupGroup(group.key) : setSelectedRowKey(rowKey)}
+                        style={{ ...clickableRowStyle, ...(group ? { background: "rgba(255,255,255,0.045)" } : nested ? { background: "rgba(138,246,176,0.035)" } : {}), ...(selected ? selectedRowStyle : {}) }}
+                        title={group ? "Expand or collapse sublocations and baits" : "Click to highlight this row"}
                       >
-                        <td style={{ ...tdStyle, color: "#8af6b0", fontWeight: 800 }}>
-                          {row.expectedLandedGain.toFixed(3)}
+                        <td style={{ ...skillupCellStyle, padding: nested ? "6px 4px 6px 24px" : "6px 4px", ...(nested ? { boxShadow: "inset 2px 0 rgba(138,246,176,0.25)" } : {}) }}>
+                          <button
+                            type="button"
+                            aria-label={group ? `${expanded ? "Hide" : "Show"} ${group.rows.length} location and bait combinations for ${row.zone}, ${row.fish}, ${row.rod}, ${row.targetGain.toFixed(3)} gain` : `${expanded ? "Hide" : "Show"} catch odds and risks for ${row.fish}, ${row.rod}, ${row.zone}, ${row.area}, ${row.bait}`}
+                            aria-expanded={expanded}
+                            aria-controls={group ? undefined : `skillup-details-${index}`}
+                            title={group ? "Sublocations and baits" : expanded ? "Hide catch odds and risks" : "Show catch odds and risks"}
+                            onClick={event => { event.stopPropagation(); if (group) toggleSkillupGroup(group.key); else setExpandedSkillupKey(expanded ? null : detailKey); }}
+                            style={{ ...styles.buttonCompact, display: "grid", placeItems: "center", width: 28, height: 28, padding: 0 }}
+                          >
+                            {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                          </button>
                         </td>
-                        <td style={{ ...tdStyle, fontWeight: 700 }}>{row.fish}</td>
-                        <td style={tdStyle}>{row.fishLevel}</td>
-                        <td style={tdStyle}>+{row.levelDifference}</td>
-                        <td style={tdStyle}>{row.skillupChancePct.toFixed(1)}%</td>
-                        <td style={{ ...tdStyle, ...shareColor(row.sharePct) }}>{row.sharePct}%</td>
-                        <td style={tdStyle}>{row.landPct.toFixed(1)}%</td>
-                        <td style={{ ...tdStyle, fontWeight: 700 }}>{row.rod}</td>
-                        <td style={tdStyle}>{row.effectiveSkill}</td>
-                        <td style={tdStyle}>{row.zone}</td>
-                        <td style={tdStyle}>{row.area}</td>
-                        <td style={tdStyle}>{row.bait}</td>
-                        <td style={{ ...tdStyle, opacity: 0.85 }}>
-                          Escape {row.escapePct}% / Snap {row.snapPct}% / Break {row.breakPct}%
+                        <td style={{ ...skillupCellStyle, color: "#8af6b0", fontWeight: 800, ...(nested ? { paddingLeft: 26 } : {}) }} title={`${row.fish} only; includes competing catches and empty casts`}>
+                          {row.targetGain.toFixed(3)}
                         </td>
+                        <td style={skillupCellStyle}><strong>{row.fish}</strong><div style={{ opacity: 0.65, fontSize: 12 }}>Lvl {row.fishLevel} (+{row.levelDifference})</div></td>
+                        <td style={skillupCellStyle}>
+                          <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                            <button type="button" aria-label={`${vendorExpanded ? "Hide" : "Show"} NPC prices and recipes for ${row.fish}`}
+                              aria-expanded={vendorExpanded} aria-controls={`skillup-vendor-${index}`} title="NPC prices and recipes"
+                              onClick={event => { event.stopPropagation(); setExpandedVendorKey(vendorExpanded ? null : rowKey); }}
+                              style={{ ...styles.buttonCompact, display: "grid", placeItems: "center", flexShrink: 0, width: 28, height: 28, padding: 0 }}>
+                              {vendorExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            </button>
+                            <div title="Best direct sale or in-era NQ recipe gross proceeds per fish, before costs">
+                              <strong>{vendor.bestPrice === null ? "Unknown" : `${formatVendorPrice(Math.round(vendor.bestPrice))} gil`}</strong>
+                              <div style={{ opacity: 0.65, fontSize: 12 }}>{vendor.bestName === row.fish ? "Direct sale" : vendor.bestName}</div>
+                            </div>
+                          </div>
+                        </td>
+                        <td style={{ ...skillupCellStyle, fontWeight: 700, fontVariantNumeric: "tabular-nums" }} title={CATCH_TIME_ASSUMPTIONS}>{formatCatchTime(row.catchTimeSeconds)}</td>
+                        <td style={skillupCellStyle}>{row.targetPct.toFixed(1)}%</td>
+                        <td style={skillupCellStyle}>
+                          {row.landPct.toFixed(1)}%
+                          {itemHazards && <div style={{ color: "#ff9c7a", fontSize: 12 }} title={itemHazards}>Item break risk</div>}
+                        </td>
+                        <td style={{ ...skillupCellStyle, fontWeight: 700 }}>{row.rod}</td>
+                        <td style={{ ...skillupCellStyle, ...(nested ? { paddingLeft: 26 } : {}) }}>
+                          {group ? <><strong>{row.zone}</strong><div style={{ opacity: 0.65, fontSize: 12 }}>{areas.length === 1 ? areas[0] : `${areas.length} sublocations`} / {group.rows.length} combinations</div></>
+                            : nested ? row.area : <>{row.zone}<div style={{ opacity: 0.65, fontSize: 12 }}>{row.area}</div></>}
+                        </td>
+                        <td style={skillupCellStyle}>{group ? baits.length === 1 ? baits[0] : `${baits.length} baits` : row.bait}</td>
                       </tr>
+                      {vendorExpanded && <tr id={`skillup-vendor-${index}`}>
+                        <td colSpan={COMPACT_SKILLUP_COLUMNS.length + 1} style={{ ...skillupCellStyle, padding: "12px 16px", background: "rgba(255,255,255,0.035)" }}>
+                          <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8 }}>
+                            <strong>{row.fish}: direct NPC sale {vendor.rawPrice === null ? "unknown" : `${formatVendorPrice(vendor.rawPrice)} gil each`}</strong>
+                            <span style={{ opacity: 0.7, fontSize: 12 }}>Gross proceeds, before crystal / ingredient costs and synthesis failures. Best: in-era NQ only.</span>
+                          </div>
+                          {vendor.recipes.length === 0 ? <div style={{ marginTop: 10, opacity: 0.7 }}>No direct synthesis recipes.</div> :
+                            <div style={{ overflowX: "auto", marginTop: 12 }}>
+                              <table style={{ width: "100%", minWidth: 620, borderCollapse: "collapse" }} aria-label={`NPC recipe prices for ${row.fish}`}>
+                                <thead><tr>{["Recipe / requirements", "Ingredients", "Output", "NPC / item", "NPC / synth", "NPC / fish"].map(label =>
+                                  <th key={label} scope="col" style={{ ...thStyle, cursor: "default", whiteSpace: "normal" }}>{label}</th>)}</tr></thead>
+                                <tbody>{vendor.recipes.flatMap(({ recipe, outcomes }) => outcomes.map((outcome, outcomeIndex) => <tr key={`${recipe.id}-${outcome.tier}`}>
+                                  {outcomeIndex === 0 && <td rowSpan={outcomes.length} style={skillupCellStyle}><strong>{recipe.res.n}</strong><div>{recipe.craft} {recipe.lvl}</div>
+                                    {recipe.subs?.map(sub => <div key={sub.c}>{sub.c} {sub.l}</div>)}
+                                    {recipe.ki && <div>Key item required</div>}
+                                    {recipe.era && <div>{recipe.era}{recipe.era === "WotG" ? " (out of era)" : ""}</div>}
+                                  </td>}
+                                  {outcomeIndex === 0 && <td rowSpan={outcomes.length} style={skillupCellStyle}><div>1 x {recipe.crystal} Crystal</div>{recipe.ing.map((item, itemIndex) => <div key={itemIndex}>{item.q} x {item.n}</div>)}</td>}
+                                  <td style={skillupCellStyle}>{outcome.tier}: {outcome.q} x {outcome.n}</td>
+                                  {[outcome.price, outcome.total, outcome.perFish].map((price, priceIndex) => <td key={priceIndex} style={skillupCellStyle}>{price === null ? "Unknown" : `${formatVendorPrice(Math.round(price))} gil`}</td>)}
+                                </tr>))}</tbody>
+                              </table>
+                            </div>}
+                        </td>
+                      </tr>}
+                      {!group && expanded && <tr id={`skillup-details-${index}`}>
+                        <td colSpan={COMPACT_SKILLUP_COLUMNS.length + 1} style={{ ...skillupCellStyle, padding: "12px 16px", background: "rgba(255,255,255,0.035)" }}>
+                          <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "12px 20px", margin: "0 0 12px" }}>
+                            {[
+                              ["Fish / cast", `${row.fishPct.toFixed(1)}%`],
+                              ["Item / cast", `${row.itemPct.toFixed(1)}%`],
+                              ["Monster / cast", `${row.mobPct.toFixed(1)}%`],
+                              ["Nothing / cast", `${row.nothingPct.toFixed(1)}%`],
+                              ["Target / cast", `${row.targetPct.toFixed(1)}%`],
+                              ["Share of fish bites", `${row.sharePct.toFixed(1)}%`],
+                              ["Skill-up chance", `${row.skillupChancePct.toFixed(1)}%`],
+                              ["Success skill", String(row.effectiveSkill)],
+                              ["Target gain / 100 casts", row.targetGain.toFixed(3)],
+                              ["Time / 200 target fish", formatCatchTime(row.catchTimeSeconds)],
+                              ["Average cast time", `${(30 * row.fishPct / 100 + 12 * (1 - row.fishPct / 100)).toFixed(1)}s`],
+                              ["Pool gain / 100 casts", row.expectedLandedGain.toFixed(3)],
+                            ].map(([label, value]) => <div key={label}><dt style={{ opacity: 0.65, fontSize: 12 }}>{label}</dt><dd style={{ margin: "4px 0 0", fontWeight: 700 }}>{value}</dd></div>)}
+                          </dl>
+                          <div style={{ marginBottom: 10, opacity: 0.75 }}>{CATCH_TIME_ASSUMPTIONS}</div>
+                          <div>Sequential target rolls: escape {row.escapePct}% / line snap {row.snapPct}% / rod break {row.breakPct}%</div>
+                          <div style={{ marginTop: 6, opacity: 0.75 }}>Each roll applies only after surviving earlier rolls. Per target hook: line snap {((1 - row.escapePct / 100) * row.snapPct).toFixed(1)}% / rod break {((1 - row.escapePct / 100) * (1 - row.snapPct / 100) * row.breakPct).toFixed(1)}%.</div>
+                          {row.itemHazards && <div style={{ color: "#ff9c7a", marginTop: 6 }}>Item rod-break hazards: {row.itemHazards}</div>}
+                        </td>
+                      </tr>}
+                      </React.Fragment>
                     );
                   })
                 )}

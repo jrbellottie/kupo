@@ -1,6 +1,6 @@
 // src/AppShell.tsx
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { UsersRound, Coins, Pickaxe } from "lucide-react";
+import { UsersRound, Coins, Pickaxe, PanelTopClose, PanelTopOpen } from "lucide-react";
 import {
   Calibration,
   DEFAULT_CALIBRATION,
@@ -24,8 +24,6 @@ import { buildTenshodoPresets, GUILD_PRESETS, nextGuildAlertTarget } from "./uti
 import { registerTabSwitcher, switchTabWithScroll, setCurrentTab } from "./utils/tabNav";
 import { getNextNmLotteryEvent, getNextNmTimedWindowEvent } from "./utils/nm";
 import FishTab from "./FishTab";
-import BaitTab from "./BaitTab";
-import RodsTab from "./RodsTab";
 import ClamTab from "./ClamTab";
 import ChocoboTab from "./ChocoboTab";
 import WeatherTab from "./WeatherTab";
@@ -179,7 +177,7 @@ function isValidTod(raw: string): boolean {
   );
 }
 
-type TabId = "home" | "timers" | "nm" | "presets" | "counters" | "luShang" | "fish" | "bait" | "rods" | "clam" | "chocobo" | "helm" | "weather" | "bcnm" | "drops" | "npc" | "bestiary" | "skillchains" | "crafting" | "printing" | "quests" | "atlas" | "calibration";
+type TabId = "home" | "timers" | "nm" | "presets" | "counters" | "luShang" | "fish" | "clam" | "chocobo" | "helm" | "weather" | "bcnm" | "drops" | "npc" | "bestiary" | "skillchains" | "crafting" | "printing" | "quests" | "atlas" | "calibration";
 
 type TabDef = {
   id: TabId;
@@ -197,8 +195,6 @@ const TABS: TabDef[] = [
   { id: "counters", label: "Counters", icon: "🔢" },
   { id: "luShang", label: "Lu Shang", icon: "🪝" },
   { id: "fish", label: "Fish", icon: "🐟" },
-  { id: "bait", label: "Bait", icon: "🪱" },
-  { id: "rods", label: "Rods", icon: "🎣" },
   { id: "clam", label: "Clam", icon: "🪣" },
   { id: "chocobo", label: "Digging", icon: "🐤" },
   { id: "helm", label: "HELM", icon: <Pickaxe size={18} /> },
@@ -342,9 +338,15 @@ export default function AppShell() {
   const [activeTab, setActiveTab] = useState<TabId>(() => {
     const stored = loadJson<string>("ffxi_active_tab_v1", "home");
     if (stored === "stopwatch") return "timers";
+    if (stored === "bait" || stored === "rods") return "fish";
     return TAB_IDS.includes(stored as TabId) ? stored as TabId : "home";
   });
   useEffect(() => setCurrentTab(activeTab), [activeTab]);
+
+  const [headerCollapsed, setHeaderCollapsed] = useState(() =>
+    loadJson<boolean>("ffxi_header_collapsed_v1", false) === true
+  );
+  useEffect(() => saveJson("ffxi_header_collapsed_v1", headerCollapsed), [headerCollapsed]);
 
   const [cWeekday, setCWeekday] = useState<VanaWeekday>("Firesday");
   const [cHour, setCHour] = useState("0");
@@ -2349,8 +2351,34 @@ export default function AppShell() {
         </section>
   );
 
+  const currentTab = TABS.find(tab => tab.id === activeTab)!;
   const tabBar = (
-    <nav style={styles.tabBar}>
+    <header style={{
+      ...styles.tabBar,
+      display: "grid",
+      gridTemplateColumns: "32px minmax(0, 1fr)",
+      alignItems: "start",
+      ...(headerCollapsed ? { padding: 0, border: "none", borderRadius: 0, boxShadow: "none", background: "#0c0c0c" } : {}),
+    }}>
+      <button
+        type="button"
+        aria-label={headerCollapsed ? "Expand header" : "Collapse header"}
+        title={headerCollapsed ? "Expand header" : "Collapse header"}
+        aria-expanded={!headerCollapsed}
+        aria-controls="main-navigation"
+        style={{ ...styles.tabButton, width: 32, height: 32, padding: 0, justifyContent: "center", borderRadius: 8 }}
+        onClick={() => setHeaderCollapsed(collapsed => !collapsed)}
+      >
+        {headerCollapsed ? <PanelTopOpen size={18} aria-hidden="true" /> : <PanelTopClose size={18} aria-hidden="true" />}
+      </button>
+      {headerCollapsed && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 32, fontSize: 13, fontWeight: 700 }}>
+          <span aria-hidden="true">{currentTab.icon}</span>
+          {currentTab.label}
+        </div>
+      )}
+      <nav id="main-navigation" aria-label="Main navigation" hidden={headerCollapsed}
+        style={{ display: headerCollapsed ? "none" : "flex", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
       {TABS.map((tab) => {
         const active = tab.id === activeTab;
         const flashing = tab.id === "home" && homeTabFlash;
@@ -2369,11 +2397,12 @@ export default function AppShell() {
           </button>
         );
       })}
-    </nav>
+      </nav>
+    </header>
   );
 
   return (
-    <div style={styles.page}>
+    <div style={{ ...styles.page, ...(headerCollapsed ? { paddingTop: 8, gap: 8 } : {}) }}>
       {tabBar}
 
       <div data-scroll-root style={{ display: "contents" }}>
@@ -2426,18 +2455,6 @@ export default function AppShell() {
       {activeTab === "fish" && (
         <div style={styles.tabContent}>
           <FishTab />
-        </div>
-      )}
-
-      {activeTab === "bait" && (
-        <div style={styles.tabContent}>
-          <BaitTab />
-        </div>
-      )}
-
-      {activeTab === "rods" && (
-        <div style={styles.tabContent}>
-          <RodsTab />
         </div>
       )}
 

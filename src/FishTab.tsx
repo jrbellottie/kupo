@@ -4,6 +4,58 @@ import { styles } from "./styles";
 import { fishData } from "./utils/phoenixData";
 import { loadJson, saveJson } from "./utils/storage";
 import { formatVendorPrice, getVendorPriceEach } from "./utils/vendorPrice";
+import BaitTab from "./BaitTab";
+import RodsTab from "./RodsTab";
+
+const FISH_VIEWS = [
+  { id: "fish", label: "Fish list" },
+  { id: "affinity", label: "Bait list" },
+  { id: "spots", label: "Best spots" },
+  { id: "skillup", label: "Skill-up planner" },
+  { id: "matrix", label: "Rod break matrix" },
+  { id: "rods", label: "Rod stats" },
+] as const;
+type FishView = typeof FISH_VIEWS[number]["id"];
+
+export default function FishTab() {
+  const [view, setView] = useState<FishView>(() => {
+    const activeTab = loadJson<string>("ffxi_active_tab_v1", "fish");
+    const saved = activeTab === "bait"
+      ? loadJson<{ mode?: string }>("ffxi_bait_ui_v1", {}).mode ?? "affinity"
+      : activeTab === "rods"
+        ? loadJson<{ mode?: string }>("ffxi_rods_ui_v1", {}).mode ?? "matrix"
+        : loadJson<string>("ffxi_fish_view_v1", "fish");
+    return FISH_VIEWS.find(entry => entry.id === saved)?.id ?? "fish";
+  });
+  useEffect(() => saveJson("ffxi_fish_view_v1", view), [view]);
+
+  return (
+    <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
+      <div role="tablist" aria-label="Fishing views" style={{ display: "flex", flexWrap: "wrap", gap: 8 }} onKeyDown={event => {
+        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const current = FISH_VIEWS.findIndex(entry => entry.id === view);
+        const index = event.key === "Home" ? 0 : event.key === "End" ? FISH_VIEWS.length - 1
+          : (current + (event.key === "ArrowRight" ? 1 : -1) + FISH_VIEWS.length) % FISH_VIEWS.length;
+        const next = FISH_VIEWS[index].id;
+        setView(next);
+        document.getElementById(`fish-tab-${next}`)?.focus();
+      }}>
+        {FISH_VIEWS.map(entry => <button
+          key={entry.id} type="button" role="tab" id={`fish-tab-${entry.id}`}
+          aria-selected={view === entry.id} aria-controls={`fish-panel-${view}`} tabIndex={view === entry.id ? 0 : -1}
+          style={view === entry.id ? styles.buttonPrimaryCompact : styles.buttonCompact}
+          onClick={() => setView(entry.id)}
+        >{entry.label}</button>)}
+      </div>
+      <div role="tabpanel" id={`fish-panel-${view}`} aria-labelledby={`fish-tab-${view}`} style={{ minWidth: 0 }}>
+        {view === "fish" ? <FishList />
+          : view === "matrix" || view === "rods" ? <RodsTab mode={view} />
+            : <BaitTab mode={view} onModeChange={setView} />}
+      </div>
+    </div>
+  );
+}
 
 type FishEntry = {
   zone: string;
@@ -181,7 +233,7 @@ const clickableRowStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 
-export default function FishTab() {
+function FishList() {
   type FishUiState = {
     qGlobal: string;
     qCatch: string;
