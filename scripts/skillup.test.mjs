@@ -210,6 +210,102 @@ test("Knightwell totals include all landed competitors and adjustable timing", (
   assert.deepEqual(fishing.calculatePoolCatch(5, rod, [{ ...fish[targetIndex], skillCap: 100 }], [50], 50), { catchTimeSeconds: null, catches: [null] });
 });
 
+test("lures cancel bad warnings, including false alarms, while bait completes snaps", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Bamboo Fishing Rod");
+  const fish = { ...fishingSnapshot.fish.Crayfish, skillCap: 140, hookBonus: 80 };
+  const options = { city: false, hasItems: false, hasMobs: false, difficulty: 0 };
+  const settings = { baseSkill: 100, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: [fish], options };
+  const risk = fishing.calculateRodRisk(100, fish, rod);
+  const warning = fishing.fishingWarningOdds(risk);
+  assert.ok(warning.snap > 0 && warning.badLand > 0);
+  const fight = fishing.calculateFishingFight(100, fish, rod, "Lure");
+  assert.ok(Math.abs(fight.attemptedPct - 100 * (1 - warning.bad)) < 1e-8);
+  assert.ok(Math.abs(fight.landPct - (risk.landPct - 100 * warning.badLand)) < 1e-8);
+  assert.ok(Math.abs(fight.skillupResolvePct - (risk.skillupResolvePct - 100 * warning.bad)) < 1e-8);
+  assert.deepEqual(fishing.calculateFishingFight(100, fish, rod, "Bait"), {
+    attemptedPct: 100, landPct: risk.landPct, skillupResolvePct: risk.skillupResolvePct,
+  });
+  const odds = fishing.calculateCastOdds(100, rod, [fish], options);
+  for (const baitKind of ["Bait", "Lure"]) {
+    const plan = fishing.calculatePoolSession({ ...settings, baitKind });
+    const outcome = fishing.calculateFishingFight(100, fish, rod, baitKind);
+    const landed = odds.targetPct[0] / 100 * outcome.landPct / 100;
+    const attempted = odds.targetPct[0] / 100 * outcome.attemptedPct / 100;
+    const fatigue = landed * fishing.fishingFatigue(100, fish, rod)
+      + (attempted - landed) * fishing.fishingFatigue(100, fish, rod, true);
+    const casts = 20000 / fatigue;
+    const gain = fishing.calculateSkillup(100, fish.skillCap, settings.zone, rod.rod).expectedGainPerTargetHook
+      * odds.targetPct[0] / 100 * outcome.skillupResolvePct / 100;
+    assert.ok(plan.skillGain > 0 && plan.skillGain < 1);
+    assert.ok(Math.abs(plan.skillGain - gain * casts) < 1e-8);
+    assert.ok(Math.abs(plan.catches[0] - landed * casts) < 1e-8);
+    assert.ok(Math.abs(plan.catchTimeSeconds - casts * (30 * attempted + 20 * (1 - attempted))) < 1e-8);
+    assert.ok(Math.abs(plan.fatigueUsed - 20000) < 1e-8);
+  }
+  const safeFish = { ...fish, ranking: 1 };
+  assert.deepEqual(fishing.calculatePoolSession({ ...settings, fish: [safeFish], baitKind: "Lure" }),
+    fishing.calculatePoolSession({ ...settings, fish: [safeFish], baitKind: "Bait" }));
+  const epic = { ...fish, size: "L" };
+  assert.deepEqual(fishing.calculateFishingFight(100, epic, rod, "Lure"), { attemptedPct: 0, landPct: 0, skillupResolvePct: 0 });
+  assert.equal(fishing.calculatePoolSession({ ...settings, fish: [epic], baitKind: "Lure" }).skillGain, null);
+  const mixed = fishing.calculatePoolSession({ ...settings, fish: [fish, { ...epic, fish: "Epic competitor" }], baitKind: "Lure" });
+  assert.equal(mixed.catches[1], 0);
+  assert.equal(mixed.gains[1], 0);
+  assert.ok(mixed.skillGain > 0);
+});
+
+test("daily sessions stop at 20,000 fatigue for fish far above skill", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Carbon Fishing Rod");
+  for (const difference of [22, 32]) {
+    for (const size of ["S", "L"]) {
+      const fish = { ...fishingSnapshot.fish["Black Eel"], skillCap: 5 + difference, ranking: 1, size, hookBonus: 80 };
+      const settings = { baseSkill: 5, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: [fish],
+        options: { city: false, hasItems: false, hasMobs: false, difficulty: 0 } };
+      const plan = fishing.calculatePoolSession(settings);
+      assert.ok(Math.abs(plan.fatigueUsed - 20000) < 1e-8);
+      assert.ok(plan.catches[0] > 0 && plan.catches[0] < 200);
+      assert.ok(plan.skillGain > 0 && plan.skillGain < 5);
+      assert.ok(Math.abs(plan.gains[0] - plan.skillGain) < 1e-8);
+      const odds = fishing.calculateCastOdds(5, rod, [fish], settings.options);
+      const oldGain = fishing.calculatePoolSkillup(5, 5, settings.zone, rod, [fish], odds.targetPct).totalGain;
+      const oldCasts = 200 / (odds.targetPct[0] / 100 * fishing.calculateRodRisk(5, fish, rod).landPct / 100);
+      assert.ok(plan.skillGain < oldCasts * oldGain / 100);
+      const boosted = fishing.calculatePoolSession({ ...settings, bonusSkill: difference });
+      assert.ok(Math.abs(boosted.catches[0] - 200) < 1e-8);
+      assert.ok(boosted.fatigueUsed < 20000);
+    }
+  }
+});
+
+test("daily fatigue weights landings and failed fights with rod discounts", () => {
+  for (const rodName of ["Carbon Fishing Rod", "Lu Shang's Fishing Rod", "Ebisu Fishing Rod"]) {
+    const rod = fishingSnapshot.rods.find(row => row.rod === rodName);
+    assert.ok(rod, rodName);
+    const fish = { ...fishingSnapshot.fish["Black Eel"], skillCap: 140, ranking: 1, hookBonus: 80 };
+    const options = { city: false, hasItems: false, hasMobs: false, difficulty: 0 };
+    const plan = fishing.calculatePoolSession({ baseSkill: 100, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: [fish], options });
+    const odds = fishing.calculateCastOdds(100, rod, [fish], options);
+    const landed = fishing.calculateRodRisk(100, fish, rod).landPct / 100;
+    const cost = landed * fishing.fishingFatigue(100, fish, rod)
+      + (1 - landed) * fishing.fishingFatigue(100, fish, rod, true);
+    const attempts = 20000 / cost;
+    assert.ok(plan.skillGain > 0 && plan.skillGain < 1);
+    assert.ok(Math.abs(plan.casts - attempts / (odds.targetPct[0] / 100)) < 1e-8);
+    assert.ok(Math.abs(plan.catches[0] - attempts * landed) < 1e-8);
+    assert.ok(Math.abs(plan.fatigueUsed - 20000) < 1e-8);
+  }
+});
+
+test("daily fatigue drops when expected skill crosses the 17-level penalty boundary", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Carbon Fishing Rod");
+  const fish = { ...fishingSnapshot.fish["Black Eel"], skillCap: 22, ranking: 1, hookBonus: 80 };
+  const options = { city: false, hasItems: false, hasMobs: false, difficulty: 0 };
+  const plan = fishing.calculatePoolSession({ baseSkill: 5.9, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: [fish], options });
+  assert.ok(plan.skillGain > 0.1);
+  assert.ok(Math.abs(plan.catches[0] - 200) < 1e-8);
+  assert.ok(plan.fatigueUsed > 5000 && plan.fatigueUsed < 10000);
+});
+
 test("200-catch sessions retain canceled bites, remove their gains, and advance skill", () => {
   const area = fishingSnapshot.areas["westronfaure|knightwell"];
   const rod = fishingSnapshot.rods.find(row => row.rod === "Tarutaru Fishing Rod");
@@ -229,6 +325,7 @@ test("200-catch sessions retain canceled bites, remove their gains, and advance 
   const physicallyRemoved = fishing.calculatePoolSession({ ...settings, fish: fish.filter(member => member.fish !== "Giant Catfish") });
   assert.ok(small.casts > physicallyRemoved.casts);
   assert.ok(small.catchTimeSeconds > physicallyRemoved.catchTimeSeconds);
+  assert.ok(Math.abs(small.fatigueUsed - physicallyRemoved.fatigueUsed) < 1e-8);
   const slowCancels = fishing.calculatePoolSession({ ...settings, excludedFish: ["Giant Catfish"], timing: { fishSeconds: 30, otherSeconds: 30 } });
   assert.ok(slowCancels.catchTimeSeconds > small.catchTimeSeconds);
   assert.deepEqual(slowCancels.catches, small.catches);

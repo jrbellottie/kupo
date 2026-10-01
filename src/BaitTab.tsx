@@ -18,6 +18,7 @@ import {
   calculatePoolSkillup,
   calculateCatchTime,
   calculatePoolSession,
+  calculateFishingFight,
   DEFAULT_FISHING_TIMING,
   formatCatchTime,
   groupSkillupRows,
@@ -177,7 +178,9 @@ type SkillupRow = PoolEntry & {
   poolKey: string;
   skillGainPer200: number | null;
   sessionCasts: number | null;
+  fatigueUsed: number | null;
   attemptedFishPct: number;
+  fight: ReturnType<typeof calculateFishingFight>;
   fishLevel: number;
   levelDifference: number;
   skillupChancePct: number;
@@ -226,9 +229,9 @@ const SPOT_COLUMNS: { key: SpotKey; label: string }[] = [
 ];
 
 const SKILLUP_COLUMNS: { key: SkillupKey; label: string }[] = [
-  { key: "skillGainPer200", label: "Est. skill gain / 200 fish" },
-  { key: "catchTimeSeconds", label: "Time / 200 total fish" },
-  { key: "targetFishPer200", label: "Target fish / 200 catches" },
+  { key: "skillGainPer200", label: "Est. skill gain / day" },
+  { key: "catchTimeSeconds", label: "Time / day" },
+  { key: "targetFishPer200", label: "Target fish / day" },
   { key: "bestVendorPrice", label: "Max NPC gross / fish" },
   { key: "fish", label: "Fish" },
   { key: "fishLevel", label: "Fish Lvl" },
@@ -250,20 +253,21 @@ const SKILLUP_COLUMNS: { key: SkillupKey; label: string }[] = [
 
 const MAX_VISIBLE_ROWS = 300;
 const COMPACT_SKILLUP_COLUMNS: { key: SkillupKey; label: string; width: string }[] = [
-  { key: "skillGainPer200", label: "Est. skill gain / 200 fish", width: "8%" },
+  { key: "skillGainPer200", label: "Est. skill gain / day", width: "8%" },
   { key: "fish", label: "Fish", width: "10%" },
   { key: "bestVendorPrice", label: "Max NPC gross / fish", width: "12%" },
-  { key: "catchTimeSeconds", label: "Time / 200 total fish", width: "10%" },
-  { key: "targetFishPer200", label: "Target fish / 200 catches", width: "10%" },
+  { key: "catchTimeSeconds", label: "Time / day", width: "10%" },
+  { key: "targetFishPer200", label: "Target fish / day", width: "10%" },
   { key: "targetPct", label: "Target / cast", width: "7%" },
   { key: "landPct", label: "Land / hook", width: "7%" },
   { key: "rod", label: "Rod", width: "12%" },
   { key: "zone", label: "Location", width: "13%" },
   { key: "bait", label: "Bait", width: "11%" },
 ];
-const CATCH_TIME_ASSUMPTIONS = "Estimated time to land 200 retained fish at this spot and bait, rounded up to a minute. Unchecked fish still bite but are canceled, as are items and monsters. Uses approximate expected skill progression; assumes 200 catches remain. Excludes fatigue stopping you early, guild rank caps, and repair / resupply downtime.";
-const TARGET_COUNT_ASSUMPTIONS = "Estimated target fish among 200 retained catches, weighted by bite and landing chances over approximate skill progression. Unchecked species still bite but contribute no catches or skill. Capped retained competitors still count. Assumes you can identify the fish you intend to cancel; estimates are not guarantees.";
-const SESSION_SKILL_ASSUMPTIONS = "Estimated fishing skill points gained across the pool while landing 200 retained fish. Updates skill-up rates, bite odds and landing odds at expected skill-level boundaries; a mean-progression approximation, not an exact stochastic forecast. Includes eligible completed failures; canceled fish give no skill. Ignores guild rank caps, fatigue limits and downtime.";
+const DAILY_LIMIT_ASSUMPTIONS = "Assumes a fresh day: 200 retained fish or 20,000 fatigue, whichever comes first. Landings and completed failures spend fatigue, including skill-gap penalties and rod discounts. Lures cancel bad feelings (including false alarms) and all epic fights, which hide snap warnings. Consumable bait completes these fights, including natural snaps. Cancellations cost time but give no catches, skill or fatigue.";
+const CATCH_TIME_ASSUMPTIONS = `Estimated time until the daily limit at this spot and bait, rounded up to a minute. ${DAILY_LIMIT_ASSUMPTIONS} Unchecked fish still bite but are canceled, as are items and monsters. Uses approximate expected skill progression. Excludes guild rank caps and repair / resupply downtime.`;
+const TARGET_COUNT_ASSUMPTIONS = `Estimated target fish per day, weighted by bite and landing chances over approximate skill progression. ${DAILY_LIMIT_ASSUMPTIONS} Unchecked species still bite but contribute no catches, skill or fatigue. Capped retained competitors still count. Assumes you can identify the fish you intend to cancel; estimates are not guarantees.`;
+const SESSION_SKILL_ASSUMPTIONS = `Estimated fishing skill points gained across the pool before the daily limit. ${DAILY_LIMIT_ASSUMPTIONS} Updates skill-up rates, bite odds, landing odds and fatigue costs at expected skill-level boundaries; a mean-progression approximation, not an exact stochastic forecast. Includes eligible completed failures; canceled fish give no skill. Ignores guild rank caps and downtime.`;
 const BAIT_UI_KEY = "ffxi_bait_ui_v1";
 
 function uniqueSorted(values: (string | null)[]): string[] {
@@ -920,7 +924,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
       targetPct: number[]; names: string[]; gains: number[]; totalGain: number; itemHazards: string;
       catchTimeSeconds: number | null; catches: (number | null)[];
       catchBreakdown: SkillupRow["catchBreakdown"];
-      skillGain: number | null; casts: number | null; attemptedFishPct: number;
+      skillGain: number | null; casts: number | null; fatigueUsed: number | null; attemptedFishPct: number;
     }>();
     for (const pool of POOLS) {
       if (pool.lvl === null) continue;
@@ -955,13 +959,14 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
             difficulty: area.difficulty, poorFish: bait.poorFish, shellfishBait: bait.shellfishBait,
           };
           const odds = calculateCastOdds(effectiveSkill, rod, members, options);
-          const gains = calculatePoolSkillup(baseSkill, effectiveSkill, pool.zone, rod, members, odds.targetPct);
-          const session = calculatePoolSession({ baseSkill, bonusSkill, zone: pool.zone, rod, fish: members, options, excludedFish, timing: { fishSeconds, otherSeconds } });
+          const gains = calculatePoolSkillup(baseSkill, effectiveSkill, pool.zone, rod, members, odds.targetPct, pool.kind);
+          const session = calculatePoolSession({ baseSkill, bonusSkill, zone: pool.zone, rod, fish: members, options, baitKind: pool.kind, excludedFish, timing: { fishSeconds, otherSeconds } });
           const retainedGains = gains.gains.map((gain, index) => excludedFish.includes(members[index].fish) ? 0 : gain);
           const itemHazards = items.filter(item => calculateRodRisk(effectiveSkill, item, rod).breakPct > 0).map(item => item.fish).join(", ");
           estimate = {
             ...odds, ...session, gains: retainedGains, totalGain: retainedGains.reduce((sum, gain) => sum + gain, 0), names: members.map(member => member.fish), itemHazards,
-            attemptedFishPct: odds.targetPct.reduce((sum, value, index) => sum + (excludedFish.includes(members[index].fish) ? 0 : value), 0),
+            attemptedFishPct: odds.targetPct.reduce((sum, value, index) => sum + (excludedFish.includes(members[index].fish) ? 0
+              : value * calculateFishingFight(effectiveSkill, members[index], rod, pool.kind).attemptedPct / 100), 0),
             catchBreakdown: members.map((member, index) => ({
               fish: member.fish, size: member.size, included: !excludedFish.includes(member.fish),
               catches: excludedFish.includes(member.fish) ? 0 : session.catches[index],
@@ -987,7 +992,9 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
           poolKey,
           skillGainPer200: estimate.skillGain,
           sessionCasts: estimate.casts,
+          fatigueUsed: estimate.fatigueUsed,
           attemptedFishPct: estimate.attemptedFishPct,
+          fight: calculateFishingFight(effectiveSkill, fish, rod, pool.kind),
           sharePct,
           fishPct: estimate.fishPct,
           itemPct: estimate.itemPct,
@@ -1463,8 +1470,8 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                   placeholder="e.g. 50"
                 />
               </div>
-              <label style={{ ...styles.field, width: 200, maxWidth: "100%" }} title="Maximum estimated time to land 200 retained fish, including failed attempts and canceled casts. Blank means no limit.">
-                <span style={styles.label}>Max time / 200 fish (hours)</span>
+              <label style={{ ...styles.field, width: 200, maxWidth: "100%" }} title="Maximum estimated time to reach 200 retained fish or 20,000 fatigue, including failed attempts and canceled casts. Blank means no limit.">
+                <span style={styles.label}>Max time / day (hours)</span>
                 <input
                   style={styles.inputCompact}
                   type="number"
@@ -1746,16 +1753,21 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                               ["Share of fish bites", `${row.sharePct.toFixed(1)}%`],
                               ["Skill-up chance", `${row.skillupChancePct.toFixed(1)}%`],
                               ["Success skill", String(row.effectiveSkill)],
-                              ["Est. skill gain / 200 fish", row.skillGainPer200 === null ? "Not catchable" : `+${row.skillGainPer200.toFixed(2)}`],
+                              ["Fight policy", row.kind === "Lure" ? "Cancel bad + epic feelings" : "Complete fights, including snaps"],
+                              ["Canceled / target hook", `${(100 - row.fight.attemptedPct).toFixed(1)}%`],
+                              ["Planned land / target hook", `${row.fight.landPct.toFixed(1)}%`],
+                              ["Est. skill gain / day", row.skillGainPer200 === null ? "Not catchable" : `+${row.skillGainPer200.toFixed(2)}`],
                               ["Est. ending skill", row.skillGainPer200 === null ? "Not catchable" : (Number(uSkill) + row.skillGainPer200).toFixed(2)],
-                              ["Time / 200 total fish", formatCatchTime(row.catchTimeSeconds)],
-                              ["Target fish / 200 catches", row.targetFishPer200 === null ? "Not catchable" : row.targetFishPer200.toFixed(1)],
-                              ["Time / 200 target fish (starting skill, ignores daily limit)", formatCatchTime(calculateCatchTime({ fishPct: row.attemptedFishPct, targetPct: row.catchBreakdown.find(member => member.fish === row.fish)?.included ? row.targetPct : 0, landPct: row.landPct }, { fishSeconds, otherSeconds }))],
-                              ["Estimated casts / 200 fish", row.sessionCasts === null ? "Not catchable" : Math.ceil(row.sessionCasts).toLocaleString()],
+                              ["Time / day", formatCatchTime(row.catchTimeSeconds)],
+                              ["Target fish / day", row.targetFishPer200 === null ? "Not catchable" : row.targetFishPer200.toFixed(1)],
+                              ["Est. fatigue / 20,000", row.fatigueUsed === null ? "Not catchable" : Math.round(row.fatigueUsed).toLocaleString()],
+                              ["Daily limit", row.fatigueUsed === null ? "Not catchable" : row.fatigueUsed >= 20000 - 1e-8 ? "20,000 fatigue" : "200 catches"],
+                              ["Time / 200 target fish (starting skill, ignores daily limit)", formatCatchTime(calculateCatchTime({ fishPct: row.attemptedFishPct, targetPct: row.catchBreakdown.find(member => member.fish === row.fish)?.included ? row.targetPct * row.fight.attemptedPct / 100 : 0, landPct: row.fight.attemptedPct > 0 ? 100 * row.fight.landPct / row.fight.attemptedPct : 0 }, { fishSeconds, otherSeconds }))],
+                              ["Estimated casts / day", row.sessionCasts === null ? "Not catchable" : Math.ceil(row.sessionCasts).toLocaleString()],
                               ["Average cast time", row.sessionCasts && row.catchTimeSeconds ? `${(row.catchTimeSeconds / row.sessionCasts).toFixed(1)}s` : "Not catchable"],
                             ].map(([label, value]) => <div key={label}><dt style={{ opacity: 0.65, fontSize: 12 }}>{label}</dt><dd style={{ margin: "4px 0 0", fontWeight: 700 }}>{value}</dd></div>)}
                           </dl>
-                          <div style={{ fontWeight: 700, marginBottom: 8 }} title="Modeled outcomes per 100 target-fish hooks when the fight is completed. These are final probabilities, not conditional rolls; early releases and minigame failures are excluded.">Actual outcomes per target hook</div>
+                          <div style={{ fontWeight: 700, marginBottom: 8 }} title="Modeled outcomes per 100 target-fish hooks if every fight is completed, before lure-policy cancellations. These are final probabilities, not conditional rolls; minigame failures are excluded.">Outcomes before cancellations / target hook</div>
                           <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "12px 20px", margin: "0 0 12px" }}>
                             {[
                               ["Landed", row.landPct],
@@ -1766,7 +1778,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                           </dl>
                           {row.itemHazards && <div style={{ color: "#ff9c7a", marginTop: 6 }}>Item rod-break hazards: {row.itemHazards}</div>}
                           <div style={{ marginTop: 16, maxWidth: 620 }}>
-                            <div style={{ fontWeight: 700, marginBottom: 8 }} title={TARGET_COUNT_ASSUMPTIONS}>Expected catch breakdown / 200 fish</div>
+                            <div style={{ fontWeight: 700, marginBottom: 8 }} title={TARGET_COUNT_ASSUMPTIONS}>Expected catch breakdown / day</div>
                             <table aria-label={`Expected catch breakdown for ${row.fish}, ${row.rod}, ${row.zone}, ${row.area}, ${row.bait}`} style={{ width: "100%", borderCollapse: "collapse" }}>
                               <thead><tr>
                                 <th scope="col" style={{ ...skillupCellStyle, textAlign: "left" }}>Fish</th>
@@ -1787,7 +1799,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                               </tr>)}</tbody>
                               <tfoot><tr>
                                 <th scope="row" colSpan={2} style={{ ...skillupCellStyle, textAlign: "left" }}>Total</th>
-                                <td style={{ ...skillupCellStyle, textAlign: "right", fontWeight: 700 }}>{row.skillGainPer200 === null ? "Not catchable" : "200.0"}</td>
+                                <td style={{ ...skillupCellStyle, textAlign: "right", fontWeight: 700 }}>{row.skillGainPer200 === null ? "Not catchable" : row.catchBreakdown.reduce((sum, member) => sum + (member.catches ?? 0), 0).toFixed(1)}</td>
                                 <td style={{ ...skillupCellStyle, textAlign: "right", fontWeight: 700 }}>{row.skillGainPer200 === null ? "Not catchable" : `+${row.skillGainPer200.toFixed(2)}`}</td>
                               </tr></tfoot>
                             </table>

@@ -71,6 +71,10 @@ The fish list is a searchable, sortable database: zones and areas, skill level, 
 #### Bait and Skill-up Planning
 Fishing spot analyzer. Pick a zone/area and bait to see the full catch pool, hook rates, and competing fish — plus a skill-up calculator for finding the best spots to level fishing.
 
+Daily skill gain, catch counts, and time estimates stop at 200 retained fish or 20,000 fatigue, whichever comes first. The model includes fatigue from landings and completed failures, skill-gap penalties, rod discounts, and approximate skill progression. Canceled fish still take time but add no catches, fatigue, or skill gain. Estimates assume a fresh day and are not guarantees.
+
+Lure estimates cancel bad-feeling fights, including false alarms that could have landed, and conservatively cancel all large-fish epic fights because those hide snap warnings. Consumable-bait estimates complete these fights and include eligible skill gains from natural snaps. Rod-break risks and minigame failures are separate; this policy does not guarantee that a lure cannot be lost.
+
 #### Rods
 Rod stats and the break matrix use the same Phoenix snapshot and risk formulas as the skill-up planner. Phoenix removes the skill-based durability bonus, uses 19% snap chance per excess rank (capped at 55%), and 10% break chance per adjusted excess rank (capped at 20%). Escape uses Phoenix's size and skill-gap rules, including certain escape at a 50-level deficit.
 
