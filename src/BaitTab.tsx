@@ -394,6 +394,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     uZone: string;
     uBait: string;
     uMinShare: string;
+    uMaxTimeHours: string;
     uSortKey: SkillupKey;
     uSortDir: SortDir;
   };
@@ -434,6 +435,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     uZone: "",
     uBait: "",
     uMinShare: "",
+    uMaxTimeHours: "",
     uSortKey: "skillGainPer200",
     uSortDir: "desc",
   };
@@ -529,6 +531,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
   const [uZone, setUZone] = useState(initialUi.uZone);
   const [uBait, setUBait] = useState(initialUi.uBait);
   const [uMinShare, setUMinShare] = useState(initialUi.uMinShare);
+  const [uMaxTimeHours, setUMaxTimeHours] = useState(initialUi.uMaxTimeHours);
   const [uSortKey, setUSortKey] = useState<SkillupKey>(initialUi.uSortKey);
   const [uSortDir, setUSortDir] = useState<SortDir>(initialUi.uSortDir);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
@@ -540,7 +543,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     setExpandedSkillupKey(null);
     setExpandedVendorKey(null);
     setExpandedSkillupGroups(new Set());
-  }, [mode, activeSearch]);
+  }, [mode, activeSearch, uMaxTimeHours]);
 
   useEffect(() => {
     function onDocumentPointerDown(event: PointerEvent) {
@@ -592,6 +595,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
       uZone,
       uBait,
       uMinShare,
+      uMaxTimeHours,
       uSortKey,
       uSortDir,
     } satisfies BaitUiState);
@@ -631,6 +635,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     uZone,
     uBait,
     uMinShare,
+    uMaxTimeHours,
     uSortKey,
     uSortDir,
   ]);
@@ -701,6 +706,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     setUZone("");
     setUBait("");
     setUMinShare("");
+    setUMaxTimeHours("");
     setUIncludeCop(true);
     setUIncludeToau(true);
     setUSortKey("skillGainPer200");
@@ -758,6 +764,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     uZone !== "" ||
     uBait.trim() !== "" ||
     uMinShare.trim() !== "" ||
+    uMaxTimeHours.trim() !== "" ||
     !uIncludeCop ||
     !uIncludeToau;
 
@@ -901,6 +908,8 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     const fishQuery = uFish.trim().toLowerCase();
     const baitQuery = uBait.trim().toLowerCase();
     const minimumShare = uMinShare.trim() === "" ? null : Number(uMinShare);
+    const maximumHours = uMaxTimeHours.trim() === "" ? null : Number(uMaxTimeHours);
+    const maximumSeconds = maximumHours !== null && Number.isFinite(maximumHours) && maximumHours >= 0 ? maximumHours * 3600 : null;
 
     const selectedRodNames = new Set(uSelectedRods);
     const availableRods = SKILLUP_RODS.filter((rod) => selectedRodNames.has(rod.rod));
@@ -961,6 +970,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
           };
           estimates.set(estimateKey, estimate);
         }
+        if (maximumSeconds !== null && (estimate.catchTimeSeconds === null || !Number.isFinite(estimate.catchTimeSeconds) || estimate.catchTimeSeconds > maximumSeconds)) continue;
         const targetIndex = estimate.names.indexOf(pool.fish);
         if (targetIndex < 0) continue;
         const targetPct = estimate.targetPct[targetIndex];
@@ -1063,6 +1073,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     uZone,
     uBait,
     uMinShare,
+    uMaxTimeHours,
     uSortKey,
     uSortDir,
   ]);
@@ -1452,6 +1463,19 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                   placeholder="e.g. 50"
                 />
               </div>
+              <label style={{ ...styles.field, width: 200, maxWidth: "100%" }} title="Maximum estimated time to land 200 retained fish, including failed attempts and canceled casts. Blank means no limit.">
+                <span style={styles.label}>Max time / 200 fish (hours)</span>
+                <input
+                  style={styles.inputCompact}
+                  type="number"
+                  inputMode="decimal"
+                  min={0}
+                  step="any"
+                  value={uMaxTimeHours}
+                  onChange={(event) => setUMaxTimeHours(event.target.value)}
+                  placeholder="No limit"
+                />
+              </label>
               <button
                 style={{ ...styles.buttonCompact, ...(skillupFilterActive ? {} : styles.buttonDisabled) }}
                 onClick={clearSkillupFilters}
