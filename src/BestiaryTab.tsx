@@ -2,6 +2,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 import { peekNavQuery, hasBackTab, goBackTab } from "./utils/tabNav";
 import bestiaryData from "./data/bestiary.json";
 import "./BestiaryTab.css";
+import { CollapsibleSection } from "./ScreenControls";
 
 type Modifier = { name: string; value: number; kind: "stat" | "mob"; note: string };
 type Ability = { id: number; name: string; scope: string; radius: number; distance: number; prepareTime: number; knockback: number; effect: string };
@@ -190,6 +191,7 @@ export default function BestiaryTab() {
         )}
       </header>
 
+      <CollapsibleSection kind="search">
       <div className="bestiary-filters">
         <label className="bestiary-check">
           <input type="checkbox" checked={era === "WOTG"} onChange={(event) => { setEra(event.target.checked ? "WOTG" : "TOAU"); setZone(""); }} />
@@ -224,6 +226,7 @@ export default function BestiaryTab() {
         <label className="bestiary-check"><input type="checkbox" checked={weaknessOnly} onChange={(event) => setWeaknessOnly(event.target.checked)} /> Has damage weakness</label>
         <button className="bestiary-clear" onClick={clearFilters}>Clear filters</button>
       </div>
+      </CollapsibleSection>
 
       <div className="bestiary-workspace">
         <aside className="bestiary-results">

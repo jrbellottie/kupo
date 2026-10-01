@@ -2,6 +2,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { styles } from "./styles";
+import { CollapsibleSection, useTableViewportHeight } from "./ScreenControls";
 import { baitData, fishData, phoenixFish } from "./utils/phoenixData";
 import fishingPlanner from "./data/fishingPlanner.json";
 import { loadJson, saveJson } from "./utils/storage";
@@ -16,6 +17,8 @@ import {
   calculateCastOdds,
   calculatePoolSkillup,
   calculateCatchTime,
+  calculatePoolSession,
+  DEFAULT_FISHING_TIMING,
   formatCatchTime,
   groupSkillupRows,
   isCityFishingZone,
@@ -145,8 +148,9 @@ type AffinityKey = "fish" | "lvl" | "size" | "bait" | "kind" | "bite" | "hookBon
 type SpotKey = "zone" | "area" | "fish" | "lvl" | "bait" | "kind" | "bite" | "hookBonus" | "vendorPriceEach" | "sharePct" | "competingCount";
 type SkillupKey =
   | "catchTimeSeconds"
+  | "targetFishPer200"
   | "bestVendorPrice"
-  | "targetGain"
+  | "skillGainPer200"
   | "fish"
   | "fishLevel"
   | "levelDifference"
@@ -168,6 +172,12 @@ type RodAccess = "ebisu" | "luShang" | "standard";
 
 type SkillupRow = PoolEntry & {
   catchTimeSeconds: number | null;
+  targetFishPer200: number | null;
+  catchBreakdown: { fish: string; size: string; catches: number | null; skillGain: number | null; included: boolean }[];
+  poolKey: string;
+  skillGainPer200: number | null;
+  sessionCasts: number | null;
+  attemptedFishPct: number;
   fishLevel: number;
   levelDifference: number;
   skillupChancePct: number;
@@ -216,8 +226,9 @@ const SPOT_COLUMNS: { key: SpotKey; label: string }[] = [
 ];
 
 const SKILLUP_COLUMNS: { key: SkillupKey; label: string }[] = [
-  { key: "targetGain", label: "Target Gain / 100 Casts" },
-  { key: "catchTimeSeconds", label: "Time / 200 fish" },
+  { key: "skillGainPer200", label: "Est. skill gain / 200 fish" },
+  { key: "catchTimeSeconds", label: "Time / 200 total fish" },
+  { key: "targetFishPer200", label: "Target fish / 200 catches" },
   { key: "bestVendorPrice", label: "Max NPC gross / fish" },
   { key: "fish", label: "Fish" },
   { key: "fishLevel", label: "Fish Lvl" },
@@ -239,17 +250,20 @@ const SKILLUP_COLUMNS: { key: SkillupKey; label: string }[] = [
 
 const MAX_VISIBLE_ROWS = 300;
 const COMPACT_SKILLUP_COLUMNS: { key: SkillupKey; label: string; width: string }[] = [
-  { key: "targetGain", label: "Target gain / 100 casts", width: "9%" },
-  { key: "fish", label: "Fish", width: "12%" },
-  { key: "bestVendorPrice", label: "Max NPC gross / fish", width: "14%" },
-  { key: "catchTimeSeconds", label: "Time / 200 fish", width: "10%" },
-  { key: "targetPct", label: "Target / cast", width: "8%" },
-  { key: "landPct", label: "Land / hook", width: "8%" },
+  { key: "skillGainPer200", label: "Est. skill gain / 200 fish", width: "8%" },
+  { key: "fish", label: "Fish", width: "10%" },
+  { key: "bestVendorPrice", label: "Max NPC gross / fish", width: "12%" },
+  { key: "catchTimeSeconds", label: "Time / 200 total fish", width: "10%" },
+  { key: "targetFishPer200", label: "Target fish / 200 catches", width: "10%" },
+  { key: "targetPct", label: "Target / cast", width: "7%" },
+  { key: "landPct", label: "Land / hook", width: "7%" },
   { key: "rod", label: "Rod", width: "12%" },
-  { key: "zone", label: "Location", width: "15%" },
-  { key: "bait", label: "Bait", width: "12%" },
+  { key: "zone", label: "Location", width: "13%" },
+  { key: "bait", label: "Bait", width: "11%" },
 ];
-const CATCH_TIME_ASSUMPTIONS = "Expected time to land 200 target fish, rounded up to a minute. All fish attempts (including competing fish and failed landings): 30s. Monster, item and empty casts canceled: 12s. Includes target bite odds, escapes, line snaps and rod breaks. Fixed current odds; excludes fatigue, daily limits and repair / resupply downtime.";
+const CATCH_TIME_ASSUMPTIONS = "Estimated time to land 200 retained fish at this spot and bait, rounded up to a minute. Unchecked fish still bite but are canceled, as are items and monsters. Uses approximate expected skill progression; assumes 200 catches remain. Excludes fatigue stopping you early, guild rank caps, and repair / resupply downtime.";
+const TARGET_COUNT_ASSUMPTIONS = "Estimated target fish among 200 retained catches, weighted by bite and landing chances over approximate skill progression. Unchecked species still bite but contribute no catches or skill. Capped retained competitors still count. Assumes you can identify the fish you intend to cancel; estimates are not guarantees.";
+const SESSION_SKILL_ASSUMPTIONS = "Estimated fishing skill points gained across the pool while landing 200 retained fish. Updates skill-up rates, bite odds and landing odds at expected skill-level boundaries; a mean-progression approximation, not an exact stochastic forecast. Includes eligible completed failures; canceled fish give no skill. Ignores guild rank caps, fatigue limits and downtime.";
 const BAIT_UI_KEY = "ffxi_bait_ui_v1";
 
 function uniqueSorted(values: (string | null)[]): string[] {
@@ -328,13 +342,16 @@ function shareColor(pct: number | null): React.CSSProperties {
 
 export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mode; onModeChange?: (mode: Mode) => void } = {}) {
   const rodsDropdownRef = useRef<HTMLDetailsElement | null>(null);
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+  const resultsHeight = useTableViewportHeight(resultsRef);
   const [expandedSkillupKey, setExpandedSkillupKey] = useState<string | null>(null);
   const [expandedVendorKey, setExpandedVendorKey] = useState<string | null>(null);
   const [expandedSkillupGroups, setExpandedSkillupGroups] = useState<Set<string>>(() => new Set());
-  function toggleSkillupGroup(key: string) {
+  function toggleSkillupGroup(key: string, expanded: boolean) {
+    if (expanded) setExpandedSkillupKey(null);
     setExpandedSkillupGroups(previous => {
       const next = new Set(previous);
-      if (next.has(key)) next.delete(key);
+      if (expanded) next.delete(key);
       else next.add(key);
       return next;
     });
@@ -365,6 +382,9 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     sSortKey: SpotKey;
     sSortDir: SortDir;
     uSkill: string;
+    uFishSeconds: string;
+    uOtherSeconds: string;
+    uExcludedFish: Record<string, string[]>;
     uBonusSkill: string;
     uSelectedRods: string[];
     uIncludeCop: boolean;
@@ -402,6 +422,9 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     sSortKey: "sharePct",
     sSortDir: "desc",
     uSkill: "1",
+    uFishSeconds: String(DEFAULT_FISHING_TIMING.fishSeconds),
+    uOtherSeconds: String(DEFAULT_FISHING_TIMING.otherSeconds),
+    uExcludedFish: {},
     uBonusSkill: "5",
     uSelectedRods: SKILLUP_ROD_NAMES,
     uIncludeCop: true,
@@ -411,7 +434,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     uZone: "",
     uBait: "",
     uMinShare: "",
-    uSortKey: "targetGain",
+    uSortKey: "skillGainPer200",
     uSortDir: "desc",
   };
 
@@ -481,6 +504,22 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
 
   // ---- Practical skill-up combinations ----
   const [uSkill, setUSkill] = useState(initialUi.uSkill);
+  const [uFishSeconds, setUFishSeconds] = useState(initialUi.uFishSeconds);
+  const [uOtherSeconds, setUOtherSeconds] = useState(initialUi.uOtherSeconds);
+  const [uExcludedFish, setUExcludedFish] = useState(initialUi.uExcludedFish ?? {});
+  function togglePoolFish(poolKey: string, fish: string) {
+    setUExcludedFish(previous => {
+      const excluded = previous[poolKey] ?? [];
+      const next = { ...previous };
+      const updated = excluded.includes(fish) ? excluded.filter(name => name !== fish) : [...excluded, fish];
+      if (updated.length) next[poolKey] = updated;
+      else delete next[poolKey];
+      return next;
+    });
+  }
+  const fishSeconds = Number(uFishSeconds) > 0 && Number.isFinite(Number(uFishSeconds)) ? Number(uFishSeconds) : DEFAULT_FISHING_TIMING.fishSeconds;
+  const otherSeconds = Number(uOtherSeconds) > 0 && Number.isFinite(Number(uOtherSeconds)) ? Number(uOtherSeconds) : DEFAULT_FISHING_TIMING.otherSeconds;
+  const catchTimeAssumptions = `${CATCH_TIME_ASSUMPTIONS} Full cast-to-next-cast estimates: ${fishSeconds}s per retained fish attempt (including failures), ${otherSeconds}s per canceled fish or non-fish cast. Includes waiting, reeling / canceling, and recasting; these timings are estimates, not verified game constants.`;
   const [uBonusSkill, setUBonusSkill] = useState(initialUi.uBonusSkill);
   const [uSelectedRods, setUSelectedRods] = useState(initialUi.uSelectedRods);
   const [uIncludeCop, setUIncludeCop] = useState(initialUi.uIncludeCop);
@@ -493,6 +532,15 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
   const [uSortKey, setUSortKey] = useState<SkillupKey>(initialUi.uSortKey);
   const [uSortDir, setUSortDir] = useState<SortDir>(initialUi.uSortDir);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const activeSearch = mode === "affinity" ? aGlobal : mode === "spots" ? sGlobal : uGlobal;
+
+  useEffect(() => {
+    if (resultsRef.current) resultsRef.current.scrollTop = 0;
+    setSelectedRowKey(null);
+    setExpandedSkillupKey(null);
+    setExpandedVendorKey(null);
+    setExpandedSkillupGroups(new Set());
+  }, [mode, activeSearch]);
 
   useEffect(() => {
     function onDocumentPointerDown(event: PointerEvent) {
@@ -532,6 +580,9 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
       sSortKey,
       sSortDir,
       uSkill,
+      uFishSeconds,
+      uOtherSeconds,
+      uExcludedFish,
       uBonusSkill,
       uSelectedRods,
       uIncludeCop,
@@ -568,6 +619,9 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     sSortKey,
     sSortDir,
     uSkill,
+    uFishSeconds,
+    uOtherSeconds,
+    uExcludedFish,
     uBonusSkill,
     uSelectedRods,
     uIncludeCop,
@@ -602,7 +656,8 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     else {
       setUSortKey(key);
       setUSortDir(
-        key === "targetGain" ||
+        key === "skillGainPer200" ||
+          key === "targetFishPer200" ||
           key === "bestVendorPrice" ||
           key === "targetPct" ||
           key === "fishLevel" ||
@@ -648,7 +703,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     setUMinShare("");
     setUIncludeCop(true);
     setUIncludeToau(true);
-    setUSortKey("targetGain");
+    setUSortKey("skillGainPer200");
     setUSortDir("desc");
   }
 
@@ -854,12 +909,17 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
     const estimates = new Map<string, {
       fishPct: number; itemPct: number; mobPct: number; nothingPct: number;
       targetPct: number[]; names: string[]; gains: number[]; totalGain: number; itemHazards: string;
+      catchTimeSeconds: number | null; catches: (number | null)[];
+      catchBreakdown: SkillupRow["catchBreakdown"];
+      skillGain: number | null; casts: number | null; attemptedFishPct: number;
     }>();
     for (const pool of POOLS) {
       if (pool.lvl === null) continue;
       const fish = PLANNER_FISH[pool.fish];
       if (!fish) continue;
       const areaKey = `${normalizeFishingName(pool.zone)}|${normalizeFishingName(pool.area)}`;
+      const poolKey = `${areaKey}|${pool.bait}`;
+      const excludedFish = uExcludedFish[poolKey] ?? [];
       const area = PLANNER_AREAS[areaKey];
       const bait = PLANNER_BAITS[pool.bait];
       if (!area || !bait) continue;
@@ -881,13 +941,24 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
           const members = area.members.map(name => PLANNER_FISH[name]).filter(member => member && !member.item && bait.fish[member.fish] !== undefined)
             .map(member => ({ ...member, hookBonus: bait.fish[member.fish] }));
           const items = area.members.map(name => PLANNER_FISH[name]).filter(member => member?.item);
-          const odds = calculateCastOdds(effectiveSkill, rod, members, {
+          const options = {
             city: isCityFishingZone(pool.zone), hasItems: items.length > 0, hasMobs: area.hasMobs,
             difficulty: area.difficulty, poorFish: bait.poorFish, shellfishBait: bait.shellfishBait,
-          });
+          };
+          const odds = calculateCastOdds(effectiveSkill, rod, members, options);
           const gains = calculatePoolSkillup(baseSkill, effectiveSkill, pool.zone, rod, members, odds.targetPct);
+          const session = calculatePoolSession({ baseSkill, bonusSkill, zone: pool.zone, rod, fish: members, options, excludedFish, timing: { fishSeconds, otherSeconds } });
+          const retainedGains = gains.gains.map((gain, index) => excludedFish.includes(members[index].fish) ? 0 : gain);
           const itemHazards = items.filter(item => calculateRodRisk(effectiveSkill, item, rod).breakPct > 0).map(item => item.fish).join(", ");
-          estimate = { ...odds, ...gains, names: members.map(member => member.fish), itemHazards };
+          estimate = {
+            ...odds, ...session, gains: retainedGains, totalGain: retainedGains.reduce((sum, gain) => sum + gain, 0), names: members.map(member => member.fish), itemHazards,
+            attemptedFishPct: odds.targetPct.reduce((sum, value, index) => sum + (excludedFish.includes(members[index].fish) ? 0 : value), 0),
+            catchBreakdown: members.map((member, index) => ({
+              fish: member.fish, size: member.size, included: !excludedFish.includes(member.fish),
+              catches: excludedFish.includes(member.fish) ? 0 : session.catches[index],
+              skillGain: excludedFish.includes(member.fish) ? 0 : session.gains[index],
+            })),
+          };
           estimates.set(estimateKey, estimate);
         }
         const targetIndex = estimate.names.indexOf(pool.fish);
@@ -900,7 +971,13 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
         const expectedLandedGain = estimate.totalGain;
         const candidate: SkillupRow = {
           ...pool,
-          catchTimeSeconds: calculateCatchTime({ fishPct: estimate.fishPct, targetPct, landPct: risk.landPct }),
+          catchTimeSeconds: estimate.catchTimeSeconds,
+          targetFishPer200: excludedFish.includes(pool.fish) ? 0 : estimate.catches[targetIndex],
+          catchBreakdown: estimate.catchBreakdown,
+          poolKey,
+          skillGainPer200: estimate.skillGain,
+          sessionCasts: estimate.casts,
+          attemptedFishPct: estimate.attemptedFishPct,
           sharePct,
           fishPct: estimate.fishPct,
           itemPct: estimate.itemPct,
@@ -942,10 +1019,10 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
 
     return rows.sort((a, b) => {
       let comparison = 0;
-      if (uSortKey === "catchTimeSeconds") {
-        if (a.catchTimeSeconds === null && b.catchTimeSeconds !== null) return 1;
-        if (b.catchTimeSeconds === null && a.catchTimeSeconds !== null) return -1;
-        comparison = (a.catchTimeSeconds ?? 0) - (b.catchTimeSeconds ?? 0);
+      if (uSortKey === "catchTimeSeconds" || uSortKey === "targetFishPer200" || uSortKey === "skillGainPer200") {
+        if (a[uSortKey] === null && b[uSortKey] !== null) return 1;
+        if (b[uSortKey] === null && a[uSortKey] !== null) return -1;
+        comparison = (a[uSortKey] ?? 0) - (b[uSortKey] ?? 0);
       } else if (uSortKey === "bestVendorPrice") {
         const first = getFishingVendorOptions(a.fish).bestPrice;
         const second = getFishingVendorOptions(b.fish).bestPrice;
@@ -953,7 +1030,6 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
         if (second === null && first !== null) return -1;
         comparison = (first ?? 0) - (second ?? 0);
       } else if (
-        uSortKey === "targetGain" ||
         uSortKey === "fishLevel" ||
         uSortKey === "levelDifference" ||
         uSortKey === "skillupChancePct" ||
@@ -970,11 +1046,14 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
       } else {
         comparison = a[uSortKey].localeCompare(b[uSortKey]);
       }
-      if (comparison === 0) return b.targetGain - a.targetGain;
+      if (comparison === 0) return (b.skillGainPer200 ?? -1) - (a.skillGainPer200 ?? -1);
       return uSortDir === "asc" ? comparison : -comparison;
     });
   }, [
     uSkill,
+    fishSeconds,
+    otherSeconds,
+    uExcludedFish,
     uBonusSkill,
     uSelectedRods,
     uIncludeCop,
@@ -991,17 +1070,20 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
   const skillupGroups = useMemo(() => groupSkillupRows(skillupResults), [skillupResults]);
   const visibleSkillupRows = useMemo(() => {
     const entries: { row: SkillupRow; group?: { key: string; rows: SkillupRow[] }; nested: boolean }[] = [];
-    for (const group of skillupGroups.slice(0, MAX_VISIBLE_ROWS)) {
+    const visibleGroups = skillupGroups.slice(0, MAX_VISIBLE_ROWS);
+    const editedGroup = expandedSkillupKey ? skillupGroups.find(group => group.rows.some(row => `${row.zone}|${row.area}|${row.fish}|${row.bait}|${row.rod}` === expandedSkillupKey)) : undefined;
+    if (editedGroup && !visibleGroups.includes(editedGroup)) visibleGroups[visibleGroups.length - 1] = editedGroup;
+    for (const group of visibleGroups) {
       if (group.rows.length === 1) entries.push({ row: group.rows[0], nested: false });
       else {
         entries.push({ row: group.rows[0], group, nested: false });
-        if (expandedSkillupGroups.has(group.key)) {
+        if (expandedSkillupGroups.has(group.key) || group.rows.some(row => `${row.zone}|${row.area}|${row.fish}|${row.bait}|${row.rod}` === expandedSkillupKey)) {
           entries.push(...group.rows.map(row => ({ row, nested: true })));
         }
       }
     }
     return entries;
-  }, [skillupGroups, expandedSkillupGroups]);
+  }, [skillupGroups, expandedSkillupGroups, expandedSkillupKey]);
 
   const results = mode === "affinity" ? affinityResults : mode === "spots" ? spotResults : skillupGroups;
   const visibleCount = Math.min(results.length, MAX_VISIBLE_ROWS);
@@ -1086,6 +1168,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
           </button>
         </div>}
 
+        <CollapsibleSection kind="search" style={mode === "skillup" ? styles.subCard : undefined}>
         {mode === "affinity" ? (
           <div style={styles.subCard}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -1216,7 +1299,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
             </div>
           </div>
         ) : (
-          <div style={styles.subCard}>
+          <div>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
               <div style={{ ...styles.field, width: 120 }}>
                 <div style={styles.label}>Base fishing skill</div>
@@ -1305,6 +1388,18 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                   </div>
                 </details>
               </div>
+              <label style={{ ...styles.field, width: 150 }} title="Estimated full cycle from starting a fish cast to starting the next cast, including waiting, fighting, failures, reeling and recasting.">
+                <span style={styles.label}>Fish cast cycle (s)</span>
+                <input aria-label="Fish cast cycle (s)" style={styles.inputCompact} type="number" min={1} step={1}
+                  value={uFishSeconds} placeholder={String(DEFAULT_FISHING_TIMING.fishSeconds)}
+                  onChange={event => setUFishSeconds(event.target.value)} onBlur={() => setUFishSeconds(String(fishSeconds))} />
+              </label>
+              <label style={{ ...styles.field, width: 160 }} title="Estimated full cycle for canceled fish, items, monsters or no bites, including waiting, canceling and recasting. Not an extra delay after a fish cast.">
+                <span style={styles.label}>Cancel / non-fish cycle (s)</span>
+                <input aria-label="Cancel / non-fish cycle (s)" style={styles.inputCompact} type="number" min={1} step={1}
+                  value={uOtherSeconds} placeholder={String(DEFAULT_FISHING_TIMING.otherSeconds)}
+                  onChange={event => setUOtherSeconds(event.target.value)} onBlur={() => setUOtherSeconds(String(otherSeconds))} />
+              </label>
               <div style={{ display: "flex", gap: 14, alignItems: "center", minHeight: 32 }}>
                 <label
                   style={{
@@ -1340,10 +1435,10 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
             </div>
 
             <div style={{ marginTop: 10, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-              {textFilter("Search everything", uGlobal, setUGlobal, "fish, rod, zone, bait", 240)}
               {textFilter("Fish", uFish, setUFish, "e.g. carp", 170)}
-              {selectFilter("Zone", uZone, setUZone, POOL_ZONES, 200)}
               {textFilter("Bait", uBait, setUBait, "e.g. lugworm", 170)}
+              {selectFilter("Zone", uZone, setUZone, POOL_ZONES, 200)}
+              {textFilter("Search everything", uGlobal, setUGlobal, "fish, rod, zone, bait", 240)}
               <div style={{ ...styles.field, width: 120 }}>
                 <div style={styles.label}>Min share %</div>
                 <input
@@ -1368,13 +1463,15 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
 
           </div>
         )}
+        </CollapsibleSection>
 
         <div
+          ref={resultsRef}
           style={{
             border: "1px solid rgba(255,255,255,0.10)",
             borderRadius: 12,
             overflow: "auto",
-            maxHeight: "62vh",
+            maxHeight: resultsHeight ?? "62vh",
             background: "rgba(255,255,255,0.015)",
           }}
         >
@@ -1509,7 +1606,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                         key={column.key}
                         style={{ ...thStyle, whiteSpace: "normal", overflowWrap: "anywhere", ...(active ? { color: "#8af6b0" } : {}) }}
                         onClick={() => onSkillupHeader(column.key)}
-                        title={column.key === "catchTimeSeconds" ? CATCH_TIME_ASSUMPTIONS : `Sort by ${column.label}`}
+                        title={column.key === "skillGainPer200" ? SESSION_SKILL_ASSUMPTIONS : column.key === "catchTimeSeconds" ? catchTimeAssumptions : column.key === "targetFishPer200" ? TARGET_COUNT_ASSUMPTIONS : `Sort by ${column.label}`}
                       >
                         {column.label}
                         {active ? (uSortDir === "asc" ? " ▲" : " ▼") : ""}
@@ -1532,34 +1629,34 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                     const vendor = getFishingVendorOptions(row.fish);
                     const vendorExpanded = expandedVendorKey === rowKey;
                     const detailKey = `${row.zone}|${row.area}|${row.fish}|${row.bait}|${row.rod}`;
-                    const expanded = group ? expandedSkillupGroups.has(group.key) : expandedSkillupKey === detailKey;
+                    const expanded = group ? expandedSkillupGroups.has(group.key) || group.rows.some(member => `${member.zone}|${member.area}|${member.fish}|${member.bait}|${member.rod}` === expandedSkillupKey) : expandedSkillupKey === detailKey;
                     const areas = group ? [...new Set(group.rows.map(member => member.area))] : [];
                     const baits = group ? [...new Set(group.rows.map(member => member.bait))] : [];
                     const itemHazards = group ? [...new Set(group.rows.map(member => member.itemHazards).filter(Boolean))].join("; ") : row.itemHazards;
                     return (
                       <React.Fragment key={rowKey}>
                       <tr
-                        onClick={() => group ? toggleSkillupGroup(group.key) : setSelectedRowKey(rowKey)}
+                        onClick={() => group ? toggleSkillupGroup(group.key, expanded) : setSelectedRowKey(rowKey)}
                         style={{ ...clickableRowStyle, ...(group ? { background: "rgba(255,255,255,0.045)" } : nested ? { background: "rgba(138,246,176,0.035)" } : {}), ...(selected ? selectedRowStyle : {}) }}
                         title={group ? "Expand or collapse sublocations and baits" : "Click to highlight this row"}
                       >
                         <td style={{ ...skillupCellStyle, padding: nested ? "6px 4px 6px 24px" : "6px 4px", ...(nested ? { boxShadow: "inset 2px 0 rgba(138,246,176,0.25)" } : {}) }}>
                           <button
                             type="button"
-                            aria-label={group ? `${expanded ? "Hide" : "Show"} ${group.rows.length} location and bait combinations for ${row.zone}, ${row.fish}, ${row.rod}, ${row.targetGain.toFixed(3)} gain` : `${expanded ? "Hide" : "Show"} catch odds and risks for ${row.fish}, ${row.rod}, ${row.zone}, ${row.area}, ${row.bait}`}
+                            aria-label={group ? `${expanded ? "Hide" : "Show"} ${group.rows.length} location and bait combinations for ${row.zone}, ${row.fish}, ${row.rod}` : `${expanded ? "Hide" : "Show"} catch odds and risks for ${row.fish}, ${row.rod}, ${row.zone}, ${row.area}, ${row.bait}`}
                             aria-expanded={expanded}
                             aria-controls={group ? undefined : `skillup-details-${index}`}
                             title={group ? "Sublocations and baits" : expanded ? "Hide catch odds and risks" : "Show catch odds and risks"}
-                            onClick={event => { event.stopPropagation(); if (group) toggleSkillupGroup(group.key); else setExpandedSkillupKey(expanded ? null : detailKey); }}
+                            onClick={event => { event.stopPropagation(); if (group) toggleSkillupGroup(group.key, expanded); else setExpandedSkillupKey(expanded ? null : detailKey); }}
                             style={{ ...styles.buttonCompact, display: "grid", placeItems: "center", width: 28, height: 28, padding: 0 }}
                           >
                             {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                           </button>
                         </td>
-                        <td style={{ ...skillupCellStyle, color: "#8af6b0", fontWeight: 800, ...(nested ? { paddingLeft: 26 } : {}) }} title={`${row.fish} only; includes competing catches and empty casts`}>
-                          {row.targetGain.toFixed(3)}
+                        <td style={{ ...skillupCellStyle, color: "#8af6b0", fontWeight: 800, ...(nested ? { paddingLeft: 26 } : {}) }} title={SESSION_SKILL_ASSUMPTIONS}>
+                          {row.skillGainPer200 === null ? "Not catchable" : `+${row.skillGainPer200.toFixed(2)}`}
                         </td>
-                        <td style={skillupCellStyle}><strong>{row.fish}</strong><div style={{ opacity: 0.65, fontSize: 12 }}>Lvl {row.fishLevel} (+{row.levelDifference})</div></td>
+                        <td style={skillupCellStyle}><strong>{row.fish}</strong><div style={{ opacity: 0.65, fontSize: 12 }}>Lvl {row.fishLevel} (+{row.levelDifference})</div>{row.catchBreakdown.some(member => member.fish === row.fish && !member.included) && <div style={{ opacity: 0.65, fontSize: 12 }}>Canceled</div>}</td>
                         <td style={skillupCellStyle}>
                           <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
                             <button type="button" aria-label={`${vendorExpanded ? "Hide" : "Show"} NPC prices and recipes for ${row.fish}`}
@@ -1574,7 +1671,8 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                             </div>
                           </div>
                         </td>
-                        <td style={{ ...skillupCellStyle, fontWeight: 700, fontVariantNumeric: "tabular-nums" }} title={CATCH_TIME_ASSUMPTIONS}>{formatCatchTime(row.catchTimeSeconds)}</td>
+                        <td style={{ ...skillupCellStyle, fontWeight: 700, fontVariantNumeric: "tabular-nums" }} title={catchTimeAssumptions}>{formatCatchTime(row.catchTimeSeconds)}</td>
+                        <td style={{ ...skillupCellStyle, fontWeight: 700, fontVariantNumeric: "tabular-nums" }} title={TARGET_COUNT_ASSUMPTIONS}>{row.targetFishPer200 === null ? "Not catchable" : row.targetFishPer200.toFixed(1)}</td>
                         <td style={skillupCellStyle}>{row.targetPct.toFixed(1)}%</td>
                         <td style={skillupCellStyle}>
                           {row.landPct.toFixed(1)}%
@@ -1624,16 +1722,52 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
                               ["Share of fish bites", `${row.sharePct.toFixed(1)}%`],
                               ["Skill-up chance", `${row.skillupChancePct.toFixed(1)}%`],
                               ["Success skill", String(row.effectiveSkill)],
-                              ["Target gain / 100 casts", row.targetGain.toFixed(3)],
-                              ["Time / 200 target fish", formatCatchTime(row.catchTimeSeconds)],
-                              ["Average cast time", `${(30 * row.fishPct / 100 + 12 * (1 - row.fishPct / 100)).toFixed(1)}s`],
-                              ["Pool gain / 100 casts", row.expectedLandedGain.toFixed(3)],
+                              ["Est. skill gain / 200 fish", row.skillGainPer200 === null ? "Not catchable" : `+${row.skillGainPer200.toFixed(2)}`],
+                              ["Est. ending skill", row.skillGainPer200 === null ? "Not catchable" : (Number(uSkill) + row.skillGainPer200).toFixed(2)],
+                              ["Time / 200 total fish", formatCatchTime(row.catchTimeSeconds)],
+                              ["Target fish / 200 catches", row.targetFishPer200 === null ? "Not catchable" : row.targetFishPer200.toFixed(1)],
+                              ["Time / 200 target fish (starting skill, ignores daily limit)", formatCatchTime(calculateCatchTime({ fishPct: row.attemptedFishPct, targetPct: row.catchBreakdown.find(member => member.fish === row.fish)?.included ? row.targetPct : 0, landPct: row.landPct }, { fishSeconds, otherSeconds }))],
+                              ["Estimated casts / 200 fish", row.sessionCasts === null ? "Not catchable" : Math.ceil(row.sessionCasts).toLocaleString()],
+                              ["Average cast time", row.sessionCasts && row.catchTimeSeconds ? `${(row.catchTimeSeconds / row.sessionCasts).toFixed(1)}s` : "Not catchable"],
                             ].map(([label, value]) => <div key={label}><dt style={{ opacity: 0.65, fontSize: 12 }}>{label}</dt><dd style={{ margin: "4px 0 0", fontWeight: 700 }}>{value}</dd></div>)}
                           </dl>
-                          <div style={{ marginBottom: 10, opacity: 0.75 }}>{CATCH_TIME_ASSUMPTIONS}</div>
-                          <div>Sequential target rolls: escape {row.escapePct}% / line snap {row.snapPct}% / rod break {row.breakPct}%</div>
-                          <div style={{ marginTop: 6, opacity: 0.75 }}>Each roll applies only after surviving earlier rolls. Per target hook: line snap {((1 - row.escapePct / 100) * row.snapPct).toFixed(1)}% / rod break {((1 - row.escapePct / 100) * (1 - row.snapPct / 100) * row.breakPct).toFixed(1)}%.</div>
+                          <div style={{ fontWeight: 700, marginBottom: 8 }} title="Modeled outcomes per 100 target-fish hooks when the fight is completed. These are final probabilities, not conditional rolls; early releases and minigame failures are excluded.">Actual outcomes per target hook</div>
+                          <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "12px 20px", margin: "0 0 12px" }}>
+                            {[
+                              ["Landed", row.landPct],
+                              ["Escape", row.escapePct],
+                              ["Line snap", (1 - row.escapePct / 100) * row.snapPct],
+                              ["Rod break", (1 - row.escapePct / 100) * (1 - row.snapPct / 100) * row.breakPct],
+                            ].map(([label, value]) => <div key={label}><dt style={{ opacity: 0.65, fontSize: 12 }}>{label}</dt><dd style={{ margin: "4px 0 0", fontWeight: 700 }}>{Number(value).toFixed(1)}%</dd></div>)}
+                          </dl>
                           {row.itemHazards && <div style={{ color: "#ff9c7a", marginTop: 6 }}>Item rod-break hazards: {row.itemHazards}</div>}
+                          <div style={{ marginTop: 16, maxWidth: 620 }}>
+                            <div style={{ fontWeight: 700, marginBottom: 8 }} title={TARGET_COUNT_ASSUMPTIONS}>Expected catch breakdown / 200 fish</div>
+                            <table aria-label={`Expected catch breakdown for ${row.fish}, ${row.rod}, ${row.zone}, ${row.area}, ${row.bait}`} style={{ width: "100%", borderCollapse: "collapse" }}>
+                              <thead><tr>
+                                <th scope="col" style={{ ...skillupCellStyle, textAlign: "left" }}>Fish</th>
+                                <th scope="col" style={{ ...skillupCellStyle, textAlign: "left" }}>Size</th>
+                                <th scope="col" style={{ ...skillupCellStyle, textAlign: "right" }}>Expected catches</th>
+                                <th scope="col" style={{ ...skillupCellStyle, textAlign: "right" }} title={SESSION_SKILL_ASSUMPTIONS}>Est. skill gain</th>
+                              </tr></thead>
+                              <tbody>{row.catchBreakdown.map(member => <tr key={member.fish}>
+                                <td style={{ ...skillupCellStyle, ...(member.fish === row.fish ? { color: "#8af6b0", fontWeight: 700 } : {}) }}>
+                                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} title={member.included ? "Retain this fish" : "Cancel this fish when it bites"}>
+                                    <input type="checkbox" aria-label={`Retain ${member.fish}`} checked={member.included} onChange={() => togglePoolFish(row.poolKey, member.fish)} />
+                                    <span style={{ textDecoration: member.included ? undefined : "line-through", opacity: member.included ? 1 : 0.6 }}>{member.fish}{member.fish === row.fish ? " (target)" : ""}</span>
+                                  </label>
+                                </td>
+                                <td style={skillupCellStyle}>{member.size === "L" ? "Large" : "Small"}</td>
+                                <td style={{ ...skillupCellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{member.catches === null ? "Not catchable" : member.catches.toFixed(1)}</td>
+                                <td style={{ ...skillupCellStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{member.skillGain === null ? "Not catchable" : `+${member.skillGain.toFixed(2)}`}</td>
+                              </tr>)}</tbody>
+                              <tfoot><tr>
+                                <th scope="row" colSpan={2} style={{ ...skillupCellStyle, textAlign: "left" }}>Total</th>
+                                <td style={{ ...skillupCellStyle, textAlign: "right", fontWeight: 700 }}>{row.skillGainPer200 === null ? "Not catchable" : "200.0"}</td>
+                                <td style={{ ...skillupCellStyle, textAlign: "right", fontWeight: 700 }}>{row.skillGainPer200 === null ? "Not catchable" : `+${row.skillGainPer200.toFixed(2)}`}</td>
+                              </tr></tfoot>
+                            </table>
+                          </div>
                         </td>
                       </tr>}
                       </React.Fragment>

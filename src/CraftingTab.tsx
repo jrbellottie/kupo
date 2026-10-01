@@ -1,6 +1,7 @@
 // src/CraftingTab.tsx
 import React, { useEffect, useMemo, useState } from "react";
 import { styles } from "./styles";
+import { CollapsibleSection } from "./ScreenControls";
 import recipesData from "./data/recipes.json";
 import { loadJson, saveJson } from "./utils/storage";
 import { craftSkillupStats } from "./utils/craftingSkillup";
@@ -891,6 +892,7 @@ export default function CraftingTab() {
       </div>
 
       <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
+        <CollapsibleSection kind="tabs">
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button
             style={mode === "recipes" ? styles.buttonPrimaryCompact : styles.buttonCompact}
@@ -905,7 +907,9 @@ export default function CraftingTab() {
             Skill-up planner
           </button>
         </div>
+        </CollapsibleSection>
 
+        <CollapsibleSection kind="search">
         {mode === "recipes" ? (
           <div style={styles.subCard}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -1081,6 +1085,7 @@ export default function CraftingTab() {
             ) : null}
           </div>
         )}
+        </CollapsibleSection>
 
         <div
           style={{

@@ -7,6 +7,7 @@ import {
   type WeaponSkill,
 } from "./utils/skillchain";
 import "./SkillchainTab.css";
+import { CollapsibleSection } from "./ScreenControls";
 
 const COMBINATIONS_PER_PAGE = 100;
 
@@ -140,6 +141,7 @@ export default function SkillchainTab() {
         <div className="sc-count"><strong>{WEAPON_SKILLS.length}</strong><span>skillchain actions</span></div>
       </header>
 
+      <CollapsibleSection kind="search">
       <section className="sc-filters" aria-label="Weapon skill filters">
         <label className="sc-search"><span>Search</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Samurai, Great Katana, Light, Tachi: Kasha..." /></label>
         <label><span>Weapon / Avatar 1</span><select value={weapon} onChange={(event) => setWeapon(event.target.value)}><option value="">All sources</option>{WEAPONS.map((item) => <option key={item}>{item}</option>)}</select></label>
@@ -154,6 +156,7 @@ export default function SkillchainTab() {
         </button>
         <button className="sc-reset" type="button" onClick={resetFilters}>Reset filters</button>
       </section>
+      </CollapsibleSection>
 
       <section className="sc-database" aria-label="Skillchain combination database">
         <div className="sc-database-heading">

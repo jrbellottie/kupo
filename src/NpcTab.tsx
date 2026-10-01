@@ -8,6 +8,7 @@ import { findableName } from "./utils/itemLinks";
 import MapView, { type MapDef } from "./MapView";
 import mapData from "./data/maps.json";
 import "./NpcTab.css";
+import { CollapsibleSection } from "./ScreenControls";
 
 type State = { query: string; zone: string; role: string; selected: string | null };
 const zones = [...new Set(NPCS.map((npc) => npc.zone).filter(Boolean))].sort();
@@ -83,9 +84,11 @@ export default function NpcTab() {
     <header className="npc-title"><h2><Users size={23} /> NPC</h2><span className="npc-muted">{filtered.length} {filtered.length === 1 ? "NPC" : "NPCs"}</span>{hasBackTab() && <button type="button" className="npc-back" onClick={goBackTab} title="Return to previous tab"><ArrowLeft size={17} /> Back</button>}</header>
     <div className="npc-layout">
       <aside className="npc-browser">
+        <CollapsibleSection kind="search">
         <label><span><Search size={15} /> Search</span><input placeholder="NPC, location, or item" value={state.query} onChange={(event) => setState({ ...state, query: event.target.value })} /></label>
         <label>Zone<select value={state.zone} onChange={(event) => setState({ ...state, zone: event.target.value })}><option value="">All zones</option>{zones.map((zone) => <option key={zone}>{zone}</option>)}</select></label>
         <label>Role<select value={state.role} onChange={(event) => setState({ ...state, role: event.target.value })}><option value="">All roles</option>{roles.map((role) => <option key={role}>{role}</option>)}</select></label>
+        </CollapsibleSection>
         <div className="npc-list">{filtered.slice(0, 150).map((npc) => <button type="button" key={npc.id} aria-pressed={selected?.id === npc.id} onClick={() => setState({ ...state, selected: npc.id })}><strong>{npc.name}</strong><span>{npc.zone}</span><small>{npc.roles.join(" / ")}</small></button>)}</div>
         {filtered.length > 150 && <p className="npc-muted">Showing 150 of {filtered.length} NPCs.</p>}
       </aside>

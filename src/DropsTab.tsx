@@ -3,6 +3,7 @@
 // guilds, BCNM, gathering, fishing, digging, clamming, quests).
 import React, { useEffect, useMemo, useState } from "react";
 import { styles } from "./styles";
+import { CollapsibleSection } from "./ScreenControls";
 import { loadJson, saveJson } from "./utils/storage";
 import { craftSearchName, normalizeItemName } from "./utils/itemLinks";
 import { getPurificationOrigin, purificationMatches } from "./utils/purification";
@@ -664,6 +665,7 @@ export default function DropsTab() {
       </div>
 
       <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
+        <CollapsibleSection kind="search">
         <div style={styles.subCard}>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={styles.field}>
@@ -749,6 +751,7 @@ export default function DropsTab() {
             {filtered.length > MAX_ROWS ? ` — showing first ${MAX_ROWS}, refine your search` : ""}
           </div>
         </div>
+        </CollapsibleSection>
 
         <div style={{ ...styles.subCard, padding: 0, overflow: "auto", maxHeight: "70vh" }}>
           <table style={{ borderCollapse: "collapse", width: "100%" }}>

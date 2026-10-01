@@ -1,6 +1,7 @@
 // src/BcnmTab.tsx
 import React, { useMemo, useState } from "react";
 import { styles } from "./styles";
+import { CollapsibleSection } from "./ScreenControls";
 import { loadJson, saveJson } from "./utils/storage";
 import { findableName } from "./utils/itemLinks";
 import { navigateToTab, peekNavQuery, hasBackTab, goBackTab } from "./utils/tabNav";
@@ -208,6 +209,7 @@ export default function BcnmTab() {
       </div>
 
       <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
+        <CollapsibleSection kind="search">
         <div style={styles.subCard}>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={styles.field}>
@@ -272,6 +274,7 @@ export default function BcnmTab() {
             {filtered.length} of {BATTLEFIELDS.length} battlefields
           </div>
         </div>
+        </CollapsibleSection>
 
         {filtered.map((bf) => {
           const key = bfKey(bf);

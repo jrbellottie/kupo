@@ -1,6 +1,7 @@
 // src/RodsTab.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { styles } from "./styles";
+import { CollapsibleSection, useTableViewportHeight } from "./ScreenControls";
 import { loadJson, saveJson } from "./utils/storage";
 import fishingPlanner from "./data/fishingPlanner.json";
 import { rodFishData } from "./utils/phoenixData";
@@ -211,6 +212,8 @@ function okColor(pct: number): React.CSSProperties {
 }
 
 export default function RodsTab({ mode: activeMode }: { mode?: Mode } = {}) {
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+  const resultsHeight = useTableViewportHeight(resultsRef);
   type RodsUiState = {
     mode: Mode;
     mGlobal: string;
@@ -488,6 +491,7 @@ export default function RodsTab({ mode: activeMode }: { mode?: Mode } = {}) {
           </button>
         </div>}
 
+        <CollapsibleSection kind="search">
         {mode === "matrix" ? (
           <div style={styles.subCard}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
@@ -578,13 +582,15 @@ export default function RodsTab({ mode: activeMode }: { mode?: Mode } = {}) {
             </div>
           </div>
         )}
+        </CollapsibleSection>
 
         <div
+          ref={resultsRef}
           style={{
             border: "1px solid rgba(255,255,255,0.10)",
             borderRadius: 12,
             overflow: "auto",
-            maxHeight: "62vh",
+            maxHeight: resultsHeight ?? "62vh",
             background: "rgba(255,255,255,0.015)",
           }}
         >

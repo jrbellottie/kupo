@@ -64,7 +64,7 @@ Manual tally counters for sessions: **Success/Failure** with a success-rate perc
 Progress tracker for the 10,000 moat carp needed for the Lu Shang's Fishing Rod. Add singles or full stacks, set the total directly, and watch the remaining count and progress bar.
 
 ### 🐟 Fish
-Six subtabs: **Fish list**, **Bait list**, **Best spots**, **Skill-up planner**, **Rod break matrix**, and **Rod stats**. Each view retains its filters, and the selected subtab is remembered.
+Seven subtabs: **Fish list**, **Bait list**, **Best spots**, **Skill-up planner**, **Fatigue fishing**, **Rod break matrix**, and **Rod stats**. Each view retains its filters, and the selected subtab is remembered.
 
 The fish list is a searchable, sortable database: zones and areas, skill level, size, vendor price, catch requirements, rarity, and optimal moon/time/season conditions.
 
@@ -73,6 +73,9 @@ Fishing spot analyzer. Pick a zone/area and bait to see the full catch pool, hoo
 
 #### Rods
 Rod stats and the break matrix use the same Phoenix snapshot and risk formulas as the skill-up planner. Phoenix removes the skill-based durability bonus, uses 19% snap chance per excess rank (capped at 55%), and 10% break chance per adjusted excess rank (capped at 20%). Escape uses Phoenix's size and skill-gap rules, including certain escape at a 50-level deficit.
+
+#### Fatigue Fishing
+Consumable-bait-only planning for natural line snaps followed by finishing the day's 200 landings. Enter skill, rod, location, bait, daily catches, estimated fatigue, and a safety reserve.
 
 ### 🪣 Clam
 Clamming reference for all clamming points: item drop rates (with and without +1 swimwear), vendor prices, and bucket weight management.

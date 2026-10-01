@@ -64,10 +64,101 @@ async function loadUtility(name) {
 const craft = await loadUtility("craftingSkillup");
 const fishing = await loadUtility("fishingSkillup");
 const fishingSnapshot = JSON.parse(readFileSync(new URL("../src/data/fishingPlanner.json", import.meta.url), "utf8"));
-test("time for 200 fish weights 30-second fish attempts and 12-second canceled casts", () => {
+test("snap planner conditions warnings and reserves fatigue for landing 200", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Carbon Fishing Rod");
+  const fish = { ...fishingSnapshot.fish["Black Eel"], hookBonus: 80 };
+  const settings = { baseSkill: 31, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: [fish], weights: [1], landed: 0, fatigueUsed: 0, reserve: 1000 };
+  const plan = fishing.calculateSnapPlan(settings);
+  assert.equal(plan.status, "Ready");
+  assert.ok(Math.abs(plan.badLandingChance - 0.1824722040549379) < 1e-10);
+  assert.equal(fishing.fishingFatigue(30, fish, rod), 100);
+  assert.equal(fishing.fishingFatigue(31, fish, rod), 25);
+  assert.ok(plan.badFights > 600);
+  assert.ok(plan.fatigueProjected <= 19000);
+  assert.ok(plan.finishFailures > 0);
+  assert.ok(Math.abs(plan.accidentalLandings + plan.finishLandings - 200) < 1e-8);
+  assert.ok(plan.opportunities > 700);
+  assert.ok(plan.opportunities < 760);
+  const level30 = fishing.calculateSnapPlan({ ...settings, baseSkill: 30 });
+  assert.match(level30.status, /Insufficient fatigue/);
+  assert.match(fishing.calculateSnapPlan({ ...settings, landed: 200 }).status, /limit reached/);
+  assert.match(fishing.calculateSnapPlan({ ...settings, fatigueUsed: 20000 }).status, /Insufficient/);
+  assert.match(fishing.calculateSnapPlan({ ...settings, baseSkill: NaN }).status, /Invalid/);
+  assert.match(fishing.calculateSnapPlan({ ...settings, baseSkill: 47 }).status, /No eligible/);
+  assert.match(fishing.calculateSnapPlan({ ...settings, fish: [{ ...fish, size: "L" }] }).status, /epic/);
+  assert.match(fishing.calculateSnapPlan({ ...settings, fish: [], weights: [] }).status, /No fish/);
+});
+
+test("snap plans include competing capped fish and rod fatigue discounts", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Carbon Fishing Rod");
+  const eel = { ...fishingSnapshot.fish["Black Eel"], hookBonus: 80 };
+  const capped = { ...eel, fish: "Capped competitor", skillCap: 20 };
+  const plan = fishing.calculateSnapPlan({ baseSkill: 31, bonusSkill: 0, zone: "Zeruhn Mines", rod,
+    fish: [eel, capped], weights: [1, 1], landed: 172, fatigueUsed: 4300, reserve: 1000 });
+  assert.equal(plan.status, "Ready");
+  assert.ok(plan.opportunities < plan.badFights + plan.finishLandings);
+  assert.ok(plan.fatigueProjected <= plan.budget);
+  const lu = fishingSnapshot.rods.find(row => row.rod.startsWith("Lu Shang's"));
+  assert.equal(fishing.fishingFatigue(31, eel, lu), 23);
+  assert.equal(fishing.fishingFatigue(0, eel, rod, true), 1000);
+  const safe = fishing.fishingWarningOdds({ snapPct: 0, breakPct: 0, escapePct: 0, landPct: 100 });
+  assert.equal(safe.bad, 0);
+  assert.equal(safe.finishLand, 1);
+});
+test("snap time includes every roll and both phases without double-counting outcomes", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Carbon Fishing Rod");
+  const fish = { ...fishingSnapshot.fish["Black Eel"], hookBonus: 80 };
+  const settings = { baseSkill: 31, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: [fish], weights: [1], landed: 0, fatigueUsed: 0, reserve: 1000 };
+  const plan = fishing.calculateSnapPlan(settings);
+  const full = fishing.calculateSnapTime(plan, 100);
+  const half = fishing.calculateSnapTime(plan, 50);
+  assert.equal(half.casts, full.casts * 2);
+  assert.ok(Math.abs(half.snapCasts * 0.5 * plan.rows[0].warning.bad - plan.badFights) < 1e-8);
+  assert.ok(Math.abs(half.finishCasts * 0.5 * plan.rows[0].warning.finishLand - plan.finishLandings) < 1e-8);
+  assert.ok(full.cancelledOrEmpty > 0);
+  assert.ok(Math.abs(half.seconds - (plan.remaining * 35 + (plan.snaps + plan.finishFailures + half.cancelledOrEmpty) * 15)) < 1e-8);
+  assert.ok(Math.abs(half.seconds - full.seconds - full.casts * 15) < 1e-8);
+  const odds = fishing.calculateCastOdds(31, rod, [fish], { city: false, hasItems: true, hasMobs: true, difficulty: 0 });
+  const actual = fishing.calculateSnapTime(plan, odds.fishPct);
+  const nonFish = actual.casts * (odds.itemPct + odds.mobPct + odds.nothingPct) / 100;
+  assert.ok(actual.cancelledOrEmpty > nonFish);
+  const progress = fishing.calculateSnapPlan({ ...settings, landed: 1, fatigueUsed: 25 });
+  assert.ok(fishing.calculateSnapTime(progress, odds.fishPct).seconds < actual.seconds);
+  for (const fishPct of [0, -1, 101, NaN]) assert.equal(fishing.calculateSnapTime(plan, fishPct), null);
+  assert.equal(fishing.calculateSnapTime(fishing.calculateSnapPlan({ ...settings, landed: 200 }), 100), null);
+});
+
+test("snap bait includes hooked cancellations but excludes no bites and pre-rolled escapes", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Carbon Fishing Rod");
+  const fish = { ...fishingSnapshot.fish["Black Eel"], hookBonus: 80 };
+  const settings = { baseSkill: 31, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: [fish], weights: [1], landed: 0, fatigueUsed: 0, reserve: 1000 };
+  const plan = fishing.calculateSnapPlan(settings);
+  const full = fishing.calculateSnapTime(plan, 100);
+  const bait = fishing.calculateSnapBait(plan, { fishPct: 100, nothingPct: 0 });
+  assert.ok(Math.abs(bait - (plan.remaining + plan.snaps + full.cancelledOrEmpty)) < 1e-8);
+  assert.ok(Math.abs(fishing.calculateSnapBait(plan, { fishPct: 50, nothingPct: 50 }) - bait) < 1e-8);
+  assert.ok(Math.abs(fishing.calculateSnapBait(plan, { fishPct: 50, nothingPct: 0 }) - bait - full.casts) < 1e-8);
+  const odds = fishing.calculateCastOdds(31, rod, [fish], { city: false, hasItems: true, hasMobs: true, difficulty: 0 });
+  const actual = fishing.calculateSnapBait(plan, odds);
+  assert.ok(actual > plan.remaining + plan.snaps);
+  assert.ok(actual < fishing.calculateSnapTime(plan, odds.fishPct).casts);
+  for (const landed of [false, true]) {
+    const progress = fishing.calculateSnapPlan({ ...settings, landed: Number(landed), fatigueUsed: 25 });
+    assert.ok(fishing.calculateSnapBait(progress, odds) < actual);
+  }
+  for (const nothingPct of [-1, 101, NaN, 60]) assert.equal(fishing.calculateSnapBait(plan, { fishPct: 50, nothingPct }), null);
+  assert.equal(fishing.calculateSnapBait(fishing.calculateSnapPlan({ ...settings, landed: 200 }), odds), null);
+});
+
+test("time for 200 fish weights adjustable full cycles with 30/20 defaults", () => {
   assert.equal(fishing.calculateCatchTime({ fishPct: 100, targetPct: 100, landPct: 100 }), 6000);
-  assert.equal(fishing.calculateCatchTime({ fishPct: 50, targetPct: 50, landPct: 100 }), 8400);
-  assert.equal(fishing.calculateCatchTime({ fishPct: 50, targetPct: 50, landPct: 50 }), 16800);
+  assert.equal(fishing.calculateCatchTime({ fishPct: 50, targetPct: 50, landPct: 100 }), 10000);
+  assert.equal(fishing.calculateCatchTime({ fishPct: 50, targetPct: 50, landPct: 50 }), 20000);
+  assert.equal(fishing.calculateCatchTime({ fishPct: 50, targetPct: 50, landPct: 100 }, { fishSeconds: 30, otherSeconds: 12 }), 8400);
+  for (const value of [0, -1, NaN, Infinity]) {
+    assert.equal(fishing.calculateCatchTime({ fishPct: 50, targetPct: 50, landPct: 100 }, { fishSeconds: value, otherSeconds: 20 }), null);
+    assert.equal(fishing.calculateCatchTime({ fishPct: 50, targetPct: 50, landPct: 100 }, { fishSeconds: 30, otherSeconds: value }), null);
+  }
   assert.equal(fishing.calculateCatchTime({ fishPct: 100, targetPct: 50, landPct: 100 }), 12000);
   assert.equal(fishing.formatCatchTime(6000), "1h 40m");
   assert.equal(fishing.formatCatchTime(8400), "2h 20m");
@@ -79,7 +170,7 @@ test("catch time includes sequential escape, snap and break losses only once", (
   const rod = fishingSnapshot.rods.find(row => row.rod === "Bamboo Fishing Rod");
   const risk = fishing.calculateRodRisk(0, fishingSnapshot.fish.Crayfish, rod);
   const seconds = fishing.calculateCatchTime({ fishPct: 60, targetPct: 40, landPct: risk.landPct });
-  const expected = 200 * (0.6 * 30 + 0.4 * 12) / (0.4 * (1 - risk.escapePct / 100) * (1 - risk.snapPct / 100) * (1 - risk.breakPct / 100));
+  const expected = 200 * (0.6 * 30 + 0.4 * 20) / (0.4 * (1 - risk.escapePct / 100) * (1 - risk.snapPct / 100) * (1 - risk.breakPct / 100));
   assert.ok(Math.abs(seconds - expected) < 1e-8);
   assert.equal(fishing.calculateCatchTime({ fishPct: 60, targetPct: 40, landPct: risk.landPct / 2 }), seconds * 2);
 });
@@ -91,14 +182,88 @@ test("impossible catches have no finite completion estimate", () => {
   assert.equal(fishing.formatCatchTime(null), "Not catchable");
 });
 
+test("Knightwell totals include all landed competitors and adjustable timing", () => {
+  const area = fishingSnapshot.areas["westronfaure|knightwell"];
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Tarutaru Fishing Rod");
+  const bait = fishingSnapshot.baits["Little Worm"];
+  const members = area.members.map(name => fishingSnapshot.fish[name]);
+  const fish = members.filter(member => !member.item && bait.fish[member.fish] !== undefined)
+    .map(member => ({ ...member, hookBonus: bait.fish[member.fish] }));
+  const odds = fishing.calculateCastOdds(5, rod, fish, { ...area, ...bait, city: false, hasItems: members.some(member => member.item) });
+  const plan = fishing.calculatePoolCatch(5, rod, fish, odds.targetPct, odds.fishPct);
+  const targetIndex = fish.findIndex(member => member.fish === "Crayfish");
+  assert.equal(fishing.formatCatchTime(plan.catchTimeSeconds), "3h 17m");
+  assert.ok(Math.abs(plan.catches[targetIndex] - 93.5948563522422) < 1e-8);
+  assert.ok(Math.abs(plan.catches.reduce((sum, value) => sum + value, 0) - 200) < 1e-8);
+  const oldTiming = fishing.calculatePoolCatch(5, rod, fish, odds.targetPct, odds.fishPct, { fishSeconds: 30, otherSeconds: 12 });
+  assert.equal(fishing.formatCatchTime(oldTiming.catchTimeSeconds), "2h 51m");
+  assert.deepEqual(oldTiming.catches, plan.catches);
+  const capped = fish.map(member => ({ ...member, skillCap: 5 }));
+  const cappedPlan = fishing.calculatePoolCatch(5, rod, capped, odds.targetPct, odds.fishPct);
+  assert.ok(Math.abs(cappedPlan.catches.reduce((sum, value) => sum + value, 0) - 200) < 1e-8);
+  assert.equal(fishing.calculatePoolSkillup(5, 5, "West Ronfaure", rod, capped, odds.targetPct).totalGain, 0);
+  const single = fishing.calculatePoolCatch(5, rod, [fish[targetIndex]], [50], 50);
+  assert.deepEqual(single.catches, [200]);
+  assert.equal(single.catchTimeSeconds, 10000);
+  assert.deepEqual(fishing.calculatePoolCatch(5, rod, [], [], 0), { catchTimeSeconds: null, catches: [] });
+  assert.deepEqual(fishing.calculatePoolCatch(5, rod, [fish[targetIndex]], [0], 0), { catchTimeSeconds: null, catches: [null] });
+  assert.deepEqual(fishing.calculatePoolCatch(5, rod, [{ ...fish[targetIndex], skillCap: 100 }], [50], 50), { catchTimeSeconds: null, catches: [null] });
+});
+
+test("200-catch sessions retain canceled bites, remove their gains, and advance skill", () => {
+  const area = fishingSnapshot.areas["westronfaure|knightwell"];
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Tarutaru Fishing Rod");
+  const bait = fishingSnapshot.baits["Little Worm"];
+  const members = area.members.map(name => fishingSnapshot.fish[name]);
+  const fish = members.filter(member => !member.item && bait.fish[member.fish] !== undefined)
+    .map(member => ({ ...member, hookBonus: bait.fish[member.fish] }));
+  const settings = { baseSkill: 5, bonusSkill: 0, zone: "West Ronfaure", rod, fish, options: { ...area, ...bait, city: false, hasItems: members.some(member => member.item) } };
+  const all = fishing.calculatePoolSession(settings);
+  const small = fishing.calculatePoolSession({ ...settings, excludedFish: ["Giant Catfish"] });
+  const catfishIndex = fish.findIndex(member => member.fish === "Giant Catfish");
+  assert.equal(small.catches[catfishIndex], 0);
+  assert.equal(small.gains[catfishIndex], 0);
+  assert.ok(small.casts > all.casts);
+  assert.ok(Math.abs(small.catches.reduce((sum, value) => sum + value, 0) - 200) < 1e-8);
+  assert.ok(Math.abs(small.gains.reduce((sum, value) => sum + value, 0) - small.skillGain) < 1e-8);
+  const physicallyRemoved = fishing.calculatePoolSession({ ...settings, fish: fish.filter(member => member.fish !== "Giant Catfish") });
+  assert.ok(small.casts > physicallyRemoved.casts);
+  assert.ok(small.catchTimeSeconds > physicallyRemoved.catchTimeSeconds);
+  const slowCancels = fishing.calculatePoolSession({ ...settings, excludedFish: ["Giant Catfish"], timing: { fishSeconds: 30, otherSeconds: 30 } });
+  assert.ok(slowCancels.catchTimeSeconds > small.catchTimeSeconds);
+  assert.deepEqual(slowCancels.catches, small.catches);
+  assert.equal(slowCancels.skillGain, small.skillGain);
+  const crayfishOnly = fishing.calculatePoolSession({ ...settings, excludedFish: ["Moat Carp", "Giant Catfish"] });
+  assert.ok(Math.abs(crayfishOnly.skillGain - 2) < 1e-8);
+  assert.ok(Math.abs(crayfishOnly.catches[fish.findIndex(member => member.fish === "Crayfish")] - 200) < 1e-8);
+  const none = fishing.calculatePoolSession({ ...settings, excludedFish: fish.map(member => member.fish) });
+  assert.equal(none.skillGain, null);
+  assert.equal(none.catchTimeSeconds, null);
+  const capped = fishing.calculatePoolSession({ ...settings, baseSkill: 7, excludedFish: ["Moat Carp", "Giant Catfish"] });
+  assert.equal(capped.skillGain, 0);
+  assert.ok(capped.catchTimeSeconds > 0);
+  const capStartingPoint = fishing.calculatePoolSession({ ...settings, baseSkill: 7, excludedFish: ["Giant Catfish"] });
+  const carpOnly = fishing.calculatePoolSession({ ...settings, baseSkill: 7, excludedFish: ["Giant Catfish", "Crayfish"] });
+  assert.ok(carpOnly.skillGain > capStartingPoint.skillGain);
+  assert.ok(carpOnly.skillGain <= 4);
+  const nearCap = fishing.calculatePoolSession({ ...settings, baseSkill: 6.9, excludedFish: ["Moat Carp", "Giant Catfish"] });
+  assert.ok(Math.abs(nearCap.skillGain - 0.1) < 1e-8);
+  const impossible = fishing.calculatePoolSession({ ...settings, fish: [{ ...fish[0], skillCap: 100 }] });
+  assert.equal(impossible.catchTimeSeconds, null);
+  assert.equal(impossible.skillGain, null);
+  assert.equal(fishing.calculatePoolSession({ ...settings, timing: { fishSeconds: 0, otherSeconds: 20 } }).skillGain, null);
+  assert.equal(fishing.calculatePoolSession({ ...settings, fish: [] }).skillGain, null);
+  assert.deepEqual(fishing.calculatePoolSession(settings), all);
+});
+
 test("planner groups equivalent zone rows while retaining every sublocation and bait", () => {
   const first = {
     zone: "East Sarutabaruta", fish: "Moat Carp", rod: "Carbon Fishing Rod",
     targetGain: 2.454, targetPct: 57.1, fishPct: 60, landPct: 97, escapePct: 3, snapPct: 0,
-    breakPct: 0, effectiveSkill: 0, area: "Lake", bait: "Insect Paste", itemHazards: "",
+    breakPct: 0, effectiveSkill: 0, area: "Lake", bait: "Insect Paste", itemHazards: "", catchTimeSeconds: 10000, targetFishPer200: 180, skillGainPer200: 3,
   };
   const alternate = { ...first, area: "River", bait: "Other bait", itemHazards: "Rusty Bucket" };
-  const changes = { zone: "West Sarutabaruta", fish: "Other fish", rod: "Other rod", targetGain: 2.45401, targetPct: 57.11, fishPct: 70, landPct: 96, escapePct: 4, snapPct: 1, breakPct: 1, effectiveSkill: 1 };
+  const changes = { zone: "West Sarutabaruta", fish: "Other fish", rod: "Other rod", targetGain: 2.45401, targetPct: 57.11, fishPct: 70, landPct: 96, escapePct: 4, snapPct: 1, breakPct: 1, effectiveSkill: 1, catchTimeSeconds: 12000, targetFishPer200: 160, skillGainPer200: 4 };
   const separate = Object.entries(changes).map(([key, value]) => ({ ...first, [key]: value }));
   const groups = fishing.groupSkillupRows([first, ...separate, alternate]);
   assert.equal(groups.length, separate.length + 1);

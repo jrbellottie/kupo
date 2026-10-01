@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { styles } from "./styles";
+import { CollapsibleSection } from "./ScreenControls";
 import { phoenixDigging as digData } from "./utils/phoenixData";
 import { diggingDistribution, diggingExtras, DIG_DAY_ITEMS, ORE_ZONES, type DigLayer } from "./utils/digging";
 import { itemPrices, useItemPrices } from "./utils/itemPrices";
@@ -324,6 +325,7 @@ export default function ChocoboTab({ cal }: { cal: Calibration }) {
       {prices.error && <p role="alert" style={{ color: "#e6c17a" }}>{prices.error}</p>}
 
       <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
+        <CollapsibleSection kind="search">
         <div style={styles.subCard}>
           <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={styles.field}>
@@ -440,6 +442,8 @@ export default function ChocoboTab({ cal }: { cal: Calibration }) {
           </div>
           <details style={{ marginTop: 10, ...styles.sub }}><summary>Elemental ore: {DIG_DAY_ITEMS[day][1]} / {maxRank >= 6 && weatherItem && moonPercent >= 7 && moonPercent <= 21 ? "conditions met in eligible zones" : "conditions not met"}</summary><p>Craftsman (60+) / elemental weather / moon 7-21%, either direction. Ore follows the day, not the weather. Qualifying candidates compete with other rewards; the 10% base roll is not the final reward chance.</p><p>{ORE_ZONES.join(", ")}</p><p>Phoenix fatigue is account-wide. Estimates assume movement between digs, available inventory, no fatigue bypass or rare-item equipment, and constant day/weather/moon. Public defaults specify 100 successful digs; live settings are not published.</p></details>
         </div>
+
+        </CollapsibleSection>
 
         <div style={styles.subCard}>
           {filtered.length === 0 ? (

@@ -11,6 +11,7 @@ import { navigateToTab } from "./utils/tabNav";
 import { loadJson, saveJson } from "./utils/storage";
 import { HELM_DAYS, HELM_DEFAULTS, HELM_GEAR, HELM_KINDS, HELM_ROCKS, HELM_ZONES, helmAvailable, helmCount, helmMapKey, helmRates, helmZoneKey, helmZoneName, type HelmKind, type HelmScenario } from "./utils/helm";
 import "./HelmTab.css";
+import { CollapsibleSection } from "./ScreenControls";
 
 const KEY = "kupo.helm.v1";
 const ICONS = { Mining: Pickaxe, Harvesting: Leaf, Excavation: Shovel, Logging: Axe };
@@ -67,6 +68,7 @@ export default function HelmTab() {
     </header>
     <p className="helm-notice">Pinned Phoenix beta source with pre-WotG item adjustments. Live server settings may differ; rates are source calculations, not live observations.</p>
     {saveError && <p role="alert">HELM settings could not be saved in this browser.</p>}
+    <CollapsibleSection kind="search">
     <div className="helm-toolbar">
       <fieldset className="helm-kinds"><legend className="helm-sr">Gathering activity</legend>
         {HELM_KINDS.map(kind => { const Icon = ICONS[kind]; return <label key={kind} className={state.kind === kind ? "is-selected" : ""}>
@@ -75,9 +77,12 @@ export default function HelmTab() {
       </fieldset>
       <label className="helm-check"><input type="checkbox" checked={state.wotg} onChange={event => change({ wotg: event.target.checked })} />Include WotG zones</label>
     </div>
+    </CollapsibleSection>
     <div className="helm-layout">
       <aside className="helm-zones" aria-label="Gathering zones">
+        <CollapsibleSection kind="search">
         <label className="helm-search"><Search size={16} /><input aria-label="Search HELM zones or items" type="search" placeholder="Zone or item" value={state.query} onChange={event => change({ query: event.target.value })} /></label>
+        </CollapsibleSection>
         <p className="helm-muted">{filtered.length} / {available.length} zones</p>
         <div className="helm-zone-list">
           {filtered.map(entry => <button type="button" key={helmZoneKey(entry)} aria-pressed={entry === zone} onClick={() => change({ selected: helmZoneKey(entry), mapId: "" })}>
@@ -94,6 +99,7 @@ export default function HelmTab() {
           <div><span>Tool breaks / attempt</span><strong>{percent(rates.breakChance)}</strong></div>
           <div><span>Possible positions</span><strong>{zone.points.length}</strong></div>
         </div>
+        <CollapsibleSection kind="search">
         <fieldset className="helm-scenario"><legend>Gathering scenario</legend>
           <label>NQ gear modifier<input type="number" min={0} max={99} disabled={zone.kind === "Excavation"} value={scenario.nq} onChange={event => changeScenario({ nq: helmCount(Number(event.target.value), 99) })} /></label>
           <label>HQ gear modifier<input type="number" min={0} max={99} disabled={zone.kind === "Excavation"} value={scenario.hq} onChange={event => changeScenario({ hq: helmCount(Number(event.target.value), 99) })} /></label>
@@ -102,7 +108,9 @@ export default function HelmTab() {
           <label className="helm-check"><input type="checkbox" checked={scenario.inventoryFull} onChange={event => changeScenario({ inventoryFull: event.target.checked })} />Inventory full</label>
           <button className="helm-reset" type="button" title="Reset gear, day, camping, and inventory scenario" aria-label="Reset gathering scenario" onClick={() => changeScenario(HELM_DEFAULTS)}><RotateCcw size={16} />Reset scenario</button>
         </fieldset>
+        </CollapsibleSection>
         {scenario.inventoryFull && <p className="helm-warning" role="status">A full inventory prevents item rewards, but tools can still break.</p>}
+        <CollapsibleSection kind="tabs">
         <div className="helm-views" role="tablist" aria-label="HELM details" onKeyDown={event => {
           const views = ["Drops", "Mechanics", "Locations"] as const;
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
@@ -112,6 +120,7 @@ export default function HelmTab() {
         }}>
           {(["Drops", "Mechanics", "Locations"] as const).map(view => <button type="button" role="tab" id={`helm-${view}`} aria-controls="helm-panel" aria-selected={state.view === view} tabIndex={state.view === view ? 0 : -1} key={view} onClick={() => change({ view })}>{view}</button>)}
         </div>
+        </CollapsibleSection>
         <div role="tabpanel" id="helm-panel" aria-labelledby={`helm-${state.view}`}>
           {state.view === "Drops" && <>
             {(zone.depletion || zone.drops.some(drop => drop.dailyCap !== null)) && <fieldset className="helm-pool"><legend>Pool already gathered</legend>

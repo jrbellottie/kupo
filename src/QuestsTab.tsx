@@ -1,5 +1,6 @@
 // src/QuestsTab.tsx
 import React, { useEffect, useMemo, useState } from "react";
+import { CollapsibleSection } from "./ScreenControls";
 import { loadJson, saveJson } from "./utils/storage";
 import questData from "./data/quests.json";
 import mapData from "./data/maps.json";
@@ -516,6 +517,7 @@ export default function QuestsTab() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <CollapsibleSection kind="tabs">
       <div style={{ display: "flex", gap: 8 }}>
         {(["quests", "missions"] as SubTab[]).map((s) => (
           <button key={s} style={chipStyle(ui.sub === s, "#7ec4e8")} onClick={() => set({ sub: s, zone: "" })}>
@@ -523,7 +525,9 @@ export default function QuestsTab() {
           </button>
         ))}
       </div>
+      </CollapsibleSection>
 
+      <CollapsibleSection kind="search">
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <button style={chipStyle(group === "", "#9aa0b8")} onClick={() => set(ui.sub === "quests" ? { questGroup: "" } : { missionGroup: "" })}>
           All
@@ -569,6 +573,7 @@ export default function QuestsTab() {
         )}
         <span style={{ color: "#9aa0b8", fontSize: 12 }}>{filtered.length} shown</span>
       </div>
+      </CollapsibleSection>
 
       <div style={{ overflowX: "auto", maxHeight: "70vh", overflowY: "auto", border: "1px solid #2a2a2a", borderRadius: 8 }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>

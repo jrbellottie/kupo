@@ -8,6 +8,7 @@ import { normalizeItemName } from "./utils/itemLinks";
 import { loadJson, saveJson } from "./utils/storage";
 import wikiData from "./data/itemWiki.json";
 import "./PricesTab.css";
+import { CollapsibleSection } from "./ScreenControls";
 
 type View = { query: string; scope: "used" | "crafting" | "digging" | "all"; status: "all" | "saved" | "missing" | "quotes"; unit: "each" | "stack" };
 const PAGE_SIZE = 50;
@@ -36,12 +37,14 @@ export default function PricesTab() {
   return <div className="prices-view">
     <div className="prices-summary"><h2>Item prices</h2><span>{savedCount.toLocaleString()} saved / {items.length.toLocaleString()} items</span><span>Local price book</span></div>
     {prices.error && <p role="alert" className="print-warning">{prices.error}</p>}
+    <CollapsibleSection kind="search">
     <div className="prices-filters">
       <label className="prices-search"><span><Search size={15} /> Search items</span><div><input type="search" aria-label="Search item prices" placeholder="Item name or ID" value={view.query} onChange={(event) => update({ query: event.target.value })} /><button type="button" className="print-icon" title="Clear item search" aria-label="Clear item search" disabled={!view.query} onClick={() => update({ query: "" })}><X size={16} /></button></div></label>
       <label>Items<select value={view.scope} onChange={(event) => update({ scope: event.target.value as View["scope"] })}><option value="used">Crafting, digging &amp; saved</option><option value="crafting">Crafting</option><option value="digging">Digging</option><option value="all">All items</option></select></label>
       <label>Prices<select value={view.status} onChange={(event) => update({ status: event.target.value as View["status"] })}><option value="all">All prices</option><option value="saved">Saved prices</option><option value="missing">Missing market price</option><option value="quotes">Buy / sell quotes</option></select></label>
       <label>Price unit<select value={view.unit} onChange={(event) => update({ unit: event.target.value as View["unit"] })}><option value="each">Per item</option><option value="stack">Per stack</option></select></label>
     </div>
+    </CollapsibleSection>
     <div className="prices-results"><span>{filtered.length.toLocaleString()} matching items</span><span>Auto: lowest buy / highest sell</span></div>
     <div className="print-table-wrap prices-table-wrap"><table className="prices-table"><thead><tr><th scope="col">Item</th><th scope="col">Market / AH</th><th scope="col">Buy quote</th><th scope="col">Sell quote</th><th scope="col">NPC references</th><th scope="col">Updated</th></tr></thead><tbody>{visible.map((item) => {
       const quantity = view.unit === "stack" ? item.stack : 1;

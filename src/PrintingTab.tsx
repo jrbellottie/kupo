@@ -14,6 +14,7 @@ import { navigateToTab, rememberTabState, peekRestoredTabState, peekNavQuery, go
 import NpcLink from "./NpcLink";
 import wikiData from "./data/itemWiki.json";
 import "./PrintingTab.css";
+import { CollapsibleSection } from "./ScreenControls";
 import "./PricesTab.css";
 
 const PricesTab = lazy(() => import("./PricesTab"));
@@ -80,6 +81,7 @@ export default function PrintingTab() {
   useEffect(() => saveJson("kupo.profits.view.v1", view), [view]);
   return <section className="printing-tab">
     <header className="print-heading"><h2><Coins size={23} /> Profits</h2><span className="print-muted">NPC / AH sales</span>{hasBackTab() && <button className="print-command" onClick={goBackTab}><ArrowLeft size={16} /> Back</button>}</header>
+    <CollapsibleSection kind="tabs">
     <div className="profits-tabs" role="tablist" aria-label="Profits views">{(["calculator", "prices"] as const).map((tab) => <button key={tab} id={`profits-tab-${tab}`} role="tab" aria-selected={view === tab} aria-controls={`profits-panel-${tab}`} tabIndex={view === tab ? 0 : -1} onClick={() => setView(tab)} onKeyDown={(event) => {
       if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
       event.preventDefault();
@@ -87,6 +89,7 @@ export default function PrintingTab() {
       setView(next);
       document.getElementById(`profits-tab-${next}`)?.focus();
     }}>{tab === "calculator" ? <Hammer size={16} /> : <Tags size={16} />}{tab === "calculator" ? "Calculator" : "Prices"}</button>)}</div>
+    </CollapsibleSection>
     <div id={`profits-panel-${view}`} role="tabpanel" aria-labelledby={`profits-tab-${view}`}>
       {view === "calculator" ? <PrintingCalculator /> : <Suspense fallback={<p className="print-muted">Loading prices...</p>}><PricesTab /></Suspense>}
     </div>
@@ -140,6 +143,7 @@ function PrintingCalculator() {
 
   return <div className="print-calculator">
     {prices.error && <p role="alert" className="print-warning">{prices.error}</p>}
+    <CollapsibleSection kind="search">
     <details className="print-settings"><summary>Economy &amp; crafting assumptions</summary>
       <div className="print-options">
         <NumberField label="Seconds per synth" value={settings.seconds} min={20} max={22} step={0.1} onChange={(seconds) => setting({ seconds })} />
@@ -160,6 +164,7 @@ function PrintingCalculator() {
     </details>
     <div className="print-summary"><span>Final HQ: best gil/hour or selected tier / skill cap {PRINT_SKILL_CAP}</span><span><strong className="print-profit">{profitable.length}</strong> profitable with ingredient sourcing</span><span><strong>{missing.length}</strong> available, prices needed</span><span><strong>{gil(3600 / (settings.seconds + settings.overhead))}</strong> total synths/hour</span></div>
     <div className="print-filters"><label><span><Search size={15} /> Search recipes</span><input placeholder="Output or ingredient" value={state.query} onChange={(event) => { update({ query: event.target.value, selected: null }); setLimit(80); }} /></label><label>Craft<select value={state.craft} onChange={(event) => update({ craft: event.target.value, selected: null })}><option value="">All crafts</option>{PRINT_CRAFTS.map((craft) => <option key={craft}>{craft}</option>)}</select></label><label>View<select value={state.filter} onChange={(event) => update({ filter: event.target.value, selected: null })}><option value="eligible">Available recipes</option><option value="profitable">Profitable only</option><option value="missing">Needs prices</option><option value="all">All recipes</option></select></label><label>Rank by<select value={state.sort} onChange={(event) => update({ sort: event.target.value as State["sort"] })}><option value="hour">Whole-chain gil/hour</option><option value="profit">Profit / final attempt</option></select></label></div>
+    </CollapsibleSection>
     <div className="print-workspace"><aside className="print-browser" aria-label="Ranked recipes"><div className="print-list-title">{ranked.length} recipes / {state.sort === "hour" ? "whole-chain gil/hour" : "gil per final attempt"}</div><div className="print-recipe-list">{ranked.slice(0, limit).map(({ recipe, estimate }, index) => <button type="button" key={recipe.id} aria-pressed={selected?.recipe.id === recipe.id} onClick={() => update({ selected: recipe.id })}><span className="print-recipe-title"><strong>{recipe.res.n}</strong><span className={tone(estimate.profit)}>{gil(state.sort === "hour" ? estimate.gilPerHour : estimate.profit)}</span></span><span className="print-muted">{index + 1}. {recipe.craft} {recipe.lvl}{recipe.subs?.map((sub) => ` / ${sub.c} ${sub.l}`).join("")} / #{recipe.id}</span><span className="print-muted">{!estimate.eligible || estimate.success <= 0 ? "Recipe or ingredient chain unavailable" : `Final HQ tier ${estimate.tier} / ${pct(estimate.hq)}`}{estimate.profit !== null && ` / ${gil(estimate.profit)} gil per final attempt`}{recipe.ki && " / Key item"}</span></button>)}</div>{ranked.length > limit && <button className="print-command" onClick={() => setLimit(limit + 80)}>Show more recipes</button>}{!ranked.length && <p className="print-muted">No recipes match these filters.</p>}</aside>
       {recipe && estimate ? <article className="print-detail" key={recipe.id}>
         <header className="print-detail-title">{image && <img src={`${import.meta.env.BASE_URL}${image.replace(/^\//, "")}`} alt={recipe.res.n} width="40" height="40" />}<div><h2>{recipe.res.n}</h2><span className="print-muted">{recipe.craft} {recipe.lvl} / {recipe.era || "Base"} / #{recipe.id}{recipe.ki ? " / Key item required" : ""}</span></div><button className="print-command" onClick={() => navigateToTab("crafting", recipe.res.n, "printing", recipe.id)}><Hammer size={15} /> Recipe</button></header>

@@ -15,6 +15,7 @@ import {
   calibrationFromSnapshot,
 } from "./vanadiel";
 import { styles } from "./styles";
+import { ScreenControlsProvider, ScreenControlToggles } from "./ScreenControls";
 import { loadJson, saveJson } from "./utils/storage";
 import { formatCountdown, nextOccurrenceLocal, pad2, parseDurationToMs, parseLocalDateTimeToMs, uid } from "./utils/time";
 import { AnyTimer, MoonDirection } from "./types";
@@ -2352,33 +2353,32 @@ export default function AppShell() {
   );
 
   const currentTab = TABS.find(tab => tab.id === activeTab)!;
+  const headerToggle = (
+    <button
+      type="button"
+      aria-label={headerCollapsed ? "Expand header" : "Collapse header"}
+      title={headerCollapsed ? "Expand header" : "Collapse header"}
+      aria-expanded={!headerCollapsed}
+      aria-controls="main-navigation"
+      style={{ ...styles.tabButton, width: headerCollapsed ? "auto" : 32, height: 32, padding: headerCollapsed ? "0 8px" : 0, justifyContent: "center", borderRadius: 8, flexShrink: 0 }}
+      onClick={() => setHeaderCollapsed(collapsed => !collapsed)}
+    >
+      {headerCollapsed ? <PanelTopOpen size={18} aria-hidden="true" /> : <PanelTopClose size={18} aria-hidden="true" />}
+      {headerCollapsed && <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "center" }}>{currentTab.icon}</span>}
+      {headerCollapsed && <span style={{ maxWidth: 80, overflow: "hidden", textOverflow: "ellipsis" }} title={currentTab.label}>{currentTab.label}</span>}
+    </button>
+  );
   const tabBar = (
-    <header style={{
+    <header hidden={headerCollapsed} style={{
       ...styles.tabBar,
-      display: "grid",
-      gridTemplateColumns: "32px minmax(0, 1fr)",
-      alignItems: "start",
-      ...(headerCollapsed ? { padding: 0, border: "none", borderRadius: 0, boxShadow: "none", background: "#0c0c0c" } : {}),
+      display: headerCollapsed ? "none" : "flex",
+      flexWrap: "wrap",
+      alignItems: "center",
+      position: "static",
     }}>
-      <button
-        type="button"
-        aria-label={headerCollapsed ? "Expand header" : "Collapse header"}
-        title={headerCollapsed ? "Expand header" : "Collapse header"}
-        aria-expanded={!headerCollapsed}
-        aria-controls="main-navigation"
-        style={{ ...styles.tabButton, width: 32, height: 32, padding: 0, justifyContent: "center", borderRadius: 8 }}
-        onClick={() => setHeaderCollapsed(collapsed => !collapsed)}
-      >
-        {headerCollapsed ? <PanelTopOpen size={18} aria-hidden="true" /> : <PanelTopClose size={18} aria-hidden="true" />}
-      </button>
-      {headerCollapsed && (
-        <div style={{ display: "flex", alignItems: "center", gap: 8, minHeight: 32, fontSize: 13, fontWeight: 700 }}>
-          <span aria-hidden="true">{currentTab.icon}</span>
-          {currentTab.label}
-        </div>
-      )}
       <nav id="main-navigation" aria-label="Main navigation" hidden={headerCollapsed}
-        style={{ display: headerCollapsed ? "none" : "flex", flexWrap: "wrap", gap: 8, minWidth: 0 }}>
+        style={{ display: headerCollapsed ? "none" : "flex", flexWrap: "wrap", gap: 8, minWidth: 0, flexBasis: "100%" }}>
+      {!headerCollapsed && headerToggle}
       {TABS.map((tab) => {
         const active = tab.id === activeTab;
         const flashing = tab.id === "home" && homeTabFlash;
@@ -2402,8 +2402,10 @@ export default function AppShell() {
   );
 
   return (
-    <div style={{ ...styles.page, ...(headerCollapsed ? { paddingTop: 8, gap: 8 } : {}) }}>
+    <ScreenControlsProvider scope={activeTab}>
+    <div style={{ ...styles.page, paddingTop: headerCollapsed ? 8 : 16, gap: headerCollapsed ? 8 : 12 }}>
       {tabBar}
+      <ScreenControlToggles>{headerCollapsed ? headerToggle : null}</ScreenControlToggles>
 
       <div data-scroll-root style={{ display: "contents" }}>
       {activeTab === "home" && (
@@ -2559,5 +2561,6 @@ export default function AppShell() {
       )}
       </div>
     </div>
+    </ScreenControlsProvider>
   );
 }

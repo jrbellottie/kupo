@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { styles } from "./styles";
+import { CollapsibleSection } from "./ScreenControls";
 import { Calibration, moonPercentAtEarthMs } from "./vanadiel";
 import { loadJson, saveJson } from "./utils/storage";
 import { WEEKDAYS, weekdayStyle } from "./utils/weekday";
@@ -308,6 +309,7 @@ export default function WeatherTab({ cal }: { cal: Calibration }) {
         server re-rolls every 3&ndash;30 earth minutes: 50% normal / 35% common / 15% rare.
       </div>
 
+      <CollapsibleSection kind="search">
       <div style={{ ...styles.subCard, marginTop: 10 }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
           <div style={styles.field}>
@@ -394,6 +396,7 @@ export default function WeatherTab({ cal }: { cal: Calibration }) {
         </div>
       </div>
 
+      </CollapsibleSection>
       <div style={{ marginTop: 10, maxHeight: 520, overflowY: "auto", border: "1px solid #333", borderRadius: 8 }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>

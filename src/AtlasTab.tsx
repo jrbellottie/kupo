@@ -4,6 +4,7 @@ import MapView, { MapDef } from "./MapView";
 import mapData from "./data/maps.json";
 import AlzadaalRoute from "./AlzadaalRoute";
 import { loadJson, saveJson } from "./utils/storage";
+import { CollapsibleSection } from "./ScreenControls";
 
 const MAPS = (mapData as { maps: MapDef[] }).maps;
 
@@ -31,6 +32,7 @@ function AtlasMapBrowser() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <CollapsibleSection kind="search">
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <input
           style={{ ...inputStyle, minWidth: 220 }}
@@ -52,6 +54,7 @@ function AtlasMapBrowser() {
         />
         <span style={{ color: "#9aa0b8", fontSize: 12 }}>{MAPS.length} maps — hover the map to read coordinates</span>
       </div>
+      </CollapsibleSection>
 
       {selected && (
         <MapView map={selected} width={560} showHoverCell highlight={coordValid ? coord.trim() : null} />
@@ -67,6 +70,7 @@ export default function AtlasTab() {
   }, [mode]);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16, minWidth: 0 }}>
+      <CollapsibleSection kind="tabs">
       <div className="atlas-subtabs" role="tablist" aria-label="Atlas views" onKeyDown={event => {
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
@@ -77,6 +81,7 @@ export default function AtlasTab() {
         <button type="button" role="tab" id="atlas-tab-maps" aria-controls="atlas-panel-maps" aria-selected={mode === "maps"} tabIndex={mode === "maps" ? 0 : -1} onClick={() => setMode("maps")}>Maps</button>
         <button type="button" role="tab" id="atlas-tab-routes" aria-controls="atlas-panel-routes" aria-selected={mode === "routes"} tabIndex={mode === "routes" ? 0 : -1} onClick={() => setMode("routes")}>Alzadaal Routes</button>
       </div>
+      </CollapsibleSection>
       <div role="tabpanel" id="atlas-panel-maps" aria-labelledby="atlas-tab-maps" hidden={mode !== "maps"}><AtlasMapBrowser /></div>
       <div role="tabpanel" id="atlas-panel-routes" aria-labelledby="atlas-tab-routes" hidden={mode !== "routes"}><AlzadaalRoute /></div>
     </div>

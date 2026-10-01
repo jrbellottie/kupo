@@ -1,17 +1,20 @@
 // src/FishTab.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { styles } from "./styles";
+import { CollapsibleSection, useTableViewportHeight } from "./ScreenControls";
 import { fishData } from "./utils/phoenixData";
 import { loadJson, saveJson } from "./utils/storage";
 import { formatVendorPrice, getVendorPriceEach } from "./utils/vendorPrice";
 import BaitTab from "./BaitTab";
 import RodsTab from "./RodsTab";
+import SnapSkillTab from "./SnapSkillTab";
 
 const FISH_VIEWS = [
   { id: "fish", label: "Fish list" },
   { id: "affinity", label: "Bait list" },
   { id: "spots", label: "Best spots" },
   { id: "skillup", label: "Skill-up planner" },
+  { id: "snap", label: "Fatigue fishing" },
   { id: "matrix", label: "Rod break matrix" },
   { id: "rods", label: "Rod stats" },
 ] as const;
@@ -31,6 +34,7 @@ export default function FishTab() {
 
   return (
     <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
+      <CollapsibleSection kind="tabs" collapsedLabel={FISH_VIEWS.find(entry => entry.id === view)?.label}>
       <div role="tablist" aria-label="Fishing views" style={{ display: "flex", flexWrap: "wrap", gap: 8 }} onKeyDown={event => {
         if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
         event.preventDefault();
@@ -48,8 +52,10 @@ export default function FishTab() {
           onClick={() => setView(entry.id)}
         >{entry.label}</button>)}
       </div>
+      </CollapsibleSection>
       <div role="tabpanel" id={`fish-panel-${view}`} aria-labelledby={`fish-tab-${view}`} style={{ minWidth: 0 }}>
         {view === "fish" ? <FishList />
+          : view === "snap" ? <SnapSkillTab />
           : view === "matrix" || view === "rods" ? <RodsTab mode={view} />
             : <BaitTab mode={view} onModeChange={setView} />}
       </div>
@@ -234,6 +240,8 @@ const clickableRowStyle: React.CSSProperties = {
 };
 
 function FishList() {
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+  const resultsHeight = useTableViewportHeight(resultsRef);
   type FishUiState = {
     qGlobal: string;
     qCatch: string;
@@ -442,6 +450,7 @@ function FishList() {
       </div>
 
       <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
+        <CollapsibleSection kind="search">
         <div style={styles.subCard}>
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
             <div style={{ ...styles.field, width: 260 }}>
@@ -540,13 +549,15 @@ function FishList() {
             All filters combine (AND). Click a column header to sort; click again to flip ascending/descending.
           </div>
         </div>
+        </CollapsibleSection>
 
         <div
+          ref={resultsRef}
           style={{
             border: "1px solid rgba(255,255,255,0.10)",
             borderRadius: 12,
             overflow: "auto",
-            maxHeight: "62vh",
+            maxHeight: resultsHeight ?? "62vh",
             background: "rgba(255,255,255,0.015)",
           }}
         >

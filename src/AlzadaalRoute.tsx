@@ -5,6 +5,7 @@ import mapData from "./data/maps.json";
 import { buildRuinsJourney, nodeLabel, ROUTE_ENDPOINTS, RouteMap } from "./utils/alzadaalRoutes";
 import { loadJson, saveJson } from "./utils/storage";
 import "./AlzadaalRoute.css";
+import { CollapsibleSection } from "./ScreenControls";
 
 const MAPS = (mapData as { maps: MapDef[] }).maps;
 const STORAGE_KEY = "kupo.atlas.alzadaal";
@@ -46,6 +47,7 @@ export default function AlzadaalRoute() {
         <h2><Route size={21} aria-hidden="true" /> Alzadaal Undersea Ruins</h2>
         <span className="route-count">{teleportCount} lettered {teleportCount === 1 ? "teleport" : "teleports"}{outsideWalk ? " + outdoor walk" : ""}</span>
       </div>
+      <CollapsibleSection kind="search">
       <div className="route-controls">
         <label>
           <span>Starting from</span>
@@ -63,6 +65,7 @@ export default function AlzadaalRoute() {
           </select>
         </label>
       </div>
+      </CollapsibleSection>
       <div className="route-summary" aria-label="Route overview">
         {journey.path.map((node, index) => (
           <span key={node.id}>{index > 0 && <ArrowRight size={13} aria-hidden="true" />}<span title={node.name}>{node.id === "dvucca" ? <Footprints size={14} aria-hidden="true" /> : null}{nodeLabel(node)}</span></span>

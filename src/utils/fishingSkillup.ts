@@ -162,18 +162,81 @@ export function calculateRodRisk(effectiveSkill: number, fish: SkillupFish, rod:
   return { snapPct, breakPct, escapePct, landPct, skillupResolvePct: 100 - escapePct };
 }
 
-export function calculateCatchTime({ fishPct, targetPct, landPct }: { fishPct: number; targetPct: number; landPct: number }): number | null {
+export type FishingTiming = { fishSeconds: number; otherSeconds: number };
+export const DEFAULT_FISHING_TIMING: FishingTiming = { fishSeconds: 30, otherSeconds: 20 };
+
+export function calculateCatchTime({ fishPct, targetPct, landPct }: { fishPct: number; targetPct: number; landPct: number }, timing: FishingTiming = DEFAULT_FISHING_TIMING): number | null {
   if (![fishPct, targetPct, landPct].every(value => Number.isFinite(value) && value >= 0 && value <= 100)
     || targetPct > fishPct || targetPct === 0 || landPct === 0) return null;
-  const averageCastSeconds = 30 * fishPct / 100 + 12 * (1 - fishPct / 100);
+  if (![timing.fishSeconds, timing.otherSeconds].every(value => Number.isFinite(value) && value > 0)) return null;
+  const averageCastSeconds = timing.fishSeconds * fishPct / 100 + timing.otherSeconds * (1 - fishPct / 100);
   const targetLandedPerCast = targetPct / 100 * landPct / 100;
   return 200 * averageCastSeconds / targetLandedPerCast;
+}
+
+export function calculatePoolCatch(
+  effectiveSkill: number, rod: SkillupRod, fish: HookFish[], targetPct: number[], fishPct: number,
+  timing: FishingTiming = DEFAULT_FISHING_TIMING,
+) {
+  const landedPct = fish.map((member, index) => targetPct[index] * calculateRodRisk(effectiveSkill, member, rod).landPct / 100);
+  const totalLandedPct = landedPct.reduce((sum, value) => sum + value, 0);
+  const valid = targetPct.length === fish.length && targetPct.every(value => Number.isFinite(value) && value >= 0 && value <= 100)
+    && Number.isFinite(fishPct) && fishPct >= 0 && fishPct <= 100
+    && Math.abs(targetPct.reduce((sum, value) => sum + value, 0) - fishPct) < 1e-8
+    && totalLandedPct > 0;
+  return {
+    catchTimeSeconds: valid ? calculateCatchTime({ fishPct, targetPct: Math.min(fishPct, totalLandedPct), landPct: 100 }, timing) : null,
+    catches: landedPct.map(value => valid ? 200 * value / totalLandedPct : null),
+  };
 }
 
 export function formatCatchTime(seconds: number | null): string {
   if (seconds === null || !Number.isFinite(seconds)) return "Not catchable";
   const minutes = Math.ceil(seconds / 60);
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
+}
+
+export function calculatePoolSession({ baseSkill, bonusSkill, zone, rod, fish, options, excludedFish = [], timing = DEFAULT_FISHING_TIMING }: {
+  baseSkill: number; bonusSkill: number; zone: string; rod: SkillupRod; fish: HookFish[];
+  options: Parameters<typeof calculateCastOdds>[3]; excludedFish?: string[]; timing?: FishingTiming;
+}) {
+  const excluded = new Set(excludedFish);
+  const retained = fish.map(member => !excluded.has(member.fish));
+  const catches = fish.map(() => 0);
+  const gains = fish.map(() => 0);
+  const unavailable = { skillGain: null, catchTimeSeconds: null, casts: null, catches: fish.map(() => null), gains: fish.map(() => null) };
+  if (![baseSkill, bonusSkill].every(value => Number.isFinite(value) && value >= 0) || baseSkill > 200
+    || ![timing.fishSeconds, timing.otherSeconds].every(value => Number.isFinite(value) && value > 0)) return unavailable;
+  let skill = baseSkill;
+  let remaining = 200;
+  let seconds = 0;
+  let casts = 0;
+  for (let stage = 0; stage < 250 && remaining > 1e-8; stage++) {
+    const currentSkill = Math.floor(skill + 1e-9);
+    const effectiveSkill = currentSkill + bonusSkill + getRodHiddenSuccessBonus(rod.rod);
+    const odds = calculateCastOdds(effectiveSkill, rod, fish, options);
+    const poolGains = calculatePoolSkillup(currentSkill, effectiveSkill, zone, rod, fish, odds.targetPct);
+    const landed = fish.map((member, index) => retained[index]
+      ? odds.targetPct[index] / 100 * calculateRodRisk(effectiveSkill, member, rod).landPct / 100 : 0);
+    const perCastGains = poolGains.gains.map((gain, index) => retained[index] ? gain / 100 : 0);
+    const landedPerCast = landed.reduce((sum, value) => sum + value, 0);
+    const gainPerCast = perCastGains.reduce((sum, value) => sum + value, 0);
+    if (landedPerCast <= 0) return unavailable;
+    const castsToFinish = remaining / landedPerCast;
+    const castsToNextSkill = gainPerCast > 0 ? (currentSkill + 1 - skill) / gainPerCast : Infinity;
+    const stageCasts = Math.min(castsToFinish, castsToNextSkill);
+    const attemptedFishPct = odds.targetPct.reduce((sum, value, index) => sum + (retained[index] ? value : 0), 0);
+    seconds += stageCasts * (timing.fishSeconds * attemptedFishPct / 100 + timing.otherSeconds * (1 - attemptedFishPct / 100));
+    casts += stageCasts;
+    for (let index = 0; index < fish.length; index++) {
+      catches[index] += landed[index] * stageCasts;
+      gains[index] += perCastGains[index] * stageCasts;
+    }
+    remaining -= landedPerCast * stageCasts;
+    skill = castsToNextSkill <= castsToFinish ? currentSkill + 1 : skill + gainPerCast * stageCasts;
+  }
+  if (remaining > 1e-8) return unavailable;
+  return { skillGain: skill - baseSkill, catchTimeSeconds: seconds, casts, catches, gains };
 }
 
 type SkillupGroupRow = {
@@ -188,6 +251,9 @@ type SkillupGroupRow = {
   snapPct: number;
   breakPct: number;
   effectiveSkill: number;
+  catchTimeSeconds?: number | null;
+  targetFishPer200?: number | null;
+  skillGainPer200?: number | null;
 };
 
 export function groupSkillupRows<Row extends SkillupGroupRow>(rows: Row[]) {
@@ -196,6 +262,7 @@ export function groupSkillupRows<Row extends SkillupGroupRow>(rows: Row[]) {
     const key = JSON.stringify([
       row.zone, row.fish, row.rod, row.targetGain, row.targetPct,
       row.fishPct, row.landPct, row.escapePct, row.snapPct, row.breakPct, row.effectiveSkill,
+      row.catchTimeSeconds, row.targetFishPer200, row.skillGainPer200,
     ]);
     const group = groups.get(key);
     if (group) group.rows.push(row);
@@ -244,4 +311,102 @@ export function calculateSkillup(baseSkill: number, fishLevel: number, zone: str
     chancePct,
     expectedGainPerTargetHook: (chancePct / 100) * expectedGainWhenSuccessful,
   };
+}
+
+export function fishingFatigue(skill: number, fish: SkillupFish, rod: SkillupRod, failed = false): number {
+  const cost = failed && fish.skillCap >= skill + 40 ? 1000
+    : fish.legendary ? (["Gugrusaurus", "Lik", "Matsya", "Abaia"].includes(fish.fish) ? 780 : 140)
+      : (fish.size === "L" ? 50 : 25) * (fish.skillCap >= skill + 17 ? 4 : 1);
+  return Math.floor(cost * (rod.rod.startsWith("Ebisu") ? 85 : rod.rod.startsWith("Lu Shang's") ? 95 : 100) / 100);
+}
+
+export function fishingWarningOdds(risk: RodRisk) {
+  const escape = risk.escapePct / 100;
+  const snap = (1 - escape) * risk.snapPct / 100;
+  const land = risk.landPct / 100;
+  const falseTerrible = Math.floor(risk.breakPct / 2) / 100;
+  const falseBad = Math.floor(risk.snapPct / 2) / 100;
+  const badLand = land * (1 - falseTerrible) * falseBad;
+  return { snap, badLand, bad: snap + badLand, finishLand: land * (1 - falseTerrible) * (1 - falseBad), escape };
+}
+
+export function calculateSnapPlan(options: {
+  baseSkill: number; bonusSkill: number; zone: string; rod: SkillupRod;
+  fish: HookFish[]; weights: number[]; landed: number; fatigueUsed: number; reserve: number;
+}) {
+  const { baseSkill, bonusSkill, zone, rod, fish, weights, landed, fatigueUsed, reserve } = options;
+  const skill = Math.floor(baseSkill) + Math.floor(bonusSkill);
+  const remaining = Math.max(0, 200 - landed);
+  const budget = Math.max(0, 20000 - fatigueUsed - reserve);
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  const rows = fish.map((member, index) => {
+    const share = totalWeight > 0 ? weights[index] / totalWeight : 0;
+    const risk = calculateRodRisk(skill, member, rod);
+    const warning = fishingWarningOdds(risk);
+    const skillup = calculateSkillup(baseSkill, member.skillCap, zone, rod.rod);
+    return { fish: member.fish, level: member.skillCap, share, risk, warning, skillup,
+      cost: fishingFatigue(skill, member, rod), failedCost: fishingFatigue(skill, member, rod, true) };
+  });
+  const sum = (get: (row: typeof rows[number]) => number) => rows.reduce((total, row) => total + row.share * get(row), 0);
+  const bad = sum(row => row.warning.bad);
+  const badLand = sum(row => row.warning.badLand);
+  const finishLand = sum(row => row.warning.finishLand);
+  const badLandingChance = bad > 0 ? badLand / bad : 0;
+  const badCost = bad > 0 ? sum(row => row.warning.snap * row.failedCost + row.warning.badLand * row.cost) / bad : 0;
+  const finishCostPerLand = finishLand > 0
+    ? sum(row => row.warning.finishLand * row.cost + row.warning.escape * row.failedCost) / finishLand : 0;
+  const baselineCost = remaining * finishCostPerLand;
+  const invalid = ![baseSkill, bonusSkill, landed, fatigueUsed, reserve, ...weights].every(Number.isFinite)
+    || baseSkill < 0 || baseSkill > 110 || bonusSkill < 0 || bonusSkill > 8
+    || landed < 0 || landed > 200 || fatigueUsed < 0 || fatigueUsed > 20000 || reserve < 0 || reserve > 20000
+    || weights.length !== fish.length || weights.some(weight => weight < 0);
+  const status = invalid ? "Invalid settings"
+    : remaining === 0 ? "Daily catch limit reached"
+      : !totalWeight ? "No fish for this bait and location"
+        : fish.some(member => member.size === "L") ? "Large-fish pool: epic messages prevent this warning-only plan"
+          : !finishLand ? "No landing route with these settings"
+            : baselineCost > budget ? "Insufficient fatigue to finish 200 with this reserve"
+              : !bad || !sum(row => row.warning.snap) ? "No natural snaps in this pool"
+                : !sum(row => row.warning.bad * Number(row.skillup.eligible)) ? "No eligible snap skill-ups in this pool" : "Ready";
+  const incrementalCost = badCost - badLandingChance * finishCostPerLand;
+  const maximumByLandings = badLandingChance > 0 ? Math.max(0, remaining - 1) / badLandingChance : Infinity;
+  const maximumByFatigue = incrementalCost > 0 ? Math.max(0, budget - baselineCost) / incrementalCost : Infinity;
+  const badFights = status === "Ready" ? Math.floor(Math.min(maximumByLandings, maximumByFatigue)) : 0;
+  const accidentalLandings = badFights * badLandingChance;
+  const finishLandings = remaining - accidentalLandings;
+  const finishScale = finishLand > 0 ? finishLandings / finishLand : 0;
+  const badScale = bad > 0 ? badFights / bad : 0;
+  const eligible = sum(row => row.warning.bad * Number(row.skillup.eligible)) * badScale
+    + sum(row => row.warning.finishLand * Number(row.skillup.eligible)) * finishScale;
+  const baselineOpportunities = finishLand > 0
+    ? remaining * sum(row => row.warning.finishLand * Number(row.skillup.eligible)) / finishLand : 0;
+  const expectedGain = sum(row => row.warning.bad * row.skillup.expectedGainPerTargetHook) * badScale
+    + sum(row => row.warning.finishLand * row.skillup.expectedGainPerTargetHook) * finishScale;
+  return { status, rows, remaining, budget, badLandingChance, badCost, finishCostPerLand, baselineCost,
+    badFights, accidentalLandings, snaps: badFights - accidentalLandings, finishLandings,
+    opportunities: eligible, extraOpportunities: eligible - baselineOpportunities, expectedGain,
+    fatigueProjected: badFights * badCost + finishLandings * finishCostPerLand,
+    finishFailures: finishScale * sum(row => row.warning.escape) };
+}
+
+export function calculateSnapTime(plan: ReturnType<typeof calculateSnapPlan>, fishPct: number) {
+  if (plan.status !== "Ready" || !Number.isFinite(fishPct) || fishPct <= 0 || fishPct > 100) return null;
+  const fishChance = fishPct / 100;
+  const badPerCast = fishChance * plan.rows.reduce((sum, row) => sum + row.share * row.warning.bad, 0);
+  const finishLandPerCast = fishChance * plan.rows.reduce((sum, row) => sum + row.share * row.warning.finishLand, 0);
+  if (badPerCast <= 0 || finishLandPerCast <= 0) return null;
+  const snapCasts = plan.badFights / badPerCast;
+  const finishCasts = plan.finishLandings / finishLandPerCast;
+  const casts = snapCasts + finishCasts;
+  const cancelledOrEmpty = Math.max(0, casts - plan.badFights - plan.finishLandings - plan.finishFailures);
+  const snapSeconds = snapCasts * 15 + plan.accidentalLandings * 20;
+  const finishSeconds = finishCasts * 15 + plan.finishLandings * 20;
+  return { casts, snapCasts, finishCasts, cancelledOrEmpty, snapSeconds, finishSeconds, seconds: snapSeconds + finishSeconds };
+}
+
+export function calculateSnapBait(plan: ReturnType<typeof calculateSnapPlan>, odds: { fishPct: number; nothingPct: number }) {
+  const time = calculateSnapTime(plan, odds.fishPct);
+  if (!time || !Number.isFinite(odds.nothingPct) || odds.nothingPct < 0
+    || odds.nothingPct > 100 || odds.fishPct + odds.nothingPct > 100 + 1e-8) return null;
+  return Math.max(0, time.casts * (1 - odds.nothingPct / 100) - plan.finishFailures);
 }
