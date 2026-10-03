@@ -4,7 +4,7 @@ A desktop companion app for **Final Fantasy XI** (era-focused / [LandSandBoat](h
 
 Vana'diel time is **global** (the same instant for every player on Earth), so the app works out of the box in any time zone. Just install and go.
 
-Kupo is an independent companion app, not affiliated with a game server. App-facing descriptions use server-neutral wording; public-source provenance remains in the data, generators, documentation, and source links. In-game names such as Phoenix Feather are unchanged.
+Kupo is an independent companion app, not affiliated with, endorsed by, or an official tool of any game server. App-facing descriptions and documentation use server-neutral wording; accurate public-source provenance remains in the data, generators, and source links.
 
 Kupo is a **fully standalone app**. It never reads, writes, or modifies game files, memory, or network traffic, and it doesn't hook into or interact with the FFXI client in any way. Everything you see is driven by the app's own simulation of Vana'diel time and its bundled database information — it's a reference and timer tool for informational purposes only.
 
@@ -84,9 +84,9 @@ Seven subtabs: **Fish list**, **Bait list**, **Best spots**, **Skill-up planner*
 
 The fish list is a searchable, sortable database: zones and areas, skill level, size, vendor price, catch requirements, rarity, and optimal moon/time/season conditions.
 
-**GP** shows **points per fish / daily GP cap (calculated item quantity)**, such as **24 / 1,520 (63.33 items)** for Greedie. The parenthesized quantity is `daily GP cap / GP per fish`, displayed to at most two decimal places. Round up to whole fish for turn-in: Greedie require **64**. Values use Phoenix's era-adjusted guild-point tables and assume no points earned today; they are not a prediction of today's request. Non-GP fish show a dash. Click the header to sort by the whole-item quantity needed; non-GP entries stay last. The Legendary column is removed, but the Legendary-only filter remains available.
+**GP** shows **points per fish / daily GP cap (calculated item quantity)**, such as **24 / 1,520 (63.33 items)** for Greedie. The parenthesized quantity is `daily GP cap / GP per fish`, displayed to at most two decimal places. Round up to whole fish for turn-in: Greedie require **64**. Values use the pinned source's era-adjusted guild-point tables and assume no points earned today; they are not a prediction of today's request. Non-GP fish show a dash. Click the header to sort by the whole-item quantity needed; non-GP entries stay last. The Legendary column is removed, but the Legendary-only filter remains available.
 
-GP generation applies the RoV global cap rollback **before** the Abyssea-era item/value corrections. This order differs from the public module list but matches the confirmed live Phoenix Greedie cap of 1,520 GP; applying the rollback afterward would incorrectly reduce that corrected cap again. Both SQL patches and the chosen order are recorded in snapshot provenance. The same corrections apply to crafting GP items.
+GP generation applies the RoV global cap rollback **before** the Abyssea-era item/value corrections. This order differs from the public module list but matches the confirmed live Greedie cap of 1,520 GP for the reference ruleset; applying the rollback afterward would incorrectly reduce that corrected cap again. Both SQL patches and the chosen order are recorded in snapshot provenance. The same corrections apply to crafting GP items.
 
 #### Bait and Skill-up Planning
 Fishing spot analyzer. Pick a zone/area and bait to see the full catch pool, hook rates, and competing fish — plus a skill-up calculator for finding the best spots to level fishing.
@@ -106,7 +106,7 @@ Lure estimates cancel bad-feeling fights, including false alarms that could have
 The NPC/recipe detail panel also lists Zaldon's **Inside the Belly** trade rewards where present in the pinned public quest source, including gil and item chances. These are separate from direct NPC sale and synthesis proceeds, require quest access, and are not guarantees or verified live-server rates. Time estimates cover active fishing, not travel or waiting for time/season availability.
 
 #### Rods
-Rod stats and the break matrix use the same Phoenix snapshot and risk formulas as the skill-up planner. Phoenix removes the skill-based durability bonus, uses 19% snap chance per excess rank (capped at 55%), and 10% break chance per adjusted excess rank (capped at 20%). Escape uses Phoenix's size and skill-gap rules, including certain escape at a 50-level deficit.
+Rod stats and the break matrix use the same pinned source snapshot and risk formulas as the skill-up planner. The reference ruleset removes the skill-based durability bonus, uses 19% snap chance per excess rank (capped at 55%), and 10% break chance per adjusted excess rank (capped at 20%). Escape uses the source's size and skill-gap rules, including certain escape at a 50-level deficit.
 
 #### Fatigue Fishing
 Consumable-bait-only planning for natural line snaps followed by finishing the day's 200 landings. Enter skill, rod, location, bait, daily catches, estimated fatigue, and a safety reserve.
@@ -115,9 +115,9 @@ Consumable-bait-only planning for natural line snaps followed by finishing the d
 Clamming reference for all clamming points: item drop rates (with and without +1 swimwear), vendor prices, and bucket weight management.
 
 ### 🐤 Digging
-Phoenix-specific digging tables for 26 zones, including **Gold Ore in Tahrongi Canyon and Western Altepa Desert**. Select rank (Amateur through Expert) and assumed weather. Digging samples Kupo's calibrated Vana'diel time, day, and moon when the tab opens or you change filters, sorting, rank, weather, or prices. The table stays fixed between changes so background clock ticks do not interrupt menus. The **Calculated at** summary shows the conditions used. Item search and zone filters do not remove competing rewards from profit calculations.
+Digging tables from the pinned reference ruleset for 26 zones, including **Gold Ore in Tahrongi Canyon and Western Altepa Desert**. Select rank (Amateur through Expert) and assumed weather. Digging samples Kupo's calibrated Vana'diel time, day, and moon when the tab opens or you change filters, sorting, rank, weather, or prices. The table stays fixed between changes so background clock ticks do not interrupt menus. The **Calculated at** summary shows the conditions used. Item search and zone filters do not remove competing rewards from profit calculations.
 
-Phoenix rolls rank-based success (30% at Amateur, up to 55% at Expert), then selects one item using rank-specific weights. The table shows both share of successful digs and chance per attempt, dig XP, and zone net gil after greens costs. An item's XP tier is not a minimum digging rank. Moon affects elemental-ore availability and expected loot/profit, but not general success or greens needed for the daily cap. Burrow, Bore, treasure/cache layers, and personal chocobo/equipment bonuses are not used by the Phoenix override.
+The reference ruleset rolls rank-based success (30% at Amateur, up to 55% at Expert), then selects one item using rank-specific weights. The table shows both share of successful digs and chance per attempt, dig XP, and zone net gil after greens costs. An item's XP tier is not a minimum digging rank. Moon affects elemental-ore availability and expected loot/profit, but not general success or greens needed for the daily cap. Burrow, Bore, treasure/cache layers, and personal chocobo/equipment bonuses are not used by these source overrides.
 
 **Zone XP / 100 items** estimates total digging XP at the daily cap: `100 × sum(item share × XP per item)` across the full eligible zone pool. Click the column header to sort highest XP first. Item search does not change zone totals. Estimates hold rank and conditions fixed rather than simulating rank-ups; Expert (level 100) earns no further XP.
 
@@ -125,21 +125,17 @@ Seeds and tree cuttings are night-only (20:00 to before 04:00). Colored rocks ar
 
 Fatigue remains account-wide, resetting at midnight JST; the public default is 100 successful digs. All profit and greens estimates cover reaching that daily cap, including greens spent on failed attempts; there is no separate 100-attempt mode. Move at least 4 yalms between digs. Estimates assume a fresh day, fixed rank/conditions, available inventory, and one green per animated attempt; they exclude travel/rental and auction fees. Live server settings may differ.
 
-Digging is independently pinned to Phoenix revision `0f016c5c7b1639d16233fddb93db48e9a51222de`, including the Phoenix data/logic overrides, without updating unrelated economic data. Regenerate with `npm run phoenix:generate -- <Phoenix checkout>`; append `--check` to verify the snapshot. Validate with `npm run test:phoenix`.
-
 ### HELM
 Mining, harvesting, excavation, and logging reference with searchable item rates, equipment modifiers, gathering limits, and reset rules. Browse annotated gathering maps with zoom and map selection, with optional WotG zones.
 
 ### 🌦️ Weather
-Phoenix weather forecasts for 203 era zones, using Kupo's calibrated clock and moon. Filter by zone, element, or specific weather. Rows show local start/end times for upcoming **weather-roll windows**, not guaranteed weather transitions. Phoenix normally rolls every 3-30 Earth minutes (50% normal / 35% common / 15% rare). From 02:00 to before 07:00 Vana'diel time, non-elemental rolls become fog outside cities. Static zones keep their initial common weather without re-rolling or applying fog. Existing weather can persist until the next server update, so confirm conditions in game.
+Weather forecasts from the pinned reference ruleset for 203 era zones, using Kupo's calibrated clock and moon. Filter by zone, element, or specific weather. Rows show local start/end times for upcoming **weather-roll windows**, not guaranteed weather transitions. The reference ruleset normally rolls every 3-30 Earth minutes (50% normal / 35% common / 15% rare). From 02:00 to before 07:00 Vana'diel time, non-elemental rolls become fog outside cities. Static zones keep their initial common weather without re-rolling or applying fog. Existing weather can persist until the next server update, so confirm conditions in game.
 
-**Elemental ore** uses the same eligibility as Digging: Journeyman / skill 50+, all 22 Phoenix ore zones, active weather **including fog**, and **waxing 6-21% only**. The ore follows the Vana'diel weekday, not the weather's element. Forecasts split at exact moon and fog-rule boundaries, omit elapsed windows, and never treat a partially eligible day as an all-day opportunity. Weather percentages describe weather rolls, not ore-drop probabilities.
+**Elemental ore** uses the same eligibility as Digging: Journeyman / skill 50+, all 22 ore zones in the reference ruleset, active weather **including fog**, and **waxing 6-21% only**. The ore follows the Vana'diel weekday, not the weather's element. Forecasts split at exact moon and fog-rule boundaries, omit elapsed windows, and never treat a partially eligible day as an all-day opportunity. Weather percentages describe weather rolls, not ore-drop probabilities.
 
 **Starts in** shows a live Earth-time countdown to the start of the row's Vana'diel day (midnight), not to a later weather/ore window. Days already underway show **Started**. Countdown ticks use Kupo's existing clock without recalculating the forecast on each tick.
 
 **Set timer** adds a persisted, one-time alert to **Clock & Timers** at the row's exact weather/ore window start, which may be later than midnight. The button shows **Timer set** while that window has an enabled timer and prevents duplicates; already-started windows cannot be scheduled. These alerts do not repeat the following Earth day. Existing timers retain their normal behavior.
-
-Weather is independently pinned to Phoenix revision `0f016c5c7b1639d16233fddb93db48e9a51222de`; the existing 203 weather blobs are unchanged. Regenerate data and city metadata with `npm run weather:generate -- <Phoenix checkout>` (append `--check` to verify). Validate with `npm run test:weather`. Legacy saved names for Carpenter's Landing and the Sanctuary of Zi'Tah are migrated to their canonical digging-zone names.
 
 ### ⚔️ BCNM
 Battlefield browser for BCNM/KSNM/ENM fights: filter by arena or type, search by name, and view orb requirements, level caps, and complete loot tables with drop rates.
@@ -163,7 +159,7 @@ Skillchain calculator: pick weapons/weapon skills and find the two- and three-st
 ### 🔨 Crafting
 Two tools in one:
 - **Recipes** — browse era-appropriate recipes by craft, level, and crystal (optionally including WotG).
-- **GP** in the recipe browser shows points per NQ item / daily cap (calculated item quantity), using the same format as the fish list. Quantities are items, not synths, regardless of recipe yield; round up to whole items for turn-in. Distinct HQ results show their own values. If request patterns differ, each points/cap/quantity combination is listed. The column sorts by whole items needed. GP data is included in `npm run phoenix:generate -- <Phoenix checkout>`; append `--check` to verify the pinned snapshot.
+- **GP** in the recipe browser shows points per NQ item / daily cap (calculated item quantity), using the same format as the fish list. Quantities are items, not synths, regardless of recipe yield; round up to whole items for turn-in. Distinct HQ results show their own values. If request patterns differ, each points/cap/quantity combination is listed. The column sorts by whole items needed. GP data is included in `npm run source:generate -- <source checkout>`; append `--check` to verify the pinned snapshot.
 - **Planner** — enter your skill to see the best recipes to level on, with success rates, expected skill gain per synth, and support/gear/moghancement bonuses factored in. Guild rank-up test items are highlighted.
 
 ### Profits
