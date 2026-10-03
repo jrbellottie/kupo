@@ -3,6 +3,7 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 import { parseSql } from "./lib/item-data.mjs";
+import { evaluateLuaData } from "./lib/lua-data.mjs";
 
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/generate-fishing.mjs <Phoenix checkout> [--check]");
@@ -20,6 +21,8 @@ const fish = Object.fromEntries(fishRows.map(row => [row.name, {
   fish: row.name, skillCap: row.skill_level, ranking: row.ranking,
   size: row.size_type ? "L" : "S", legendary: Boolean(row.legendary),
   rarity: row.rarity / 1000, shellfish: Boolean(row.flags & 1), item: Boolean(row.item),
+  disabled: Boolean(row.disabled), requiredKeyItem: row.required_keyitem,
+  questRestricted: Boolean(row.quest_only || row.quest < 255),
   restricted: Boolean(row.disabled || row.quest_only || row.required_keyitem || row.quest < 255),
 }]));
 const names = new Map(fishRows.map(row => [row.fishid, row.name]));
@@ -39,6 +42,7 @@ const areas = Object.fromEntries(table("fishing_area").map(row => {
     difficulty: difficulty.get(row.zoneid) ?? 0,
     hasMobs: mobs.some(mob => mob.zoneid === row.zoneid && (!mob.areaid || mob.areaid === row.areaid) && !mob.nm && !mob.disabled),
     members: groups.filter(entry => entry.groupid === group).map(entry => names.get(entry.fishid)).filter(name => name && !fish[name].restricted),
+    allMembers: groups.filter(entry => entry.groupid === group).map(entry => names.get(entry.fishid)).filter(name => name && !fish[name].disabled),
   }];
 }));
 const rodRows = table("fishing_rod");
@@ -53,7 +57,28 @@ const rods = JSON.parse(readFileSync("src/data/rods.json", "utf8")).map(rod => (
 db.close();
 source("src/map/utils/fishingutils.cpp");
 source("modules/temp_patch/phoenix-fishing.patch");
-const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, inputs }, fish, baits, areas, rods };
+const rewardSource = source("scripts/quests/otherAreas/Inside_the_Belly.lua");
+const rewardStart = rewardSource.indexOf("local fishRewards");
+const rewardEnd = rewardSource.indexOf("local function tradeFish", rewardStart);
+if (rewardStart < 0 || rewardEnd < 0) throw new Error("Fish reward table boundaries not found");
+const rewardData = evaluateLuaData([
+  "xi = {}",
+  source("scripts/enum/item.lua").replace(/^\uFEFF/, ""),
+  "xi.title = setmetatable({}, { __index = function() return 0 end })",
+  rewardSource.slice(rewardStart, rewardEnd).replace("local fishRewards", "fishRewards"),
+], "{ rewards = fishRewards, items = xi.item }");
+const catalog = JSON.parse(readFileSync("src/data/itemInfo.json", "utf8"));
+const enumNames = Object.fromEntries(Object.entries(rewardData.items).map(([name, id]) => [id,
+  name.toLowerCase().replace(/_/g, " ").replace(/\b\w/g, letter => letter.toUpperCase()),
+]));
+const guttingRewards = Object.fromEntries(Object.entries(rewardData.rewards).filter(([id]) => names.has(Number(id))).map(([id, reward]) => [names.get(Number(id)), {
+  gil: reward.gil,
+  items: Object.values(reward.items).map(item => ({
+    itemId: item.itemId, name: catalog.items[item.itemId]?.name ?? enumNames[item.itemId] ?? `Item #${item.itemId}`,
+    chancePct: item.chance, min: item.min ?? 1, max: item.max ?? 1,
+  })),
+}]));
+const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, inputs }, fish, baits, areas, rods, guttingRewards };
 const filename = "src/data/fishingPlanner.json";
 const text = JSON.stringify(output) + "\n";
 if (process.argv.includes("--check")) {

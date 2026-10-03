@@ -5,6 +5,7 @@ import { CollapsibleSection } from "./ScreenControls";
 import recipesData from "./data/recipes.json";
 import { loadJson, saveJson } from "./utils/storage";
 import { craftSkillupStats } from "./utils/craftingSkillup";
+import { formatGuildPointCap, getGuildPointItemsToCap } from "./utils/guildPoints";
 import { findableName, normalizeItemName } from "./utils/itemLinks";
 import { getPurification, purificationMatches } from "./utils/purification";
 import { navigateToTab, peekNavQuery, peekNavRecipeId, hasBackTab, goBackTab, peekBackTabSeq, nextNavSeq } from "./utils/tabNav";
@@ -71,7 +72,7 @@ const ERA_OPTIONS = ["Base", "RotZ", "CoP", "ToAU", "WotG"];
 
 type Mode = "recipes" | "planner";
 type SortDir = "asc" | "desc";
-type RecipeKey = "res" | "craft" | "lvl" | "crystal" | "era";
+type RecipeKey = "res" | "craft" | "lvl" | "crystal" | "era" | "gpItemsToCap";
 type PlannerKey =
   | "expectedPerSynth"
   | "res"
@@ -97,6 +98,7 @@ type PlannerRow = {
 
 const RECIPE_COLUMNS: { key: RecipeKey; label: string }[] = [
   { key: "res", label: "Result" },
+  { key: "gpItemsToCap", label: "GP" },
   { key: "craft", label: "Craft" },
   { key: "lvl", label: "Lvl" },
   { key: "crystal", label: "Crystal" },
@@ -617,6 +619,7 @@ export default function CraftingTab() {
     if (recipe.hq.every((h) => h.n === recipe.res.n)) return hqText(recipe);
     return recipe.hq.map((h, i) => {
       const label = `${h.n}${h.q > 1 ? ` x${h.q}` : ""}`;
+      const gpCount = h.n === recipe.res.n ? null : getGuildPointItemsToCap(h.n);
       const target = h.n === recipe.res.n ? null : findableName(h.n);
       return (
         <React.Fragment key={i}>
@@ -636,6 +639,7 @@ export default function CraftingTab() {
           ) : (
             label
           )}
+          {gpCount !== null && ` (GP: ${formatGuildPointCap(h.n)})`}
         </React.Fragment>
       );
     });
@@ -719,7 +723,14 @@ export default function CraftingTab() {
     const dir = rSortDir === "asc" ? 1 : -1;
     rows.sort((a, b) => {
       let cmp = 0;
-      if (rSortKey === "lvl") cmp = a.lvl - b.lvl;
+      if (rSortKey === "gpItemsToCap") {
+        const av = getGuildPointItemsToCap(a.res.n);
+        const bv = getGuildPointItemsToCap(b.res.n);
+        if (av === null && bv !== null) return 1;
+        if (av !== null && bv === null) return -1;
+        cmp = (av ?? 0) - (bv ?? 0);
+      }
+      else if (rSortKey === "lvl") cmp = a.lvl - b.lvl;
       else if (rSortKey === "res") cmp = a.res.n.localeCompare(b.res.n);
       else if (rSortKey === "craft") cmp = a.craft.localeCompare(b.craft);
       else if (rSortKey === "crystal") cmp = a.crystal.localeCompare(b.crystal);
@@ -864,7 +875,7 @@ export default function CraftingTab() {
         cursor: "pointer",
         whiteSpace: "nowrap",
       }}
-      title="Wings of the Goddess recipes — coming soon to Phoenix"
+      title="Include Wings of the Goddess recipes"
     >
       <input type="checkbox" checked={includeWotg} onChange={(e) => setIncludeWotg(e.target.checked)} />
       Include WotG
@@ -890,6 +901,13 @@ export default function CraftingTab() {
           )}
         </div>
       </div>
+
+      {mode === "recipes" && <div style={styles.sub}>
+        GP shows points per NQ item / daily cap (calculated item quantity) when requested, not synths.
+        Round up to whole items for turn-in. Sort by items needed.
+        Assumes no GP earned today; a dash means no guild-point entry.
+        Distinct HQ results show their own counts and caps; alternate caps are listed when patterns differ.
+      </div>}
 
       <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
         <CollapsibleSection kind="tabs">
@@ -1067,7 +1085,7 @@ export default function CraftingTab() {
                 ℹ️ Info — era rates &amp; assumptions
               </summary>
               <div style={{ marginTop: 6, ...styles.sub }}>
-                Era (Phoenix/LSB) rates: skill-up chance is a flat <strong>60%</strong> below skill 50.0 and{" "}
+                Era rates: skill-up chance is a flat <strong>60%</strong> below skill 50.0 and{" "}
                 <strong>25%</strong> at 50.0+, on any synth where your skill is below the recipe cap. Broken synths can
                 still skill up at half rate, but only within 1–5 levels of the cap. Skill-up size scales with the level
                 gap (up to +0.5 at 14+ over), and is baked into the calculation. Only +0.1 happens above skill 60. 
@@ -1148,6 +1166,7 @@ export default function CraftingTab() {
                           </button>
                           {renderResult(r, rankUp)}
                         </td>
+                        <td style={tdStyle}>{formatGuildPointCap(r.res.n)}</td>
                         <td style={tdStyle}>{r.craft}</td>
                         <td style={tdStyle}>{r.lvl}</td>
                         <td style={tdStyle}>{r.crystal}</td>

@@ -5,6 +5,7 @@ import { CollapsibleSection, useTableViewportHeight } from "./ScreenControls";
 import { fishData } from "./utils/phoenixData";
 import { loadJson, saveJson } from "./utils/storage";
 import { formatVendorPrice, getVendorPriceEach } from "./utils/vendorPrice";
+import { formatGuildPointCap, getGuildPointItemsToCap } from "./utils/guildPoints";
 import BaitTab from "./BaitTab";
 import RodsTab from "./RodsTab";
 import SnapSkillTab from "./SnapSkillTab";
@@ -89,7 +90,7 @@ type SortKey =
   | "str"
   | "type"
   | "vendorPriceEach"
-  | "legendary"
+  | "gpItemsToCap"
   | "bestMoon"
   | "bestTime"
   | "bestSeason"
@@ -106,7 +107,7 @@ const COLUMNS: { key: SortKey; label: string; numeric?: boolean }[] = [
   { key: "str", label: "Str", numeric: true },
   { key: "type", label: "Type" },
   { key: "vendorPriceEach", label: "Vendor Price", numeric: true },
-  { key: "legendary", label: "Legendary" },
+  { key: "gpItemsToCap", label: "GP", numeric: true },
   { key: "bestMoon", label: "Best Moon" },
   { key: "bestTime", label: "Best Time" },
   { key: "bestSeason", label: "Best Season" },
@@ -181,9 +182,9 @@ function compareEntries(a: FishEntry, b: FishEntry, key: SortKey, dir: SortDir):
     else if (av === null) return 1;
     else if (bv === null) return -1;
     else cmp = av - bv;
-  } else if (key === "vendorPriceEach") {
-    const av = getVendorPriceEach(a.catch);
-    const bv = getVendorPriceEach(b.catch);
+  } else if (key === "vendorPriceEach" || key === "gpItemsToCap") {
+    const av = key === "vendorPriceEach" ? getVendorPriceEach(a.catch) : getGuildPointItemsToCap(a.catch, "Fishing");
+    const bv = key === "vendorPriceEach" ? getVendorPriceEach(b.catch) : getGuildPointItemsToCap(b.catch, "Fishing");
     if (av === null && bv === null) cmp = 0;
     else if (av === null) return 1;
     else if (bv === null) return -1;
@@ -449,6 +450,12 @@ function FishList() {
         </div>
       </div>
 
+      <div style={styles.sub}>
+        GP shows points per fish / daily cap (calculated item quantity) when requested,
+        assuming no GP earned today. Round up to whole fish for turn-in. Sort by items needed.
+        A dash means no Fishing guild-point entry.
+      </div>
+
       <div style={{ marginTop: 10, display: "grid", gap: 12 }}>
         <CollapsibleSection kind="search">
         <div style={styles.subCard}>
@@ -606,9 +613,7 @@ function FishList() {
                     <td style={tdStyle}>{f.str ?? "-"}</td>
                     <td style={tdStyle}>{f.type}</td>
                     <td style={tdStyle}>{formatVendorPrice(getVendorPriceEach(f.catch))}</td>
-                    <td style={{ ...tdStyle, ...(f.legendary ? { color: "#D8B04B", fontWeight: 800 } : {}) }}>
-                      {f.legendary ?? "-"}
-                    </td>
+                    <td style={tdStyle}>{formatGuildPointCap(f.catch, "Fishing")}</td>
                     <td style={tdStyle}>{f.bestMoon}</td>
                     <td style={{ ...tdStyle, whiteSpace: "normal", minWidth: 280 }}>{bestTimeMultiline(f.bestTime)}</td>
                     <td style={tdStyle}>{f.bestSeason}</td>

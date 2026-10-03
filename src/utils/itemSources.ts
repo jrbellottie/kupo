@@ -1,7 +1,7 @@
 // src/utils/itemSources.ts — aggregates every in-app source for an item name
 // (mob drops live in DropsTab's own table; this covers everything else).
 import { shopsData, helmData, phoenixDigging as chocoboDigData } from "./phoenixData";
-import { DIG_DAY_ITEMS, ORE_ZONES } from "./digging";
+import { DIGGING, DIG_DAY_ITEMS, ORE_ZONES } from "./digging";
 import guildShopsData from "../data/guildShops.json";
 import bcnmData from "../data/bcnm.json";
 import fishData from "../data/fish.json";
@@ -36,7 +36,6 @@ type ShopRow = { n: string; zone: string; npc: string; price: number };
 type GuildRow = { n: string; guild: string; price: number; rank: string };
 type HelmRow = { kind: string; zone: string; n: string; pct: number };
 type FishRow = { zone: string; catch: string };
-type DigRow = { zone: string; item: string; rate: number | null };
 type RecipeRow = { id: number; craft: string; lvl: number; era: string; ing: { n: string }[]; res: { n: string }; hq: { n: string }[]; d?: number };
 type CpRow = { n: string; nation: string; rank: number | null; cp: number; lvl: number | null };
 type Battlefield = {
@@ -70,13 +69,18 @@ for (const r of shopsData as ShopRow[]) entry(r.n).shops.push({ npc: r.npc, zone
 for (const r of guildShopsData as GuildRow[]) entry(r.n).guild.push({ guild: r.guild, rank: r.rank, price: r.price });
 for (const r of cpItemsData as CpRow[]) entry(r.n).cp.push({ nation: r.nation, rank: r.rank, cp: r.cp });
 for (const r of helmData as HelmRow[]) entry(r.n).helm.push({ kind: r.kind, zone: r.zone, pct: r.pct });
-for (const r of chocoboDigData.entries as DigRow[]) {
+for (const r of chocoboDigData.entries) {
   const e = entry(r.item);
-  if (!e.digging.some((d) => d.zone === r.zone)) e.digging.push({ zone: r.zone, rate: null });
+  const minimumRank = r.weights.findIndex(weight => weight > 0);
+  const condition = ["rank-dependent weights", ...(minimumRank > 0 ? [`${DIGGING.ranks[minimumRank]} (${minimumRank * 10}+)`] : []), ...(r.nightOnly ? ["night 20:00-04:00"] : [])].join("; ");
+  if (!e.digging.some((d) => d.zone === r.zone)) e.digging.push({ zone: r.zone, rate: null, condition });
 }
-for (const [day, [rock, ore]] of Object.entries(DIG_DAY_ITEMS)) {
-  for (const zone of ORE_ZONES) entry(ore).digging.push({ zone, rate: null, condition: `${day}; Craftsman (60+), elemental weather, moon 7-21%` });
-  for (const zone of new Set(chocoboDigData.entries.map(row => row.zone))) entry(rock).digging.push({ zone, rate: null, condition: `${day}; Novice (30+)` });
+for (const [day, ore] of Object.entries(DIG_DAY_ITEMS)) {
+  for (const zone of ORE_ZONES) entry(ore.item).digging.push({ zone, rate: null, condition: `${day}; Journeyman (50+), active weather (including fog), waxing moon 6-21%` });
+}
+for (const weather of DIGGING.weather) {
+  if (!weather.item) continue;
+  for (const zone of new Set(chocoboDigData.entries.map(row => row.zone))) entry(weather.item).digging.push({ zone, rate: null, condition: weather.name });
 }
 for (const r of fishData as FishRow[]) {
   const e = entry(r.catch);

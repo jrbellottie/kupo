@@ -1,5 +1,5 @@
 import { catalogData, phoenixDigging as digData } from "./phoenixData";
-import { DIG_DAY_ITEMS } from "./digging";
+import { DIGGING, DIG_DAY_ITEMS } from "./digging";
 import { PRINT_RECIPES, printItemKey } from "./printingData";
 import { normalizeItemName } from "./itemLinks";
 import type { PriceSnapshot } from "./itemPriceStore";
@@ -7,7 +7,7 @@ import type { PriceSnapshot } from "./itemPriceStore";
 export type PriceCatalogItem = { key: string; name: string; stack: number; crafting: boolean; digging: boolean; search: string };
 const catalog = catalogData as unknown as { names: Record<string, number>; items: Record<string, { name: string; stack: number }> };
 const crafting = new Set(PRINT_RECIPES.flatMap((recipe) => [recipe.res.n, ...recipe.hq.map((item) => item.n), ...recipe.ing.map((item) => item.n), `${recipe.crystal} Crystal`]).map(printItemKey));
-const digNames = [...digData.entries.map((entry) => entry.item), ...Object.values(DIG_DAY_ITEMS).flat(), "Gysahl Greens", ...["Fire", "Ice", "Wind", "Earth", "Lightning", "Water", "Light", "Dark"].flatMap((element) => [`${element} Crystal`, `${element} Cluster`])];
+const digNames = [...digData.entries.map((entry) => entry.item), ...Object.values(DIG_DAY_ITEMS).map(entry => entry.item), "Gysahl Greens", ...DIGGING.weather.flatMap(entry => entry.item ? [entry.item] : [])];
 const digging = new Set(digNames.map(printItemKey));
 const aliases = new Map<string, string[]>();
 for (const [name, id] of Object.entries(catalog.names)) {

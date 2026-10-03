@@ -68,7 +68,7 @@ export function ScreenControlToggles({ children }: { children?: ReactNode }) {
   );
   if (!children && !collapsedKinds.length) return null;
   return <div data-screen-toolbar role="group" aria-label="Collapsed sections"
-    style={{ ...styles.tabBar, background: "#0c0c0c", minWidth: 0 }}>
+    style={{ ...styles.tabBar, position: "static", background: "#0c0c0c", minWidth: 0 }}>
     {children}
     {collapsedKinds.map(kind => {
     const sections = controls.sections.filter(section => section.scope === controls.scope && section.kind === kind);

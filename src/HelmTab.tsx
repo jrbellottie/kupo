@@ -63,10 +63,10 @@ export default function HelmTab() {
 
   return <section className="helm" aria-label="HELM gathering">
     <header className="helm-header">
-      <div><h2>HELM</h2><p>Phoenix gathering / {state.wotg ? "Through WotG" : "ToAU"}</p></div>
+      <div><h2>HELM</h2><p>Gathering / {state.wotg ? "Through WotG" : "ToAU"}</p></div>
       <a className="helm-source" href={`${sourceUrl}/scripts/globals/hobbies/helm/logic.lua`} target="_blank" rel="noreferrer">Source {PHOENIX_SOURCE.revision.slice(0, 8)} <ExternalLink size={14} /></a>
     </header>
-    <p className="helm-notice">Pinned Phoenix beta source with pre-WotG item adjustments. Live server settings may differ; rates are source calculations, not live observations.</p>
+    <p className="helm-notice">Pinned source data with pre-WotG item adjustments. Live server settings may differ; rates are source calculations, not live observations.</p>
     {saveError && <p role="alert">HELM settings could not be saved in this browser.</p>}
     <CollapsibleSection kind="search">
     <div className="helm-toolbar">
@@ -134,7 +134,7 @@ export default function HelmTab() {
             <div className="helm-table-scroll"><table className="helm-table"><thead><tr><th>Item</th><th>Pool share</th><th>Per attempt</th><th>NPC base / item</th><th>Restrictions</th></tr></thead><tbody>
               {rows.map(drop => <tr key={drop.sourceItemId}><td><ItemLink name={drop.name} /></td><td>{percent(drop.share)}</td><td className="helm-chance">{percent(drop.perAttempt)}</td><td>{gil(printSellPrice(drop.name, {}))}</td><td>{[drop.dailyCap !== null ? `${drop.dailyCap}/JST day` : "", zone.depletion?.pool.includes(drop.sourceItemId) ? "Shared depletion" : "", drop.sourceItemId === 769 ? "Day's element" : ""].filter(Boolean).join("; ") || "None"}</td></tr>)}
             </tbody></table></div>
-            <p className="helm-muted">NPC values are Phoenix BaseSell references, not fame-adjusted shop quotes. Chances describe the next attempt at the entered pool state; they change as capped or depleted items are obtained.</p>
+            <p className="helm-muted">NPC values are base sell-price references, not fame-adjusted shop quotes. Chances describe the next attempt at the entered pool state; they change as capped or depleted items are obtained.</p>
           </>}
           {state.view === "Mechanics" && <div className="helm-mechanics">
             <h4>Success and tool loss</h4>
@@ -151,14 +151,14 @@ export default function HelmTab() {
             {zone.drops.some(drop => drop.dailyCap !== null) ? <p>Daily limits: {zone.drops.filter(drop => drop.dailyCap !== null).map(drop => `${drop.name}: ${drop.dailyCap}`).join("; ")}. Each item's weight becomes floor(base weight / (already obtained + 1)), then zero at its cap. Reset takes effect on zone-in after midnight JST, not while remaining in the zone.</p> : <p>No per-item daily caps are configured for this pool.</p>}
             <p>Remaining weights are renormalized after cap and depletion adjustments. These are per-character limits, not a server-wide stock count.</p>
             {zone.zone === "Wajaom Woodlands" && zone.kind === "Harvesting" && <><h4>Quest result</h4><p>Vanishing Act: while the quest is accepted and Rainbow Berry is missing, a non-breaking harvesting attempt can grant the key item. It is separate from the regular weighted item pool.</p></>}
-            <div className="helm-source-links"><a href={`${sourceUrl}/scripts/globals/hobbies/helm/data.lua`} target="_blank" rel="noreferrer">Phoenix data <ExternalLink size={13} /></a><a href={`${sourceUrl}/modules/era/lua/globals/helm/helm_adjustments.lua`} target="_blank" rel="noreferrer">Era adjustments <ExternalLink size={13} /></a></div>
+            <div className="helm-source-links"><a href={`${sourceUrl}/scripts/globals/hobbies/helm/data.lua`} target="_blank" rel="noreferrer">Gathering data <ExternalLink size={13} /></a><a href={`${sourceUrl}/modules/era/lua/globals/helm/helm_adjustments.lua`} target="_blank" rel="noreferrer">Era adjustments <ExternalLink size={13} /></a></div>
           </div>}
           {state.view === "Locations" && <div className="helm-locations">
             {gatheringMap ? <div>
               {gatheringMaps.length > 1 && <label>Gathering map<select value={gatheringMap.id} onChange={event => change({ mapId: event.target.value })}>{gatheringMaps.map(entry => <option value={entry.id} key={entry.id}>{entry.name}</option>)}</select></label>}
               <HelmGatheringMap key={gatheringMap.id} map={gatheringMap} />
               <div className="helm-source-links"><a href={gatheringMap.sourceUrl} target="_blank" rel="noreferrer">FFXIclopedia map <ExternalLink size={13} /></a><a href={gatheringMap.activityUrl} target="_blank" rel="noreferrer">{zone.kind} reference <ExternalLink size={13} /></a></div>
-              <p className="helm-muted">Wiki gathering locations, not live active points. Phoenix positions may differ.</p>
+              <p className="helm-muted">Wiki gathering locations, not live active points. Server positions may differ.</p>
             </div> : <div>
               <p className="helm-muted">No annotated {zone.kind.toLowerCase()} map is available for this zone. Zone reference only; gathering points are not marked.</p>
               {map ? <><label>Zone map<select value={map.id} onChange={event => change({ mapId: event.target.value })}>{maps.map(entry => <option value={entry.id} key={entry.id}>{entry.name}</option>)}</select></label><MapView map={map} width={720} showHoverCell /></> : <p>No bundled map is available for this zone.</p>}

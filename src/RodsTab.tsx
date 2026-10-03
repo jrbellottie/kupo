@@ -557,7 +557,7 @@ export default function RodsTab({ mode: activeMode }: { mode?: Mode } = {}) {
             </div>
 
             <div style={{ marginTop: 8, ...styles.sub }}>
-              Phoenix public-source formulas and rod durability. Skill affects escape, not snap/break durability.
+              Public-source formulas and rod durability. Skill affects escape, not snap/break durability.
               Rolls are sequential: escape, then line snap (lose bait), then rod break.
               Snap Roll % applies after surviving escape; Break Roll % applies after surviving both earlier rolls.
               No Mishap % is the combined chance to land a completed fight, excluding minigame failures.

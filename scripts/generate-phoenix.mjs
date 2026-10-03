@@ -9,12 +9,16 @@ import { evaluateLuaData } from "./lib/lua-data.mjs";
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/generate-phoenix.mjs <Phoenix checkout> [--check]");
 const revision = "ace1415cf5643d8d45ff72067522d97f2ccb038f";
+const diggingRevision = "0f016c5c7b1639d16233fddb93db48e9a51222de";
 const inputs = {};
-const source = (file) => {
-  const content = execFileSync("git", ["-C", checkout, "show", `${revision}:${file}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
-  inputs[file] = createHash("sha256").update(content).digest("hex");
+const readSource = (file, ref, hashes) => {
+  const content = execFileSync("git", ["-C", checkout, "show", `${ref}:${file}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+  hashes[file] = createHash("sha256").update(content).digest("hex");
   return content;
 };
+const source = (file) => readSource(file, revision, inputs);
+const diggingInputs = {};
+const digSource = (file) => readSource(file, diggingRevision, diggingInputs);
 const catalog = JSON.parse(readFileSync("src/data/itemInfo.json", "utf8"));
 const fishing = Object.fromEntries(parseSql(source("sql/fishing_fish.sql"), "fishing_fish").map(row => [row.name, { skillCap: row.skill_level, item: Boolean(row.item), disabled: Boolean(row.disabled) }]));
 const basic = parseSql(source("sql/item_basic.sql"), "item_basic");
@@ -55,11 +59,7 @@ for (const id of Object.keys(clamming.itemData)) if (!catalog.items[id]) {
   if (!row) throw new Error(`Missing clamming item ${id}`);
   items[id] = { name: row.name.replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase()), sell: row.BaseSell, stack: row.stackSize, flags: row.flags, category: 0 };
 }
-db.close();
 source("scripts/globals/hobbies/clamming/logic.lua");
-const digTable = evaluateLuaData([bootstrap, source("scripts/globals/hobbies/chocobo_digging/data.lua")], "xi.chocoboDig.digInfo");
-const digLogic = source("scripts/globals/hobbies/chocobo_digging/logic.lua");
-const allowed = [...digLogic.match(/local diggingZoneList\s*=\s*set\{([\s\S]*?)\}/)[1].replace(/--[^\n]*/g, "").matchAll(/xi\.zone\.([A-Z_]+)/g)].map(match => zoneEnums[match[1]]);
 const zoneName = (id) => Object.entries(zoneEnums).find(([, value]) => value === Number(id))?.[0].toLowerCase().replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase()).replace("The Sanctuary Of Zitah", "The Sanctuary of Zi'Tah").replace("Carpenters Landing", "Carpenters' Landing");
 const helmSetup = `xi.helmType={HARVESTING=1,EXCAVATION=2,LOGGING=3,MINING=4}; xi.emote=xi.helmType; xi.expansion={ABYSSEA=8,WOTG=4}; Module.new=function() return {addOverrideByEra=function(self,name,callbacks) for _,callback in pairs(callbacks) do callback() end end} end`;
 const helmTable = evaluateLuaData([bootstrap, helmSetup, source("scripts/globals/hobbies/helm/data.lua"), source("modules/era/lua/globals/helm/helm_adjustments.lua")], "xi.helm.dataTable");
@@ -94,12 +94,54 @@ const helmGear = [...gearByItem.values()].sort((first, second) => first.kind.loc
 const valerianoSource = source("modules/era/lua/globals/valeriano_shop_adjust.lua");
 const valerianoStock = evaluateLuaData([bootstrap], `{${valerianoSource.match(/local stock\s*=\s*\{([\s\S]*?)\n    \}/)[1]}}`);
 const valerianoOffers = ["Southern San d'Oria", "Port Bastok", "Windurst Woods"].flatMap(zone => Object.values(valerianoStock).map(row => ({ n: names.get(row[1]), npc: "Valeriano", zone, price: row[2] })));
-const entries = [];
-for (const zone of allowed) for (const [layer, rows] of Object.entries(digTable[zone] ?? {})) for (const row of Object.values(rows)) {
-  if (!names.has(row[1])) throw new Error(`Unknown dig item ${row[1]}`);
-  entries.push({ zone: zoneName(zone), item: names.get(row[1]), rate: row[2] / 10, rank: row[3] === 0 ? null : ranks[row[3]], mode: Number(layer) === 3 ? "burrow" : Number(layer) === 4 ? "bore" : null, layer: ["", "treasure", "regular", "burrow", "bore"][Number(layer)] });
-}
-entries.sort((first, second) => first.zone.localeCompare(second.zone) || first.layer.localeCompare(second.layer) || first.item.localeCompare(second.item));
+const digInit = digSource("modules/init.txt");
+if (!digInit.split(/\r?\n/).some(line => line.trim() === "phoenix/lua")) throw new Error("Phoenix digging modules not enabled");
+const digItems = Object.fromEntries([...digSource("scripts/enum/item.lua").matchAll(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+)\s*,/gm)].map(match => [match[1], Number(match[2])]));
+const digZones = Object.fromEntries(Object.entries(parseYaml(digSource("data/enums/zone.yaml")).values).map(([name, id]) => [name.toUpperCase(), id]));
+const digWeather = Object.fromEntries(Object.entries(parseYaml(digSource("data/enums/weather.yaml")).values).map(([name, id]) => [name.toUpperCase(), id]));
+const digBootstrap = `${bootstrap}; xi.item=${luaTable(digItems)}; xi.zone=${luaTable(digZones)}; xi.weather=${luaTable(digWeather)}; set=function(values) local result={} for _,v in ipairs(values) do result[v]=true end return result end`;
+const digTable = evaluateLuaData([digBootstrap, digSource("modules/phoenix/lua/globals/hobbies/chocobo_digging/pxi_digging_data.lua")], "xi.chocoboDig");
+for (const file of [
+  "modules/phoenix/lua/globals/hobbies/chocobo_digging/pxi_digging_logic.lua",
+  "modules/phoenix/lua/globals/hobbies/chocobo_digging/chocobo_account_fatigue.lua",
+  "scripts/utils/common.lua", "scripts/utils/utils.lua", "settings/default/main.lua",
+  "src/map/packets/c2s/0x01a_action.cpp",
+]) digSource(file);
+const digName = id => {
+  const name = catalog.items[id]?.name;
+  if (!name) throw new Error(`Unknown Phoenix digging item ${id}`);
+  return { itemId: Number(id), item: name };
+};
+const digZoneName = id => {
+  const key = Object.keys(digZones).find(name => digZones[name] === Number(id));
+  if (!key || zoneEnums[key] !== Number(id)) throw new Error(`Unmapped Phoenix digging zone ${id}`);
+  return zoneName(id);
+};
+const rankValues = table => ranks.map((_, rank) => {
+  const value = table[rank];
+  if (!Number.isFinite(value) || value < 0) throw new Error(`Invalid digging value at rank ${rank}`);
+  return value;
+});
+const entries = Object.entries(digTable.zoneTable).flatMap(([zone, rows]) => Object.values(rows).map(row => ({
+  zone: digZoneName(zone), ...digName(row[1]), itemRank: row[2],
+  weights: rankValues(Object.fromEntries(ranks.map((_, rank) => [rank, row[rank + 3]]))),
+  nightOnly: Boolean(digTable.nightOnlyItems[row[1]]),
+})));
+entries.sort((first, second) => first.zone.localeCompare(second.zone) || first.item.localeCompare(second.item));
+const days = ["Firesday", "Earthsday", "Watersday", "Windsday", "Iceday", "Lightningday", "Lightsday", "Darksday"];
+const digging = {
+  source: { repository: "https://github.com/phoenixffxi/Phoenix", revision: diggingRevision, branch: "beta", inputs: diggingInputs },
+  ranks, accuracy: rankValues(digTable.accuracy), experiencePerItem: rankValues(digTable.experiencePerItem),
+  xpToLevel: Array.from({ length: 100 }, (_, index) => digTable.xpToLevel[index + 1]),
+  entries, oreZones: Object.keys(digTable.elementalOreZones).map(digZoneName).sort(),
+  oreWeights: rankValues(digTable.elementalOreWeight),
+  ores: Object.fromEntries(days.map((day, index) => [day, digName(digTable.elementalOreByDay[index])])),
+  weather: [
+    { id: digWeather.FOG, name: "Fog", itemId: null, item: null, weights: ranks.map(() => 0) },
+    ...Object.entries(digTable.crystalByWeather).map(([id, item]) => ({ id: Number(id), name: digName(item).item.replace(" Crystal", " (single weather)"), ...digName(item), weights: rankValues(digTable.crystalWeight) })),
+    ...Object.entries(digTable.clusterByWeather).map(([id, item]) => ({ id: Number(id), name: digName(item).item.replace(" Cluster", " (double weather)"), ...digName(item), weights: rankValues(digTable.clusterWeight) })),
+  ].sort((first, second) => first.id - second.id),
+};
 const guilds = evaluateLuaData([bootstrap, source("scripts/data/guild_shops.lua"), source("modules/phoenix/lua/data/era_guild_shops.lua")], "xi.data.guildShops");
 const shops = JSON.parse(readFileSync("src/data/shops.json", "utf8"));
 const npcZones = new Map(shops.map(row => [row.npc.replaceAll(" ", "_"), row.zone]));
@@ -120,9 +162,44 @@ for (const [npc, guild] of Object.entries(guilds)) {
   for (const row of Object.values(stock)) guildOffers.push({ n: names.get(row.id), npc: npc.replaceAll("_", " "), zone: npcZones.get(npc), price: guildPrice(row), initial: row.initial, restockRate: row.restockRate, stocked: row.initial > 0 || row.restockRate > 0 });
 }
 guildOffers.sort((first, second) => first.npc.localeCompare(second.npc) || first.n.localeCompare(second.n));
-const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, branch: "beta", eraScenario: "ToAU (pre-WotG)", inputs }, items, fishing, clamming, helm, helmZones, helmGear, valerianoOffers, guildNpcs: Object.keys(guilds).map(npc => npc.replaceAll("_", " ")).sort(), guildOffers, digging: { entries } };
+const guildNames = new Map(Object.entries(enumValues("scripts/enum/guild.lua")).map(([name, id]) => [id, name[0] + name.slice(1).toLowerCase()]));
+const basicNames = new Map(basic.map(row => [row.itemid, row.name]));
+source("src/map/guild.cpp");
+const guildPointSqlOrder = ["modules/era/sql/rov/guild_item_points.sql", "modules/era/sql/abyssea/guild_item_points.sql"];
+db.exec("CREATE TABLE guild_item_points (guildid INTEGER, itemid INTEGER, rank INTEGER, points INTEGER, max_points INTEGER, pattern INTEGER, PRIMARY KEY (guildid, itemid, pattern))");
+const insertGp = db.prepare("INSERT INTO guild_item_points VALUES (?, ?, ?, ?, ?, ?)");
+for (const row of parseSql(source("sql/guild_item_points.sql"), "guild_item_points")) {
+  insertGp.run(row.guildid, row.itemid, row.rank, row.points, row.max_points, row.pattern);
+}
+// Roll back the global cap multiplier before item-specific era corrections.
+// This differs from public init order, matching the confirmed live Greedie cap of 1,520.
+for (const file of guildPointSqlOrder) {
+  const module = file.replace(/^modules\//, "").replace(/\/guild_item_points\.sql$/, "");
+  if (!init.split(/\r?\n/).some(line => line.trim().replace(/\/$/, "") === module)) throw new Error(`GP era module not enabled: ${module}`);
+  const statements = source(file).replace(/--[^\n]*/g, "").split(";").map(statement => statement.trim()).filter(Boolean);
+  for (const statement of statements) {
+    if (!/^(?:UPDATE|INSERT INTO|DELETE FROM)\s+`?guild_item_points`?\s/i.test(statement)) throw new Error(`Unsupported GP patch: ${statement}`);
+    // MariaDB rounds division results when assigning to integer columns; SQLite otherwise truncates.
+    db.exec(statement.replace(/`max_points`\s*\/\s*3\b/g, "CAST(ROUND(`max_points` / 3.0) AS INTEGER)"));
+  }
+}
+const gpCounts = new Map();
+const guildPoints = db.prepare("SELECT * FROM guild_item_points ORDER BY guildid, rank, pattern, itemid").all().map(row => {
+  const guild = guildNames.get(row.guildid);
+  const item = catalog.items[row.itemid]?.name ?? basicNames.get(row.itemid)?.replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase());
+  if (!guild || !item || !Number.isInteger(row.points) || row.points <= 0 || !Number.isInteger(row.max_points) || row.max_points <= 0) {
+    throw new Error(`Invalid guild-point entry: ${JSON.stringify(row)}`);
+  }
+  const count = Math.ceil(row.max_points / row.points);
+  const previous = gpCounts.get(row.itemid);
+  if (previous !== undefined && previous !== count) throw new Error(`Pattern-dependent GP quantities need explicit handling: ${item}`);
+  gpCounts.set(row.itemid, count);
+  return { guild, itemId: row.itemid, item, rank: row.rank, pattern: row.pattern, points: row.points, maxPoints: row.max_points };
+});
+db.close();
+const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, branch: "beta", eraScenario: "ToAU (pre-WotG)", guildPointSqlOrder, guildPointScenario: "Global cap rollback before item-specific era corrections; live Greedie cap confirmed at 1520 GP", inputs }, items, fishing, clamming, helm, helmZones, helmGear, valerianoOffers, guildNpcs: Object.keys(guilds).map(npc => npc.replaceAll("_", " ")).sort(), guildOffers, guildPoints, digging };
 const filename = "src/data/phoenix.json";
 const text = JSON.stringify(output) + "\n";
 if (process.argv.includes("--check")) { if (readFileSync(filename, "utf8") !== text) throw new Error("Phoenix snapshot differs; regenerate explicitly"); }
 else writeFileSync(filename, text);
-console.log(`Phoenix ${revision}: ${Object.keys(items).length} item overrides, ${guildOffers.length} guild offers, ${entries.length} digging entries in ${allowed.length} zones`);
+console.log(`Phoenix ${revision}: ${Object.keys(items).length} item overrides, ${guildOffers.length} guild offers; digging ${diggingRevision}: ${entries.length} entries in ${Object.keys(digTable.zoneTable).length} zones`);

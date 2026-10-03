@@ -353,7 +353,7 @@ export default function BestiaryTab() {
                 <span>Mob type {flagText(selected.flags.mobType)}</span><span>Immunity {flagText(selected.flags.immunity)}</span><span>Behavior {flagText(selected.flags.behavior)}</span><span>Roam {flagText(selected.flags.roam)}</span>
               </section>
 
-              <div className="bestiary-caveat"><strong>Baseline note:</strong> {DATA.source.baseline} Lua initialization, server multipliers, battle state, and custom Phoenix changes can alter live command values.</div>
+              <div className="bestiary-caveat"><strong>Baseline note:</strong> {DATA.source.baseline} Lua initialization, server multipliers, battle state, and custom server changes can alter live command values.</div>
             </>
           )}
         </main>

@@ -208,6 +208,33 @@ export function nextEarthMsForVanaWeekdayTime(args: {
   return nowEarthMs + deltaVanaSeconds * VANA_MS_PER_VANA_SECOND;
 }
 
+export function nextEarthMsForVanaDailySchedule(args: {
+  nowEarthMs: number;
+  cal?: Calibration;
+  departureMinutes: readonly number[];
+  offsetHours: number;
+}): number {
+  const { nowEarthMs, cal, departureMinutes, offsetHours } = args;
+  if (
+    !Number.isFinite(nowEarthMs) ||
+    !Number.isFinite(cal?.timeOffsetMs ?? 0) ||
+    !Number.isInteger(offsetHours) || offsetHours < 0 || offsetHours > 23 ||
+    departureMinutes.length === 0 ||
+    departureMinutes.some((minute) => !Number.isInteger(minute) || minute < 0 || minute >= 1440)
+  ) {
+    throw new Error("Invalid Vana'diel transport schedule.");
+  }
+
+  const minuteMs = 60 * VANA_MS_PER_VANA_SECOND;
+  const dayMs = VANA_SECONDS_PER_DAY * VANA_MS_PER_VANA_SECOND;
+  const nowInDayMs = mod(applyCalibrationToEarthMs(nowEarthMs, cal), dayMs);
+  const deltas = departureMinutes.map((minute) => {
+    const delta = mod((minute - offsetHours * 60) * minuteMs - nowInDayMs, dayMs);
+    return delta === 0 ? dayMs : delta;
+  });
+  return nowEarthMs + Math.min(...deltas);
+}
+
 export function nextEarthMsForMoonPercent(args: {
   nowEarthMs: number;
   cal?: Calibration;

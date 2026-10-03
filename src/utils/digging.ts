@@ -1,58 +1,103 @@
-export type DigLayer = "treasure" | "regular" | "burrow" | "bore";
+import phoenix from "../data/phoenix.json";
+import type { VanaWeekday } from "../vanadiel";
+
+export const DIGGING = phoenix.digging;
+export const DIG_RANKS = DIGGING.ranks;
+export const DIG_ZONES = [...new Set(DIGGING.entries.map(entry => entry.zone))];
+export const ORE_ZONES = DIGGING.oreZones;
+export const DIG_DAY_ITEMS = DIGGING.ores;
+export const DIG_DAILY_CAP = 100;
+export const ORE_WEATHER_IDS = DIGGING.weather.map(weather => weather.id);
+
+export type DigConditions = {
+  rank: number;
+  hour: number;
+  moonPercent: number;
+  waxing: boolean;
+  day: VanaWeekday;
+  weather: number;
+};
+export type DigReward = {
+  zone: string;
+  itemId: number;
+  item: string;
+  weight: number;
+  experience: number;
+  condition: string;
+  share: number;
+  perAttempt: number;
+};
+export type DigDistribution = {
+  rewards: DigReward[];
+  successChance: number;
+  expectedExperience: number;
+};
+
 export function nextDigReset(nowMs: number): number {
   const dayMs = 86_400_000;
   const jstOffset = 9 * 3_600_000;
   return (Math.floor((nowMs + jstOffset) / dayMs) + 1) * dayMs - jstOffset;
 }
-export type DigCandidate = { item: string; rate: number; layer: DigLayer };
-export const ORE_ZONES = ["La Theine Plateau", "Jugner Forest", "Batallia Downs", "Konschtat Highlands", "Pashhow Marshlands", "Rolanberry Fields", "Tahrongi Canyon", "Meriphataud Mountains", "Sauromugue Champaign"];
-export const DIG_DAY_ITEMS: Record<string, [string, string]> = {
-  Firesday: ["Red Rock", "Fire Ore"], Earthsday: ["Yellow Rock", "Earth Ore"],
-  Watersday: ["Blue Rock", "Water Ore"], Windsday: ["Green Rock", "Wind Ore"],
-  Iceday: ["Translucent Rock", "Ice Ore"], Lightningday: ["Purple Rock", "Lightning Ore"],
-  Lightsday: ["White Rock", "Light Ore"], Darksday: ["Black Rock", "Dark Ore"],
-};
 
-export function digRollChance(rate: number, moon: number): number {
-  const multiplier = 1.5 - Math.abs(Math.max(0, Math.min(100, moon)) - 50) / 50;
-  const threshold = Math.round(rate * 10);
-  let successes = 0;
-  for (let roll = 1; roll <= 1000; roll++) if (Math.max(1, Math.min(1000, Math.floor(roll * multiplier))) <= threshold) successes++;
-  return successes / 1000;
+export function isElementalOreMoon(moonPercent: number, waxing: boolean): boolean {
+  return waxing && moonPercent >= 6 && moonPercent < 22;
 }
 
-export function digLayerChances(probabilities: number[]): number[] {
-  return probabilities.map((probability, target) => {
-    let counts = [1];
-    probabilities.forEach((other, index) => {
-      if (index === target) return;
-      const next = Array(counts.length + 1).fill(0) as number[];
-      counts.forEach((value, count) => { next[count] += value * (1 - other); next[count + 1] += value * other; });
-      counts = next;
-    });
-    return probability * counts.reduce((sum, value, count) => sum + value / (count + 1), 0);
-  });
+export function elementalOreActive(zone: string, conditions: DigConditions): boolean {
+  return ORE_ZONES.includes(zone) && DIGGING.oreWeights[conditions.rank] > 0
+    && ORE_WEATHER_IDS.includes(conditions.weather)
+    && isElementalOreMoon(conditions.moonPercent, conditions.waxing);
 }
 
-export function diggingDistribution(candidates: DigCandidate[], moon: number) {
-  const rewards = candidates.map(() => 0);
-  const success: Record<DigLayer, number> = { treasure: 0, regular: 0, burrow: 0, bore: 0 };
-  for (const layer of ["treasure", "regular", "burrow", "bore"] as const) {
-    const indices = candidates.flatMap((entry, index) => entry.layer === layer ? [index] : []);
-    const probabilities = indices.map((index) => digRollChance(candidates[index].rate, moon));
-    success[layer] = 1 - probabilities.reduce((none, probability) => none * (1 - probability), 1);
-    const chosen = digLayerChances(probabilities);
-    indices.forEach((index, offset) => { rewards[index] = chosen[offset] * (layer === "treasure" ? 1 : 1 - success.treasure); });
+export function diggingDistribution(zone: string, conditions: DigConditions): DigDistribution {
+  const { rank, hour, moonPercent, day, weather: weatherId } = conditions;
+  if (!DIG_ZONES.includes(zone) || !Number.isInteger(rank) || rank < 0 || rank >= DIG_RANKS.length
+    || !Number.isFinite(hour) || hour < 0 || hour >= 24
+    || !Number.isFinite(moonPercent) || moonPercent < 0 || moonPercent > 100
+    || !Object.prototype.hasOwnProperty.call(DIG_DAY_ITEMS, day)
+    || (weatherId !== 0 && !DIGGING.weather.some(weather => weather.id === weatherId))) {
+    throw new Error("Invalid digging zone or conditions");
   }
-  const successChance = success.treasure + (1 - success.treasure) * (1 - (1 - success.regular) * (1 - success.burrow) * (1 - success.bore));
-  return { rewards, successChance, expectedItems: rewards.reduce((sum, chance) => sum + chance, 0) };
+  const night = hour >= 20 || hour < 4;
+  const rewards: DigReward[] = DIGGING.entries
+    .filter(entry => entry.zone === zone && entry.weights[rank] > 0 && (!entry.nightOnly || night))
+    .map(entry => ({
+      zone, itemId: entry.itemId, item: entry.item, weight: entry.weights[rank],
+      experience: rank === 10 ? 0 : DIGGING.experiencePerItem[entry.itemRank],
+      condition: entry.nightOnly ? "Night (20:00-04:00)" : "Always",
+      share: 0, perAttempt: 0,
+    }));
+  const weather = DIGGING.weather.find(entry => entry.id === weatherId);
+  if (weather?.item && weather.itemId !== null && weather.weights[rank] > 0) {
+    rewards.push({
+      zone, itemId: weather.itemId, item: weather.item, weight: weather.weights[rank],
+      experience: rank === 10 ? 0 : DIGGING.experiencePerItem[0],
+      condition: weather.name, share: 0, perAttempt: 0,
+    });
+  }
+  if (elementalOreActive(zone, conditions)) {
+    rewards.push({
+      zone, ...DIG_DAY_ITEMS[day], weight: DIGGING.oreWeights[rank],
+      experience: rank === 10 ? 0 : DIGGING.experiencePerItem[10],
+      condition: `${day}; waxing 6-21%; weather`, share: 0, perAttempt: 0,
+    });
+  }
+  const totalWeight = rewards.reduce((sum, entry) => sum + entry.weight, 0);
+  if (totalWeight <= 0) throw new Error(`Empty digging pool: ${zone}`);
+  const successChance = DIGGING.accuracy[rank] / 100;
+  for (const entry of rewards) {
+    entry.share = entry.weight / totalWeight;
+    entry.perAttempt = successChance * entry.share;
+  }
+  return {
+    rewards, successChance,
+    expectedExperience: rewards.reduce((sum, entry) => sum + entry.perAttempt * entry.experience, 0),
+  };
 }
 
-export function diggingExtras(zone: string, rank: number, moon: number, day: string, weatherItem: string): DigCandidate[] {
-  const result: DigCandidate[] = [];
-  const items = DIG_DAY_ITEMS[day];
-  if (weatherItem) result.push({ item: weatherItem, rate: 10, layer: "regular" });
-  if (rank >= 3 && items) result.push({ item: items[0], rate: 5, layer: "regular" });
-  if (rank >= 6 && items && weatherItem && moon >= 7 && moon <= 21 && ORE_ZONES.includes(zone)) result.push({ item: items[1], rate: 10, layer: "regular" });
-  return result;
+export function diggingEstimate(distribution: DigDistribution, greensCost: number, price: (item: string) => number) {
+  if (!Number.isFinite(greensCost) || greensCost < 0) throw new Error("Invalid Gysahl Greens cost");
+  const attempts = DIG_DAILY_CAP / distribution.successChance;
+  const gross = distribution.rewards.reduce((sum, entry) => sum + entry.perAttempt * price(entry.item), 0) * attempts;
+  return { attempts, greens: Math.ceil(attempts), net: gross - attempts * greensCost, experience: distribution.expectedExperience * attempts };
 }

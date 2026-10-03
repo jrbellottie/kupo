@@ -87,6 +87,12 @@ export function nextOccurrenceLocal(targetMs: number, nowMs: number): number {
   return t;
 }
 
+export function advanceEarthTimer(timer: EarthTimer, nowMs: number): EarthTimer {
+  return timer.repeatDaily === false
+    ? { ...timer, enabled: false }
+    : { ...timer, targetEarthMs: nextOccurrenceLocal(timer.targetEarthMs, nowMs) };
+}
+
 // -------------------- Duration parsing --------------------
 
 /**
@@ -164,3 +170,4 @@ export function parseDurationToMs(raw: string): number | undefined {
 
   return undefined;
 }
+import type { EarthTimer } from "../types";

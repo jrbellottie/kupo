@@ -64,6 +64,32 @@ async function loadUtility(name) {
 const craft = await loadUtility("craftingSkillup");
 const fishing = await loadUtility("fishingSkillup");
 const fishingSnapshot = JSON.parse(readFileSync(new URL("../src/data/fishingPlanner.json", import.meta.url), "utf8"));
+
+test("fishing skill-up table and expanded details have no native hover tooltips", () => {
+  const source = readFileSync(new URL("../src/BaitTab.tsx", import.meta.url), "utf8");
+  const file = ts.createSourceFile("BaitTab.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  let table;
+  function findTable(node) {
+    if (ts.isJsxElement(node) && node.openingElement.tagName.getText(file) === "table"
+      && node.openingElement.attributes.properties.some(attribute =>
+        ts.isJsxAttribute(attribute) && attribute.name.text === "aria-label"
+        && attribute.initializer && ts.isStringLiteral(attribute.initializer)
+        && attribute.initializer.text === "Fishing skill-up combinations")) {
+      table = node;
+    }
+    ts.forEachChild(node, findTable);
+  }
+  findTable(file);
+  assert.ok(table, "Skill-up table must exist");
+  function checkTooltips(node) {
+    if (ts.isJsxAttribute(node)) {
+      assert.notEqual(node.name.getText(file), "title", "Table content must not create native hover popups");
+    }
+    ts.forEachChild(node, checkTooltips);
+  }
+  checkTooltips(table);
+});
+
 test("snap planner conditions warnings and reserves fatigue for landing 200", () => {
   const rod = fishingSnapshot.rods.find(row => row.rod === "Carbon Fishing Rod");
   const fish = { ...fishingSnapshot.fish["Black Eel"], hookBonus: 80 };
@@ -243,8 +269,11 @@ test("lures cancel bad warnings, including false alarms, while bait completes sn
     assert.ok(Math.abs(plan.fatigueUsed - 20000) < 1e-8);
   }
   const safeFish = { ...fish, ranking: 1 };
-  assert.deepEqual(fishing.calculatePoolSession({ ...settings, fish: [safeFish], baitKind: "Lure" }),
-    fishing.calculatePoolSession({ ...settings, fish: [safeFish], baitKind: "Bait" }));
+  const { baitNeeded: lureNeeded, ...safeLure } = fishing.calculatePoolSession({ ...settings, fish: [safeFish], baitKind: "Lure" });
+  const { baitNeeded: baitNeeded, ...safeBait } = fishing.calculatePoolSession({ ...settings, fish: [safeFish], baitKind: "Bait" });
+  assert.deepEqual(safeLure, safeBait);
+  assert.equal(lureNeeded, 1);
+  assert.ok(baitNeeded > 1);
   const epic = { ...fish, size: "L" };
   assert.deepEqual(fishing.calculateFishingFight(100, epic, rod, "Lure"), { attemptedPct: 0, landPct: 0, skillupResolvePct: 0 });
   assert.equal(fishing.calculatePoolSession({ ...settings, fish: [epic], baitKind: "Lure" }).skillGain, null);
@@ -252,6 +281,92 @@ test("lures cancel bad warnings, including false alarms, while bait completes sn
   assert.equal(mixed.catches[1], 0);
   assert.equal(mixed.gains[1], 0);
   assert.ok(mixed.skillGain > 0);
+});
+
+test("expanded fishing pools retain prerequisite fish without enabling disabled catches", () => {
+  for (const name of ["Gugrusaurus", "Lik"]) {
+    assert.ok(fishingSnapshot.fish[name].requiredKeyItem > 0);
+    assert.equal(fishingSnapshot.fish[name].disabled, false);
+    assert.ok(Object.values(fishingSnapshot.areas).some(area => area.allMembers.includes(name)));
+    assert.ok(Object.values(fishingSnapshot.areas).every(area => !area.members.includes(name)));
+  }
+  for (const area of Object.values(fishingSnapshot.areas)) {
+    assert.ok(area.members.every(name => area.allMembers.includes(name)));
+    assert.ok(area.allMembers.every(name => !fishingSnapshot.fish[name].disabled));
+  }
+});
+
+test("fish gutting rewards retain the pinned public quest rates and item names", () => {
+  const gugrusaurus = fishingSnapshot.guttingRewards.Gugrusaurus;
+  const lik = fishingSnapshot.guttingRewards.Lik;
+  assert.equal(gugrusaurus.gil, 880);
+  assert.equal(lik.gil, 880);
+  assert.match(gugrusaurus.items[0].name, /Saber Shoot/i);
+  assert.equal(gugrusaurus.items[0].chancePct, 0.4);
+  assert.match(lik.items[0].name, /Opal Silk/i);
+  assert.equal(lik.items[0].chancePct, 0.5);
+  assert.ok(fishingSnapshot.guttingRewards["Moat Carp"] === undefined);
+  for (const reward of Object.values(fishingSnapshot.guttingRewards)) {
+    for (const item of reward.items) {
+      assert.ok(item.chancePct > 0 && item.chancePct <= 100);
+      assert.ok(item.min >= 1 && item.max >= item.min);
+    }
+  }
+});
+
+test("general catch planning can complete Lik epic fights with lures", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Ebisu Fishing Rod");
+  const fish = { ...fishingSnapshot.fish.Lik, hookBonus: 75 };
+  const settings = { baseSkill: 110, bonusSkill: 0, zone: "Lufaise Meadows", rod, fish: [fish], baitKind: "Lure",
+    options: { city: false, hasItems: false, hasMobs: false, difficulty: 0 } };
+  assert.equal(fishing.calculatePoolSession(settings).catchTimeSeconds, null);
+  const plan = fishing.calculatePoolSession({ ...settings, allowEpicLures: true });
+  assert.ok(plan.catchTimeSeconds > 0);
+  assert.ok(plan.catches[0] > 0 && plan.catches[0] < 31);
+  assert.ok(Math.abs(plan.fatigueUsed - 20000) < 1e-8);
+  assert.equal(plan.baitNeeded, 1);
+  assert.deepEqual(fishing.calculateFishingFight(110, fish, rod, "Lure", true), fishing.calculateFishingFight(110, fish, rod, "Bait"));
+  const capped = fishing.calculatePoolSession({ ...settings, baseSkill: 140, allowEpicLures: true });
+  assert.equal(capped.skillGain, 0);
+  assert.ok(capped.catches[0] > 0);
+});
+
+test("daily bait counts landings and canceled bites but excludes no bites", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Carbon Fishing Rod");
+  const fish = { ...fishingSnapshot.fish["Black Eel"], skillCap: 100, ranking: 1, hookBonus: 80 };
+  const settings = { baseSkill: 100, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: [fish],
+    options: { city: false, hasItems: false, hasMobs: false, difficulty: 0 } };
+  const plain = fishing.calculatePoolSession(settings);
+  assert.ok(Math.abs(plain.baitNeeded - 200) < 1e-8);
+  assert.ok(plain.casts > plain.baitNeeded);
+  const crowded = { ...settings, fish: [fish, { ...fish, fish: "Canceled competitor" }],
+    excludedFish: ["Canceled competitor"], options: { ...settings.options, hasItems: true, hasMobs: true } };
+  const plan = fishing.calculatePoolSession(crowded);
+  const odds = fishing.calculateCastOdds(100, rod, crowded.fish, crowded.options);
+  const extraBait = plan.casts * (odds.targetPct[1] + odds.itemPct + odds.mobPct) / 100;
+  assert.ok(Math.abs(plan.baitNeeded - 200 - extraBait) < 1e-8);
+  assert.ok(Math.abs(plan.baitNeeded - plan.casts * (1 - odds.nothingPct / 100)) < 1e-8);
+  assert.equal(fishing.calculatePoolSession({ ...crowded, baitKind: "Lure" }).baitNeeded, 1);
+  assert.equal(fishing.calculatePoolSession({ ...settings, fish: [] }).baitNeeded, null);
+});
+
+test("daily bait counts natural snaps and breaks, but not pre-rolled escapes", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Bamboo Fishing Rod");
+  const fish = { ...fishingSnapshot.fish.Crayfish, skillCap: 140, hookBonus: 80 };
+  const settings = { baseSkill: 100, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: [fish],
+    options: { city: false, hasItems: true, hasMobs: true, difficulty: 0 } };
+  const plan = fishing.calculatePoolSession(settings);
+  assert.ok(plan.skillGain < 1);
+  assert.ok(Math.abs(plan.fatigueUsed - 20000) < 1e-8);
+  const risk = fishing.calculateRodRisk(100, fish, rod);
+  const odds = fishing.calculateCastOdds(100, rod, [fish], settings.options);
+  const escaped = plan.casts * odds.targetPct[0] / 100 * risk.escapePct / 100;
+  const snapped = plan.casts * odds.targetPct[0] / 100 * (1 - risk.escapePct / 100) * risk.snapPct / 100;
+  const broken = plan.casts * odds.targetPct[0] / 100 * (1 - risk.escapePct / 100) * (1 - risk.snapPct / 100) * risk.breakPct / 100;
+  const canceled = plan.casts * (odds.itemPct + odds.mobPct) / 100;
+  assert.ok(snapped > 0 && broken > 0 && escaped > 0);
+  assert.ok(Math.abs(plan.baitNeeded - plan.catches[0] - snapped - broken - canceled) < 1e-8);
+  assert.ok(Math.abs(plan.baitNeeded - plan.casts * (1 - odds.nothingPct / 100) + escaped) < 1e-8);
 });
 
 test("daily sessions stop at 20,000 fatigue for fish far above skill", () => {

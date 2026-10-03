@@ -68,7 +68,7 @@ export default function SnapSkillTab() {
   return <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 12, minWidth: 0 }}>
     <div style={styles.titleRow}>
       <h3 style={styles.h3}>Fatigue fishing</h3>
-      <span style={styles.sub}>Phoenix source estimate / 200 catches / 20,000 fatigue</span>
+      <span style={styles.sub}>Source estimate / 200 catches / 20,000 fatigue</span>
     </div>
     <CollapsibleSection kind="search">
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 12, padding: 12, border: "1px solid #333", borderRadius: 8 }}>
@@ -169,7 +169,7 @@ export default function SnapSkillTab() {
       <br />All pool fish are included; a feeling does not identify a species. Epic messages hide risk, so large-fish pools are excluded.
       <br />Natural snaps require a completed fight. Early-reel snaps and ordinary escapes spend fatigue without skill-ups; cancellations give no skill-ups. Both landings and natural snaps spend bait.
       <br />*Skill and pool conditions are held constant, with neutral time/moon/weather and the standard skill-up multiplier. Projected skill gain is not simulated progression. Recalculate after a skill or setup change; actual fatigue requires the full day history.
-      <br />Daily counters are manual and account-wide, with a Japanese-midnight reset. No automatic reset or game connection. Source: <a href={`${snapshot.source.repository}/tree/${snapshot.source.revision}`} target="_blank" rel="noreferrer">Phoenix {snapshot.source.revision.slice(0, 7)}</a>.
+      <br />Daily counters are manual and account-wide, with a Japanese-midnight reset. No automatic reset or game connection. Source: <a href={`${snapshot.source.repository}/tree/${snapshot.source.revision}`} target="_blank" rel="noreferrer">Revision {snapshot.source.revision.slice(0, 7)}</a>.
     </div>
   </section>;
 }
