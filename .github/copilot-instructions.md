@@ -35,6 +35,17 @@ The maintainer can edit this file to set ongoing Copilot project rules.
 - Do not describe source-specific behavior as universal across all servers.
   Keep relevant assumptions and live-server variation caveats.
 
+## README scope
+
+- Keep the README's app descriptions a general overview, not a detailed manual.
+- Use no more than one short, simple paragraph per tab, feature, or other app
+  section. Explain its purpose without listing every control, option, behavior,
+  calculation, or edge case.
+- When updating an existing overview, revise its paragraph rather than appending
+  detailed explanations, feature lists, or subsections.
+- Keep necessary installation, development, source provenance, licensing, and
+  attribution information separate from app overviews.
+
 ## Maintainer additions
 
 Add further project rules here as needed.

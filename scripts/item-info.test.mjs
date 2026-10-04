@@ -4,10 +4,136 @@ import { readFileSync, existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseSql, normalizeName, displayName } from "./lib/item-data.mjs";
 import { buildSync } from "esbuild";
+import { generateSourceItemDetails } from "./lib/source-item-details.mjs";
 
 const catalog = JSON.parse(readFileSync(new URL("../src/data/itemInfo.json", import.meta.url), "utf8"));
 const wiki = JSON.parse(readFileSync(new URL("../src/data/itemWiki.json", import.meta.url), "utf8"));
 const purification = JSON.parse(readFileSync(new URL("../src/data/purification.json", import.meta.url), "utf8"));
+const snapshot = JSON.parse(readFileSync(new URL("../src/data/phoenix.json", import.meta.url), "utf8"));
+
+test("binary spell job levels retain all bytes and reject malformed values", () => {
+  const jobs = "00002100000000000000000000000000000000230000";
+  const sql = `CREATE TABLE \`spells\` (\n \`id\` int,\n \`jobs\` binary(22)\n);\nINSERT INTO \`spells\` VALUES (135,0x${jobs});`;
+  assert.deepEqual(parseSql(sql, "spells"), [{ id: 135, jobs }]);
+  assert.throws(() => parseSql(sql.replace(jobs, "0021"), "spells"), /Invalid binary value/);
+});
+
+test("source metadata applies enabled SQL in load order and maps attachment inventory IDs", () => {
+  const sql = (table, row) => `CREATE TABLE \`${table}\` (\n${Object.keys(row).map(key => ` \`${key}\` ${key === "jobs" && table === "spell_list" ? "binary(22)" : "text"}`).join(",\n")}\n);\nINSERT INTO \`${table}\` VALUES (${Object.entries(row).map(([key, value]) => key === "jobs" && table === "spell_list" ? `0x${value}` : typeof value === "string" ? `'${value}'` : value).join(",")});`;
+  const basicRows = [
+    { itemid: 4743, subid: 0, name: "scroll_of_reraise" },
+    { itemid: 2239, subid: 8450, name: "tension_spring" },
+    { itemid: 15761, subid: 0, name: "chariot_band" },
+  ];
+  const sources = {
+    "sql/item_basic.sql": basicRows.map(row => sql("item_basic", row)).join("\n"),
+    "sql/item_equipment.sql": sql("item_equipment", { itemId: 12306, name: "kite_shield", level: 28, ilevel: 0, jobs: 193, slot: 2, shieldSize: 3 }),
+    "sql/item_usable.sql": sql("item_usable", { itemid: 15761, name: "chariot_band", maxCharges: 7, activation: 1, useDelay: 5, reuseDelay: 3600, aoe: 0 }),
+    "sql/item_puppet.sql": sql("item_puppet", { itemid: 8450, name: "tension_spring", slot: 3, element: 1 }),
+    "sql/spell_list.sql": sql("spell_list", { spellid: 135, name: "reraise", jobs: "00001900000000000000000000000000000000230000", mpCost: 150, castTime: 8000, recastTime: 60000 }),
+    "modules/init.txt": "phoenix/sql\nera/sql/wotg\nphoenix/lua\n# era/sql/toau\n",
+    "modules/phoenix/sql/items.sql": "UPDATE item_equipment SET jobs = 192 WHERE itemId = 12306; UPDATE item_usable SET reuseDelay = 57600 WHERE name = \"chariot_band\"; UPDATE spell_list SET castTime = 7000 WHERE name = 'reraise';",
+    "modules/era/sql/wotg/spells.sql": "UPDATE spell_list SET jobs = 0x00002100000000000000000000000000000000230000, castTime = 8000 WHERE name = 'Reraise'; UPDATE item_puppet SET element = 2 WHERE name = 'tension_spring';",
+    "modules/era/sql/toau/spells.sql": "UPDATE spell_list SET castTime = 999 WHERE name = 'reraise';",
+    "scripts/enum/magic.lua": "xi.magic.spell = {\n RERAISE = 135,\n}",
+    "scripts/items/scroll_of_reraise.lua": "target:addSpell(xi.magic.spell.RERAISE)",
+    "modules/phoenix/lua/items/era_items.lua": "local m=Module:new(); m:addOverride('xi.items.chariot_band.onItemUse',function(target) xi.itemUtils.addItemExpEffect(target,xi.effect.DEDICATION,75,5400,500) end)",
+  };
+  const inputs = {
+    source: file => { assert.ok(file in sources, file); return sources[file]; },
+    files: Object.keys(sources).reverse(),
+    spellFiles: ["scripts/items/scroll_of_reraise.lua"],
+    catalog: { items: Object.fromEntries([12306, 15761, 2239, 4743].map(id => [id, {}])) },
+  };
+  const { items, sqlOrder } = generateSourceItemDetails(inputs);
+  assert.deepEqual(sqlOrder, ["modules/phoenix/sql/items.sql", "modules/era/sql/wotg/spells.sql"]);
+  assert.equal(items[12306].equipment.jobs, 192);
+  assert.equal(items[15761].usable.reuseDelay, 57600);
+  assert.deepEqual(items[15761].expEffect, { bonus: 75, duration: 5400, cap: 500 });
+  assert.deepEqual(items[2239].puppet, { slot: 3, element: 2 });
+  assert.equal(items[8450], undefined);
+  assert.equal(items[4743].spell.jobs[2], 33);
+  assert.equal(items[4743].spell.jobs[19], 35);
+  assert.equal(items[4743].spell.castTime, 8000);
+  sources["modules/phoenix/sql/items.sql"] = "DELETE FROM item_equipment WHERE itemId = 12306;";
+  assert.throws(() => generateSourceItemDetails(inputs), /Unsupported metadata patch/);
+});
+
+test("pinned scroll statistics include all Reraise levels and overlapping era corrections", () => {
+  for (const [id, level, mp] of [[4743, 33, 150], [4749, 60, 175], [4750, 75, 200]]) {
+    const { spell } = snapshot.itemDetails[id];
+    assert.equal(spell.available, true);
+    assert.equal(spell.jobs[2], level);
+    assert.equal(spell.mpCost, mp);
+    assert.equal(spell.castTime, 8000);
+    assert.equal(spell.recastTime, 60000);
+  }
+  const spell = name => snapshot.itemDetails[catalog.names[normalizeName(name)]].spell;
+  assert.equal(spell("Scroll of Raise II").mpCost, 200);
+  assert.equal(spell("Scroll of Raise III").castTime, 20000);
+  assert.equal(spell("Scroll of Stone II").mpCost, 43);
+  assert.equal(spell("Scroll of Stone II").recastTime, 14500);
+  assert.equal(spell("Scroll of Flare").castTime, 19000, "SoA rollback follows RoV rollback");
+  assert.equal(spell("Scroll of Protectra").castTime, 3000);
+  assert.equal(spell("Scroll of Banishga").jobs[6], 0, "PLD access must be removed");
+  assert.deepEqual(spell("Scroll of Inundation"), { id: 879, available: false });
+  assert.equal(Object.values(snapshot.itemDetails).filter(item => item.spell).length, 369);
+  for (const [id, item] of Object.entries(snapshot.itemDetails)) {
+    assert.ok(catalog.items[id], `Unknown item ${id}`);
+    if (!item.spell?.available) continue;
+    assert.equal(item.spell.jobs.length, 22);
+    assert.ok(item.spell.jobs.every(level => Number.isInteger(level) && level >= 0 && level <= 255));
+    for (const key of ["mpCost", "castTime", "recastTime"]) assert.ok(Number.isInteger(item.spell[key]) && item.spell[key] >= 0);
+  }
+  for (const file of [...snapshot.source.itemDetailSqlOrder, "sql/spell_list.sql", "scripts/enum/magic.lua", "scripts/items/scroll_of_reraise.lua", "modules/phoenix/lua/items/era_items.lua"]) {
+    assert.match(snapshot.source.inputs[file], /^[a-f0-9]{64}$/);
+  }
+});
+
+test("shared catalog applies equipment, pet food, cooldown and EXP overrides without losing base stats", async () => {
+  const { outputFiles } = buildSync({ entryPoints: [fileURLToPath(new URL("../src/utils/phoenixData.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "esm" });
+  const { catalogData } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString("base64")}`);
+  for (const [id, changes] of Object.entries(snapshot.itemDetails)) {
+    for (const [key, value] of Object.entries(changes)) assert.deepEqual(catalogData.items[id][key], value, `${id}.${key}`);
+  }
+  assert.equal(catalogData.items[12306].equipment.jobs, 192);
+  assert.deepEqual(catalogData.items[12306].modifiers, catalog.items[12306].modifiers);
+  for (const id of [17016, 17017, 17018, 17019, 17020, 17021]) assert.equal(catalogData.items[id].equipment.level, 0);
+  for (const [id, jobs] of [[17318, 7665], [17336, 1153], [17343, 70688]]) assert.equal(catalogData.items[id].equipment.jobs, jobs);
+  assert.equal(catalogData.items[17040].usable.reuseDelay, 86400);
+  assert.equal(catalogData.items[17040].usable.useDelay, 30);
+  for (const [id, cap, duration] of [[15761, 500, 5400], [15762, 1000, 10800], [15763, 2000, 12600]]) {
+    assert.equal(catalogData.items[id].usable.reuseDelay, 57600);
+    assert.equal(catalogData.items[id].usable.useDelay, 15);
+    assert.equal(catalogData.items[id].expEffect.cap, cap);
+    assert.equal(catalogData.items[id].expEffect.duration, duration);
+  }
+});
+
+test("item details render corrected levels and keep retail text and images behind labeled disclosure", async () => {
+  const { outputFiles } = buildSync({
+    stdin: { contents: 'import React from "react"; import { renderToStaticMarkup } from "react-dom/server"; import ItemInfo from "./src/ItemInfo"; export const render = name => renderToStaticMarkup(<ItemInfo name={name} />);', resolveDir: process.cwd(), loader: "tsx" },
+    bundle: true, write: false, platform: "node", format: "cjs", loader: { ".css": "empty" }, define: { "import.meta.env.BASE_URL": '"/"' },
+  });
+  const { createRequire } = await import("node:module");
+  const module = { exports: {} };
+  new Function("require", "module", "exports", outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
+  for (const [name, level] of [["Reraise", 33], ["Reraise II", 60], ["Reraise III", 75]]) {
+    const html = module.exports.render(`Scroll of ${name}`);
+    const primary = html.replace(/<details\b[\s\S]*?<\/details>/g, "");
+    assert.match(primary, new RegExp(`WHM Lv\\. ${level}`));
+    assert.doesNotMatch(primary, /WHM Lv\. (25|56|70)\b/);
+    assert.match(html, /<details><summary[^>]*>Wiki statistics and notes \(may show later-retail values\)/);
+    assert.match(html, /Wiki tooltip image \(may show later-retail values\)/);
+    assert.doesNotMatch(html, /<details[^>]*\bopen\b/);
+    assert.match(primary, /pinned source overrides/);
+  }
+  const shield = module.exports.render("Kite Shield").replace(/<details\b[\s\S]*?<\/details>/g, "");
+  assert.match(shield, /PLD \/ DRK/);
+  assert.doesNotMatch(shield, /WAR/);
+  assert.match(module.exports.render("Warp Cudgel"), /24h/);
+  assert.match(module.exports.render("Scroll of Inundation"), /not defined in the pinned source snapshot/);
+});
 test("crystal family lists match bundled ToAU element assignments", () => {
   const data = JSON.parse(readFileSync(new URL("../src/data/crystalFamilies.json", import.meta.url), "utf8"));
   const bestiary = JSON.parse(readFileSync(new URL("../src/data/bestiary.json", import.meta.url), "utf8"));

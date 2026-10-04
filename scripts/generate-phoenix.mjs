@@ -5,6 +5,7 @@ import { DatabaseSync } from "node:sqlite";
 import { parse as parseYaml } from "yaml";
 import { parseSql } from "./lib/item-data.mjs";
 import { evaluateLuaData } from "./lib/lua-data.mjs";
+import { generateSourceItemDetails } from "./lib/source-item-details.mjs";
 
 const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/generate-phoenix.mjs <Phoenix checkout> [--check]");
@@ -20,6 +21,13 @@ const source = (file) => readSource(file, revision, inputs);
 const diggingInputs = {};
 const digSource = (file) => readSource(file, diggingRevision, diggingInputs);
 const catalog = JSON.parse(readFileSync("src/data/itemInfo.json", "utf8"));
+const gitLines = (...args) => execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).trim().split(/\r?\n/);
+const itemDetails = generateSourceItemDetails({
+  source,
+  files: gitLines("ls-tree", "-r", "--name-only", revision, "modules"),
+  spellFiles: gitLines("grep", "-l", "target:canLearnSpell(", revision, "--", "scripts/items").map(file => file.slice(revision.length + 1)),
+  catalog,
+});
 const fishing = Object.fromEntries(parseSql(source("sql/fishing_fish.sql"), "fishing_fish").map(row => [row.name, { skillCap: row.skill_level, item: Boolean(row.item), disabled: Boolean(row.disabled) }]));
 const basic = parseSql(source("sql/item_basic.sql"), "item_basic");
 const db = new DatabaseSync(":memory:");
@@ -197,7 +205,7 @@ const guildPoints = db.prepare("SELECT * FROM guild_item_points ORDER BY guildid
   return { guild, itemId: row.itemid, item, rank: row.rank, pattern: row.pattern, points: row.points, maxPoints: row.max_points };
 });
 db.close();
-const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, branch: "beta", eraScenario: "ToAU (pre-WotG)", guildPointSqlOrder, guildPointScenario: "Global cap rollback before item-specific era corrections; live Greedie cap confirmed at 1520 GP", inputs }, items, fishing, clamming, helm, helmZones, helmGear, valerianoOffers, guildNpcs: Object.keys(guilds).map(npc => npc.replaceAll("_", " ")).sort(), guildOffers, guildPoints, digging };
+const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, branch: "beta", eraScenario: "ToAU (pre-WotG)", itemDetailSqlOrder: itemDetails.sqlOrder, guildPointSqlOrder, guildPointScenario: "Global cap rollback before item-specific era corrections; live Greedie cap confirmed at 1520 GP", inputs }, items, itemDetails: itemDetails.items, fishing, clamming, helm, helmZones, helmGear, valerianoOffers, guildNpcs: Object.keys(guilds).map(npc => npc.replaceAll("_", " ")).sort(), guildOffers, guildPoints, digging };
 const filename = "src/data/phoenix.json";
 const text = JSON.stringify(output) + "\n";
 if (process.argv.includes("--check")) { if (readFileSync(filename, "utf8") !== text) throw new Error("Phoenix snapshot differs; regenerate explicitly"); }

@@ -12,6 +12,7 @@ export function parseSql(sql, table) {
   const schema = sql.match(new RegExp('CREATE TABLE (?:IF NOT EXISTS )?`' + table + '` \\(([\\s\\S]*?)\\n\\)'));
   if (!schema) throw new Error(`Missing schema: ${table}`);
   const columns = [...schema[1].matchAll(/^\s*`([^`]+)`/gm)].map((match) => match[1]);
+  const binaryColumns = new Map([...schema[1].matchAll(/^\s*`([^`]+)`\s+binary\((\d+)\)/gm)].map((match) => [match[1], Number(match[2])]));
   const rows = [];
   for (const match of sql.matchAll(new RegExp('^INSERT INTO `' + table + '` VALUES \\((.*)\\);', 'gm'))) {
     const fields = [];
@@ -21,7 +22,9 @@ export function parseSql(sql, table) {
     const push = () => {
       const value = current.trim();
       const number = (token) => variables.has(token.trim()) ? variables.get(token.trim()) : Number(token.trim());
-      fields.push(wasQuoted ? current : value === "NULL" ? null : value.includes("|") ? value.split("|").reduce((total, token) => Number.isFinite(total) && Number.isFinite(number(token)) ? total | number(token) : NaN, 0) : number(value));
+      const binaryLength = binaryColumns.get(columns[fields.length]);
+      if (binaryLength && !new RegExp(`^0x[\\da-f]{${binaryLength * 2}}$`, "i").test(value)) throw new Error(`Invalid binary value in ${table}: ${value}`);
+      fields.push(binaryLength ? value.slice(2).toLowerCase() : wasQuoted ? current : value === "NULL" ? null : value.includes("|") ? value.split("|").reduce((total, token) => Number.isFinite(total) && Number.isFinite(number(token)) ? total | number(token) : NaN, 0) : number(value));
       current = "";
       wasQuoted = false;
     };
