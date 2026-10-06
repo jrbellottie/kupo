@@ -21,6 +21,7 @@ const fish = Object.fromEntries(fishRows.map(row => [row.name, {
   fish: row.name, skillCap: row.skill_level, ranking: row.ranking,
   size: row.size_type ? "L" : "S", legendary: Boolean(row.legendary),
   rarity: row.rarity / 1000, shellfish: Boolean(row.flags & 1), item: Boolean(row.item),
+  moonPattern: row.moon_pattern,
   disabled: Boolean(row.disabled), requiredKeyItem: row.required_keyitem,
   questRestricted: Boolean(row.quest_only || row.quest < 255),
   restricted: Boolean(row.disabled || row.quest_only || row.required_keyitem || row.quest < 255),
@@ -56,6 +57,7 @@ const ranks = new Map(db.prepare("SELECT * FROM fishing_rod").all().map(row => [
 const rods = JSON.parse(readFileSync("src/data/rods.json", "utf8")).map(rod => ({ ...rod, maxRank: ranks.get(rod.rod) ?? rod.maxRank }));
 db.close();
 source("src/map/utils/fishingutils.cpp");
+source("src/map/utils/fishingutils.h");
 source("modules/temp_patch/phoenix-fishing.patch");
 const rewardSource = source("scripts/quests/otherAreas/Inside_the_Belly.lua");
 const rewardStart = rewardSource.indexOf("local fishRewards");

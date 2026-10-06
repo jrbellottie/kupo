@@ -9,6 +9,7 @@ import { formatGuildPointCap, getGuildPointItemsToCap } from "./utils/guildPoint
 import BaitTab from "./BaitTab";
 import RodsTab from "./RodsTab";
 import SnapSkillTab from "./SnapSkillTab";
+import { type Calibration } from "./vanadiel";
 
 const FISH_VIEWS = [
   { id: "fish", label: "Fish list" },
@@ -21,7 +22,7 @@ const FISH_VIEWS = [
 ] as const;
 type FishView = typeof FISH_VIEWS[number]["id"];
 
-export default function FishTab() {
+export default function FishTab({ cal }: { cal: Calibration }) {
   const [view, setView] = useState<FishView>(() => {
     const activeTab = loadJson<string>("ffxi_active_tab_v1", "fish");
     const saved = activeTab === "bait"
@@ -56,9 +57,9 @@ export default function FishTab() {
       </CollapsibleSection>
       <div role="tabpanel" id={`fish-panel-${view}`} aria-labelledby={`fish-tab-${view}`} style={{ minWidth: 0 }}>
         {view === "fish" ? <FishList />
-          : view === "snap" ? <SnapSkillTab />
+          : view === "snap" ? <SnapSkillTab cal={cal} />
           : view === "matrix" || view === "rods" ? <RodsTab mode={view} />
-            : <BaitTab mode={view} onModeChange={setView} />}
+            : <BaitTab cal={cal} mode={view} onModeChange={setView} />}
       </div>
     </div>
   );

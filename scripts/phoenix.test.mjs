@@ -21,6 +21,10 @@ test("app copy uses neutral server wording, including tooltips, accessible label
       function visit(node) {
         if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) return;
         if (ts.isStringLiteralLike(node) || ts.isJsxText(node) || ts.isTemplateHead(node) || ts.isTemplateMiddle(node) || ts.isTemplateTail(node)) {
+          const provenanceLink = ts.isStringLiteralLike(node) && ts.isJsxAttribute(node.parent)
+            && node.parent.name.getText(source) === "href" && /^https:\/\/wiki\.phoenix-xi\.com\//.test(node.text);
+          const sourcePath = ts.isStringLiteralLike(node) && /^modules\/phoenix\/[\w/.-]+\.lua$/.test(node.text);
+          if (provenanceLink || sourcePath) return;
           const text = node.text.replace(/\bphoenix[ _](?:feather|pearl|armlet|perch[ _]inn)\b/gi, "");
           if (/\b(?:phoenix|pheonix|phenix)\b/i.test(text)) {
             const { line } = source.getLineAndCharacterOfPosition(node.getStart(source));

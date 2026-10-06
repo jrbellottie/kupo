@@ -1,0 +1,1211 @@
+{
+  "source": {
+    "repository": "https://github.com/phoenixffxi/Phoenix",
+    "revision": "9b93232a0cc1e4a5a50b0f988f37d7ae63b8fcfa",
+    "checkedOn": "2026-10-05",
+    "license": "GPL-3.0",
+    "licenseUrl": "https://github.com/phoenixffxi/Phoenix/blob/9b93232a0cc1e4a5a50b0f988f37d7ae63b8fcfa/LICENSE",
+    "attribution": "Mechanics and numeric tables researched from the source fork and LandSandBoat contributors; explanatory text is independently written.",
+    "inputs": {
+      "scripts/enum/item.lua": "9c795c78c48a1a922db358818127aac193f4e96f1ddbdceddde035f53f13b90b",
+      "data/enums/zone.yaml": "7d0771aeb78514294ab1d4a393436413ca8d9241e41f289a16fa8e3c4bf28688",
+      "scripts/globals/hobbies/chocobo_raising/settings.lua": "be0d0d28f3873873463f4a6758447d2f7e93e767418dc8a436db1155a290432f",
+      "scripts/enum/chocobo_raising.lua": "73d5de977819b9e14a90f09110af3826cd5fb7a3bc405543b04d5fa08b81a78e",
+      "scripts/globals/hobbies/chocobo_raising/constants.lua": "af4f5deb9444b0985a3d997acbf8f414c1511545336c76a949b0489b6fa9364f",
+      "modules/init.txt": "288da9c52a3c9969904628f6e7a7c87024c999a2226865d740945a432b881c58",
+      "scripts/globals/hobbies/chocobo_raising/walks.lua": "436f5c28328e63aefedf6664f05758f7c17442c03c4884a852164e68627c85ad",
+      "scripts/globals/hobbies/chocobo_raising/breeding.lua": "093ecd4952781a0f1192ae214abf10c1ed0a56c731047ea8d6347f2556a4b1f9",
+      "scripts/globals/hobbies/chocobo_raising/care_plan.lua": "78ea38139abf1530f9168f9e33eaafadf2ab7defcd45de040e0c690cb6042c56",
+      "scripts/globals/hobbies/chocobo_raising/model.lua": "da1afc125defa9c46ffaea277539ff278f92c5db7423c8a6ed2c3314748162ff",
+      "scripts/globals/hobbies/chocobo_raising/event_vm.lua": "7868a2b2b0349cc168f30125ece4cefd7f84dd3f68f6758f4944c40dbd136d7e",
+      "scripts/globals/hobbies/chocobo_raising/event_playout.lua": "2f5fdbcb0c33617fb8fda982da1ae5ae022fd0be431005b7a0ad9e4e85d1c3a4",
+      "scripts/globals/hobbies/chocobo_raising/choco_data.lua": "b942e6af62c93d8ffc377c249014ae4ebe2d0625ace446eded5c9c5dc781e1a3",
+      "scripts/globals/hobbies/chocobo_raising/whistle.lua": "46fd5cb6dd71df3613fc4798558ead54ffa2875f08aefc365cb24d82925fd5bc",
+      "scripts/globals/hobbies/chocobo_raising/retirement.lua": "e5b193a0658e5745855bd1101144696adcdfc3cd34faaa18335bf0aafa6fe452",
+      "scripts/globals/hobbies/chocobo_raising/README.md": "ae32320904a6eb9ab7b86c78ea3d3a03f4aa6f758e60ee3fdac95d5fadf5dcc4",
+      "modules/custom/lua/chocobo_raising_qol.lua": "efcef2a868ff78c32e909327882b4066f6858dbd2a288985cade42bc4f8e5a8b",
+      "settings/default/main.lua": "b06b5cea808361eaebad7aa0fa0438a2fcf60f6b75c43106cc162c93d40e9d4b",
+      "modules/phoenix/lua/globals/hobbies/chocobo_digging/pxi_digging_logic.lua": "4eeb0a0b0f08047362753340373d3d91d99b48930aa8e25c7e96c2155e150dd9",
+      "scripts/quests/hiddenQuests/Chocobo_Whistle.lua": "b901dcd87dacd743d4729e2ef9a4972ebb45a3d30e4beab46b9bced49e7b271a",
+      "scripts/quests/jeuno/Chocobo_on_the_Loose.lua": "f947757f890e5ec2b7c91fa83d5a9d7bb286deac6846fa3fd68589b0981dec78",
+      "scripts/zones/RuLude_Gardens/npcs/Dabih_Jajalioh.lua": "e4ce0b1cc0c7557573da4ac4f4d6e6df08b75055d3e7d1bd0a5ca972f74ae7a1",
+      "LICENSE": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    "wiki": "https://www.bg-wiki.com/ffxi/Category:Chocobo_Raising",
+    "caveat": "Public source snapshot, not verification of live-server settings. Several source formulas are explicitly estimates of retail behavior."
+  },
+  "settings": {
+    "dayLength": 86400,
+    "daysToChick": 4,
+    "daysToAdolescent": 19,
+    "daysToAdult1": 29,
+    "daysToAdult2": 43,
+    "daysToAdult3": 64,
+    "daysToAdult4": 129,
+    "statPositiveMultiplier": 1,
+    "statNegativeMultiplier": 1,
+    "gilMultiplier": 1,
+    "disableRetirement": false,
+    "statGrowthCap": 640,
+    "ridingSpeedBase": 80,
+    "ridingSpeedPerRank": 2.5,
+    "ridingSpeedCap": 100,
+    "ridingTimeBase": 17,
+    "ridingTimePerRank": 4,
+    "ridingTimeCap": 45
+  },
+  "foods": [
+    {
+      "id": 5606,
+      "name": "Azouph Greens",
+      "category": "Food",
+      "fullness": 128,
+      "affection": 72,
+      "cures": [],
+      "chick": {
+        "fullness": 128,
+        "affection": 72,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [
+          "discernment",
+          "receptivity"
+        ],
+        "chance": 15,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2343,
+      "name": "Bag of La Theine Millet",
+      "category": "Food",
+      "fullness": 32,
+      "affection": 0,
+      "cures": [],
+      "chick": {
+        "fullness": 32,
+        "affection": 0,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2211,
+      "name": "Ball of Carrot Paste",
+      "category": "Food",
+      "fullness": 64,
+      "affection": 72,
+      "cures": [],
+      "chick": {
+        "fullness": 160,
+        "affection": 24,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [
+          "strength",
+          "endurance",
+          "discernment",
+          "receptivity"
+        ],
+        "chance": 100,
+        "eitherWay": true
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2208,
+      "name": "Ball of Herb Paste",
+      "category": "Food",
+      "fullness": 32,
+      "affection": -48,
+      "cures": [],
+      "chick": {
+        "fullness": 64,
+        "affection": 48,
+        "cures": [
+          "stomachache",
+          "sick",
+          "very ill",
+          "injured"
+        ]
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2210,
+      "name": "Ball of Vegetable Paste",
+      "category": "Food",
+      "fullness": 32,
+      "affection": 0,
+      "cures": [],
+      "chick": {
+        "fullness": 64,
+        "affection": 48,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2209,
+      "name": "Ball of Worm Paste",
+      "category": "Food",
+      "fullness": 32,
+      "affection": 0,
+      "cures": [],
+      "chick": {
+        "fullness": 128,
+        "affection": 72,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2568,
+      "name": "Bowl of Lethe Consomme",
+      "category": "Training",
+      "fullness": 64,
+      "affection": 24,
+      "cures": [],
+      "chick": {
+        "fullness": 64,
+        "affection": 24,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": true
+    },
+    {
+      "id": 2569,
+      "name": "Bowl of Lethe Potage",
+      "category": "Training",
+      "fullness": 64,
+      "affection": 24,
+      "cures": [],
+      "chick": {
+        "fullness": 64,
+        "affection": 24,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": true
+    },
+    {
+      "id": 4545,
+      "name": "Bunch of Gysahl Greens",
+      "category": "Food",
+      "fullness": 96,
+      "affection": 48,
+      "cures": [],
+      "chick": {
+        "fullness": 96,
+        "affection": 48,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2207,
+      "name": "Celerity Salad",
+      "category": "Medicine",
+      "fullness": 96,
+      "affection": 0,
+      "cures": [
+        "injured",
+        "sick",
+        "stomachache",
+        "lonely",
+        "very ill",
+        "bored",
+        "spoiled",
+        "lovesick"
+      ],
+      "chick": {
+        "fullness": 96,
+        "affection": 0,
+        "cures": [
+          "injured",
+          "sick",
+          "stomachache",
+          "lonely",
+          "very ill",
+          "bored",
+          "spoiled",
+          "lovesick"
+        ]
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2206,
+      "name": "Chocolixir",
+      "category": "Energy",
+      "fullness": 128,
+      "affection": 0,
+      "cures": [],
+      "chick": {
+        "fullness": 128,
+        "affection": 0,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 100,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2197,
+      "name": "Chocotonic",
+      "category": "Medicine",
+      "fullness": 32,
+      "affection": -48,
+      "cures": [],
+      "chick": {
+        "fullness": 32,
+        "affection": -48,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": true,
+      "alone": true,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 534,
+      "name": "Clump of Gausebit Wildgrass",
+      "category": "Medicine",
+      "fullness": 64,
+      "affection": 24,
+      "cures": [
+        "injured"
+      ],
+      "chick": {
+        "fullness": 64,
+        "affection": 24,
+        "cures": [
+          "injured"
+        ]
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2201,
+      "name": "Clump of Tokopekko Wildgrass",
+      "category": "Medicine",
+      "fullness": 64,
+      "affection": 24,
+      "cures": [
+        "sick",
+        "very ill"
+      ],
+      "chick": {
+        "fullness": 64,
+        "affection": 24,
+        "cures": [
+          "sick",
+          "very ill"
+        ]
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2203,
+      "name": "Cupid Worm",
+      "category": "Training",
+      "fullness": 96,
+      "affection": 120,
+      "cures": [],
+      "chick": {
+        "fullness": 96,
+        "affection": 120,
+        "cures": []
+      },
+      "stats": {
+        "strength": -2,
+        "endurance": -2,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2202,
+      "name": "Garidav Wildgrass",
+      "category": "Medicine",
+      "fullness": 64,
+      "affection": 24,
+      "cures": [
+        "stomachache"
+      ],
+      "chick": {
+        "fullness": 64,
+        "affection": 24,
+        "cures": [
+          "stomachache"
+        ]
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2205,
+      "name": "Gregarious Worm",
+      "category": "Training",
+      "fullness": 160,
+      "affection": 0,
+      "cures": [],
+      "chick": {
+        "fullness": 160,
+        "affection": 0,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": -2,
+        "receptivity": -2
+      },
+      "energy": 20,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2345,
+      "name": "Hi-Chocolixir",
+      "category": "Energy",
+      "fullness": 96,
+      "affection": 0,
+      "cures": [],
+      "chick": {
+        "fullness": 96,
+        "affection": 0,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 100,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2204,
+      "name": "Parasite Worm",
+      "category": "Training",
+      "fullness": 64,
+      "affection": 0,
+      "cures": [],
+      "chick": {
+        "fullness": 64,
+        "affection": 0,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": true,
+      "forgetsAbility": false
+    },
+    {
+      "id": 4389,
+      "name": "San Dorian Carrot",
+      "category": "Training",
+      "fullness": 96,
+      "affection": 24,
+      "cures": [],
+      "chick": {
+        "fullness": 96,
+        "affection": 24,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [
+          "strength",
+          "endurance",
+          "discernment",
+          "receptivity"
+        ],
+        "chance": 15,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 5605,
+      "name": "Sharug Greens",
+      "category": "Food",
+      "fullness": 64,
+      "affection": 24,
+      "cures": [],
+      "chick": {
+        "fullness": 64,
+        "affection": 24,
+        "cures": []
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [
+          "strength",
+          "endurance"
+        ],
+        "chance": 15,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 2346,
+      "name": "Tornado Salad",
+      "category": "Medicine",
+      "fullness": 96,
+      "affection": 0,
+      "cures": [
+        "injured",
+        "sick",
+        "stomachache",
+        "lonely",
+        "very ill",
+        "bored",
+        "spoiled",
+        "lovesick"
+      ],
+      "chick": {
+        "fullness": 96,
+        "affection": 0,
+        "cures": [
+          "injured",
+          "sick",
+          "stomachache",
+          "lonely",
+          "very ill",
+          "bored",
+          "spoiled",
+          "lovesick"
+        ]
+      },
+      "stats": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 5607,
+      "name": "Vomp Carrot",
+      "category": "Training",
+      "fullness": 64,
+      "affection": 24,
+      "cures": [],
+      "chick": {
+        "fullness": 64,
+        "affection": 24,
+        "cures": []
+      },
+      "stats": {
+        "strength": 2,
+        "endurance": 2,
+        "discernment": -2,
+        "receptivity": -2
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    },
+    {
+      "id": 5608,
+      "name": "Zegham Carrot",
+      "category": "Training",
+      "fullness": 96,
+      "affection": 24,
+      "cures": [],
+      "chick": {
+        "fullness": 96,
+        "affection": 24,
+        "cures": []
+      },
+      "stats": {
+        "strength": -2,
+        "endurance": -2,
+        "discernment": 2,
+        "receptivity": 2
+      },
+      "energy": 0,
+      "random": {
+        "fields": [],
+        "chance": 0,
+        "eitherWay": false
+      },
+      "wakes": false,
+      "alone": false,
+      "rerollGene": false,
+      "forgetsAbility": false
+    }
+  ],
+  "plans": [
+    {
+      "id": 0,
+      "name": "Basic Care",
+      "stage": "Egg",
+      "arrows": {
+        "strength": 1,
+        "endurance": 1,
+        "discernment": 1,
+        "receptivity": 1
+      },
+      "affection": -2,
+      "energy": 2,
+      "poorEnergy": 0,
+      "difficulty": 1,
+      "successStats": [
+        "affection"
+      ],
+      "pay": []
+    },
+    {
+      "id": 1,
+      "name": "Rest",
+      "stage": "Chick",
+      "arrows": {
+        "strength": 0,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 0
+      },
+      "affection": 2,
+      "energy": 0,
+      "poorEnergy": 0,
+      "difficulty": 1,
+      "successStats": [
+        "endurance"
+      ],
+      "pay": []
+    },
+    {
+      "id": 2,
+      "name": "Take a Walk",
+      "stage": "Chick",
+      "arrows": {
+        "strength": 2,
+        "endurance": 2,
+        "discernment": -1,
+        "receptivity": -1
+      },
+      "affection": -4,
+      "energy": 3,
+      "poorEnergy": 0,
+      "difficulty": 2,
+      "successStats": [
+        "strength",
+        "endurance"
+      ],
+      "pay": []
+    },
+    {
+      "id": 3,
+      "name": "Listen to Music",
+      "stage": "Chick",
+      "arrows": {
+        "strength": -1,
+        "endurance": -1,
+        "discernment": 2,
+        "receptivity": 2
+      },
+      "affection": -4,
+      "energy": 3,
+      "poorEnergy": 0,
+      "difficulty": 2,
+      "successStats": [
+        "discernment",
+        "receptivity"
+      ],
+      "pay": []
+    },
+    {
+      "id": 4,
+      "name": "Exercise Alone",
+      "stage": "Adolescent",
+      "arrows": {
+        "strength": 2,
+        "endurance": 0,
+        "discernment": -2,
+        "receptivity": -1
+      },
+      "affection": -6,
+      "energy": 4,
+      "poorEnergy": 0,
+      "difficulty": 2,
+      "successStats": [
+        "strength"
+      ],
+      "pay": []
+    },
+    {
+      "id": 5,
+      "name": "Exercise in a Group",
+      "stage": "Adolescent",
+      "arrows": {
+        "strength": 0,
+        "endurance": 2,
+        "discernment": -1,
+        "receptivity": -2
+      },
+      "affection": -6,
+      "energy": 4,
+      "poorEnergy": 0,
+      "difficulty": 3,
+      "successStats": [
+        "endurance"
+      ],
+      "pay": []
+    },
+    {
+      "id": 6,
+      "name": "Interact with Children",
+      "stage": "Adolescent",
+      "arrows": {
+        "strength": -2,
+        "endurance": -1,
+        "discernment": 2,
+        "receptivity": 0
+      },
+      "affection": -6,
+      "energy": 4,
+      "poorEnergy": 0,
+      "difficulty": 2,
+      "successStats": [
+        "discernment"
+      ],
+      "pay": []
+    },
+    {
+      "id": 7,
+      "name": "Interact with Chocobos",
+      "stage": "Adolescent",
+      "arrows": {
+        "strength": -1,
+        "endurance": -2,
+        "discernment": 0,
+        "receptivity": 2
+      },
+      "affection": -6,
+      "energy": 4,
+      "poorEnergy": 0,
+      "difficulty": 3,
+      "successStats": [
+        "receptivity"
+      ],
+      "pay": []
+    },
+    {
+      "id": 8,
+      "name": "Carry Packages",
+      "stage": "Adolescent",
+      "arrows": {
+        "strength": 3,
+        "endurance": 3,
+        "discernment": -3,
+        "receptivity": -3
+      },
+      "affection": -6,
+      "energy": 13,
+      "poorEnergy": 3,
+      "difficulty": 4,
+      "successStats": [
+        "endurance",
+        "strength"
+      ],
+      "pay": [
+        200,
+        100
+      ]
+    },
+    {
+      "id": 9,
+      "name": "Exhibit to the Public",
+      "stage": "Adolescent",
+      "arrows": {
+        "strength": -3,
+        "endurance": -3,
+        "discernment": 3,
+        "receptivity": 3
+      },
+      "affection": -8,
+      "energy": 13,
+      "poorEnergy": 3,
+      "difficulty": 4,
+      "successStats": [
+        "discernment",
+        "receptivity"
+      ],
+      "pay": [
+        200,
+        100
+      ]
+    },
+    {
+      "id": 10,
+      "name": "Deliver Messages",
+      "stage": "Adult",
+      "arrows": {
+        "strength": 4,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": -3
+      },
+      "affection": -10,
+      "energy": 26,
+      "poorEnergy": 6,
+      "difficulty": 5,
+      "successStats": [
+        "strength",
+        "discernment"
+      ],
+      "pay": [
+        400,
+        200
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Dig for Treasure",
+      "stage": "Adult",
+      "arrows": {
+        "strength": 0,
+        "endurance": -3,
+        "discernment": 4,
+        "receptivity": 0
+      },
+      "affection": -10,
+      "energy": 26,
+      "poorEnergy": 6,
+      "difficulty": 5,
+      "successStats": [
+        "discernment",
+        "strength"
+      ],
+      "pay": [
+        400,
+        200
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Act in a Play",
+      "stage": "Adult",
+      "arrows": {
+        "strength": -3,
+        "endurance": 0,
+        "discernment": 0,
+        "receptivity": 4
+      },
+      "affection": -10,
+      "energy": 26,
+      "poorEnergy": 6,
+      "difficulty": 5,
+      "successStats": [
+        "receptivity",
+        "discernment"
+      ],
+      "pay": [
+        400,
+        200
+      ]
+    }
+  ],
+  "abilities": [
+    {
+      "name": "Gallop",
+      "discernment": 64
+    },
+    {
+      "name": "Canter",
+      "discernment": 96
+    },
+    {
+      "name": "Burrow",
+      "discernment": 64
+    },
+    {
+      "name": "Bore",
+      "discernment": 160
+    },
+    {
+      "name": "Auto-Regen",
+      "discernment": 64
+    },
+    {
+      "name": "Treasure Finder",
+      "discernment": 64
+    }
+  ],
+  "learnChance": 25,
+  "eggColorOdds": [
+    {
+      "id": 2312,
+      "name": "Faintly warm",
+      "yellow": 95,
+      "black": 3,
+      "blue": 1,
+      "red": 0.5,
+      "green": 0.5
+    },
+    {
+      "id": 2314,
+      "name": "Slightly warm",
+      "yellow": 85,
+      "black": 5,
+      "blue": 3.4,
+      "red": 3.3,
+      "green": 3.3
+    },
+    {
+      "id": 2317,
+      "name": "A bit warm",
+      "yellow": 75,
+      "black": 10,
+      "blue": 5,
+      "red": 5,
+      "green": 5
+    },
+    {
+      "id": 2318,
+      "name": "A little warm",
+      "yellow": 32,
+      "black": 18,
+      "blue": 18,
+      "red": 16,
+      "green": 16
+    },
+    {
+      "id": 2319,
+      "name": "Somewhat warm",
+      "yellow": 12,
+      "black": 22,
+      "blue": 22,
+      "red": 22,
+      "green": 22
+    }
+  ],
+  "foodStatPoints": 2,
+  "planStatPoints": [
+    2,
+    3
+  ],
+  "forcedFeedIllnessChance": 10,
+  "actionEnergy": {
+    "42": {
+      "1": 24,
+      "2": 30
+    },
+    "43": {
+      "1": 32,
+      "2": 40
+    },
+    "44": {
+      "1": 38,
+      "2": 48
+    },
+    "48": {
+      "1": 3,
+      "2": 4
+    },
+    "50": {
+      "1": 11,
+      "2": 14
+    },
+    "51": {
+      "1": 16,
+      "2": 20
+    },
+    "52": {
+      "1": 27,
+      "2": 34
+    }
+  },
+  "feeding": {
+    "initialAffection": 255,
+    "chickHungerPerEnergy": 2.25
+  }
+}

@@ -32,6 +32,17 @@ export type DigDistribution = {
   successChance: number;
   expectedExperience: number;
 };
+export const DIG_CATEGORIES = ["Normal", "Night", "Weather", "Elemental ore", "Bore", "Burrow", "Treasure"] as const;
+export type DigCategory = typeof DIG_CATEGORIES[number];
+export type DigCatalogReward = Omit<DigReward, "share" | "perAttempt" | "experience"> & {
+  key: string;
+  category: DigCategory;
+  status: "active" | "inactive" | "reference";
+  share: number | null;
+  perAttempt: number | null;
+  experience: number | null;
+  rateConditions?: DigConditions;
+};
 
 export function nextDigReset(nowMs: number): number {
   const dayMs = 86_400_000;
@@ -100,4 +111,68 @@ export function diggingEstimate(distribution: DigDistribution, greensCost: numbe
   const attempts = DIG_DAILY_CAP / distribution.successChance;
   const gross = distribution.rewards.reduce((sum, entry) => sum + entry.perAttempt * price(entry.item), 0) * attempts;
   return { attempts, greens: Math.ceil(attempts), net: gross - attempts * greensCost, experience: distribution.expectedExperience * attempts };
+}
+
+export function diggingCatalog(zone: string, conditions: DigConditions, includeConditional = false) {
+  const distribution = diggingDistribution(zone, conditions);
+  const oreCondition = (day: string) => `${day}; Journeyman (50+); waxing moon 6-21%; active weather (including fog)`;
+  const rows: DigCatalogReward[] = distribution.rewards.map(entry => {
+    const category: DigCategory = entry.condition === "Always" ? "Normal"
+      : entry.condition.startsWith("Night") ? "Night"
+        : entry.condition.includes("waxing") ? "Elemental ore" : "Weather";
+    return {
+      ...entry, key: `${zone}:${category}:${entry.itemId}`, category, status: "active",
+      condition: category === "Elemental ore" ? oreCondition(conditions.day) : entry.condition,
+    };
+  });
+  if (!includeConditional) return { distribution, rows };
+  const keys = new Set(rows.map(entry => entry.key));
+  const add = (entry: Pick<DigReward, "itemId" | "item" | "condition">, category: DigCategory, status: "inactive" | "reference", rateConditions?: DigConditions) => {
+    const key = `${zone}:${category}:${entry.itemId}`;
+    if (keys.has(key)) return;
+    keys.add(key);
+    const estimate = rateConditions ? diggingDistribution(zone, rateConditions).rewards.find(reward => reward.itemId === entry.itemId) : undefined;
+    rows.push({
+      ...entry, zone, key, category, status, weight: estimate?.weight ?? 0, experience: null,
+      share: estimate?.share ?? null, perAttempt: estimate?.perAttempt ?? null,
+      rateConditions: estimate ? rateConditions : undefined,
+    });
+  };
+  for (const entry of DIGGING.entries.filter(entry => entry.zone === zone)) {
+    add({
+      ...entry, condition: entry.nightOnly ? "Night (20:00-04:00)" : "Rank with a nonzero item weight",
+    }, entry.nightOnly ? "Night" : "Normal", "inactive", entry.nightOnly ? { ...conditions, hour: 20 } : conditions);
+  }
+  for (const weather of DIGGING.weather) {
+    if (weather.itemId !== null && weather.item !== null) {
+      add({ itemId: weather.itemId, item: weather.item, condition: weather.name }, "Weather", "inactive", { ...conditions, weather: weather.id });
+    }
+  }
+  if (ORE_ZONES.includes(zone)) {
+    for (const [day, ore] of Object.entries(DIG_DAY_ITEMS)) {
+      add({ ...ore, condition: oreCondition(day) }, "Elemental ore", "inactive", {
+        ...conditions, day: day as keyof typeof DIG_DAY_ITEMS, waxing: true, moonPercent: 6,
+        weather: ORE_WEATHER_IDS.includes(conditions.weather) ? conditions.weather : ORE_WEATHER_IDS[0],
+      });
+    }
+  }
+  for (const entry of DIGGING.referenceLayers.filter(entry => entry.zone === zone)) {
+    const category = entry.layer;
+    if (category !== "Bore" && category !== "Burrow" && category !== "Treasure") {
+      throw new Error(`Unknown digging reference layer: ${category}`);
+    }
+    const requirement = category === "Treasure" ? "Base treasure layer (not the Treasure Finder ability)"
+      : `Registered personal chocobo with ${category}`;
+    add({
+      ...entry,
+      condition: `${requirement}; ${DIG_RANKS[entry.minimumRank]} (${entry.minimumRank * 10}+) in base source. Not applied by the pinned override; live availability unverified.`,
+    }, category, "reference");
+  }
+  return { distribution, rows };
+}
+
+export function matchesDiggingSearch(entry: DigCatalogReward, query: string) {
+  const search = query.trim().toLowerCase();
+  return entry.item.toLowerCase().includes(search)
+    || ` ${entry.category} ${entry.condition}`.toLowerCase().includes(` ${search}`);
 }

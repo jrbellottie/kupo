@@ -28,6 +28,8 @@ export type TransportTimer = BaseTimer & {
   kind: "TRANSPORT";
   departureMinutes: number[];
   arrivalMinutes?: number[];
+  departurePort?: string;
+  arrivalPort?: string;
   offsetHours: number;
 };
 

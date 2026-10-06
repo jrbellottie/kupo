@@ -5,7 +5,8 @@ import { styles } from "./styles";
 import snapshot from "./data/fishingPlanner.json";
 import { baitData, fishData } from "./utils/phoenixData";
 import { loadJson, saveJson } from "./utils/storage";
-import { calculateCastOdds, calculateSnapPlan, calculateSnapTime, calculateSnapBait, formatCatchTime, fishingFatigue, isCityFishingZone, type HookFish, type SkillupRod } from "./utils/fishingSkillup";
+import { calculateCastOdds, calculateSnapPlan, calculateSnapTime, calculateSnapBait, formatCatchTime, fishingFatigue, isCityFishingZone, getFishingMoonPhase, type HookFish, type SkillupRod } from "./utils/fishingSkillup";
+import { type Calibration, getVanaNow, moonDirectionFromStep } from "./vanadiel";
 
 const normalize = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "");
 const fishCatalog = snapshot.fish as Record<string, Omit<HookFish, "hookBonus"> & { restricted: boolean }>;
@@ -29,9 +30,14 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   return <label style={{ display: "grid", gap: 6, minWidth: 0, fontSize: 13 }}>{label}{children}</label>;
 }
 
-export default function SnapSkillTab() {
+export default function SnapSkillTab({ cal }: { cal: Calibration }) {
   const [settings, setSettings] = useState<Settings>(() => ({ ...defaults, ...loadJson<Partial<Settings>>("ffxi_snap_skill_v1", {}) }));
   const [recordFish, setRecordFish] = useState("");
+  const [moonSnapshot, setMoonSnapshot] = useState(() => getVanaNow(Date.now(), cal));
+  useEffect(() => {
+    setMoonSnapshot(getVanaNow(Date.now(), cal));
+  }, [cal]);
+  const moonPhase = getFishingMoonPhase(moonSnapshot.moonStep);
   useEffect(() => saveJson("ffxi_snap_skill_v1", settings), [settings]);
   const update = <Key extends keyof Settings>(key: Key, value: Settings[Key]) => setSettings(previous => ({ ...previous, [key]: value }));
   const location = locations.find(entry => entry.key === settings.location) ?? defaultLocation;
@@ -45,7 +51,7 @@ export default function SnapSkillTab() {
     const pool = members.filter(member => !member.item && bait.fish[member.fish] !== undefined)
       .map(member => ({ ...member, hookBonus: bait.fish[member.fish] }));
     const odds = calculateCastOdds(effectiveSkill, rod, pool, { ...area, ...bait,
-      city: isCityFishingZone(location.zone), hasItems: members.some(member => member.item) });
+      city: isCityFishingZone(location.zone), hasItems: members.some(member => member.item), moonPhase });
     const plan = calculateSnapPlan({ ...settings, zone: location.zone, rod, fish: pool, weights: odds.targetPct });
     return { pool, plan, time: calculateSnapTime(plan, odds.fishPct), baitNeeded: calculateSnapBait(plan, odds) };
   };
@@ -93,6 +99,10 @@ export default function SnapSkillTab() {
       </div>
     </CollapsibleSection>
 
+    <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, fontSize: 13 }}>
+      <span>Moon snapshot: {moonDirectionFromStep(moonSnapshot.moonStep)} {moonSnapshot.moonPercent}% ({moonSnapshot.moonPhaseName})</span>
+      <button type="button" style={styles.buttonCompact} onClick={() => setMoonSnapshot(getVanaNow(Date.now(), cal))}>Recalculate with current moon</button>
+    </div>
     <div style={{ display: "flex", gap: 16, flexWrap: "wrap", padding: "10px 0", borderBottom: "1px solid #333" }}>
       <span><strong>{plan.remaining}</strong> landings left</span>
       <span><strong>{numberText(Math.max(0, 20000 - settings.fatigueUsed))}</strong> fatigue left</span>
@@ -168,7 +178,8 @@ export default function SnapSkillTab() {
       <strong>Estimate, not a guaranteed 200 catches.</strong> Random outcomes can exhaust fatigue or fill the catch limit early. A reserve is not a confidence guarantee.
       <br />All pool fish are included; a feeling does not identify a species. Epic messages hide risk, so large-fish pools are excluded.
       <br />Natural snaps require a completed fight. Early-reel snaps and ordinary escapes spend fatigue without skill-ups; cancellations give no skill-ups. Both landings and natural snaps spend bait.
-      <br />*Skill and pool conditions are held constant, with neutral time/moon/weather and the standard skill-up multiplier. Projected skill gain is not simulated progression. Recalculate after a skill or setup change; actual fatigue requires the full day history.
+      <br />Moon is sampled when this planner opens or you select Recalculate with current moon. The snapshot stays fixed as you change settings and throughout the projected session. Moon affects fish preferences and fish/item/monster/no-bite odds, not the direct skill-up roll.
+      <br />*Skill and pool conditions are held constant, with neutral time of day, season and weather, estimated cast timings, and the standard skill-up multiplier. Projected skill gain is not simulated progression. Update your skill or setup as it changes; actual fatigue requires the full day history. Live conditions can differ.
       <br />Daily counters are manual and account-wide, with a Japanese-midnight reset. No automatic reset or game connection. Source: <a href={`${snapshot.source.repository}/tree/${snapshot.source.revision}`} target="_blank" rel="noreferrer">Revision {snapshot.source.revision.slice(0, 7)}</a>.
     </div>
   </section>;

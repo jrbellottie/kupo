@@ -24,12 +24,13 @@ import { AnyTimer, MoonDirection } from "./types";
 import { WEEKDAYS, WEEKDAY_COLORS, weekdayStyle } from "./utils/weekday";
 import { moonDirGlyph, moonGlyphStyle, moonPhaseStyle } from "./utils/moon";
 import { buildTenshodoPresets, GUILD_PRESETS, nextGuildAlertTarget } from "./utils/guilds";
-import { TRANSPORT_GROUPS, createTransportTimer, formatTransportDepartures, getTransportArrivalMinutes, type TransportPreset } from "./utils/transport";
+import { TRANSPORT_GROUPS, createTransportTimer, getTransportArrivalMinutes, getTransportPorts, type TransportPreset } from "./utils/transport";
 import { registerTabSwitcher, switchTabWithScroll, setCurrentTab } from "./utils/tabNav";
 import { getNextNmLotteryEvent, getNextNmTimedWindowEvent } from "./utils/nm";
 import FishTab from "./FishTab";
 import ClamTab from "./ClamTab";
 import ChocoboTab from "./ChocoboTab";
+import ChocoboRaisingTab from "./ChocoboRaisingTab";
 import WeatherTab from "./WeatherTab";
 import StopwatchTab from "./StopwatchTab";
 import BcnmTab from "./BcnmTab";
@@ -43,6 +44,7 @@ const AtlasTab = React.lazy(() => import("./AtlasTab"));
 const DropsTab = React.lazy(() => import("./DropsTab"));
 const NpcTab = React.lazy(() => import("./NpcTab"));
 const HelmTab = React.lazy(() => import("./HelmTab"));
+const GardeningTab = React.lazy(() => import("./GardeningTab"));
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.floor(n)));
@@ -181,7 +183,7 @@ function isValidTod(raw: string): boolean {
   );
 }
 
-type TabId = "home" | "timers" | "nm" | "presets" | "counters" | "luShang" | "fish" | "clam" | "chocobo" | "helm" | "weather" | "bcnm" | "drops" | "npc" | "bestiary" | "skillchains" | "crafting" | "printing" | "quests" | "atlas" | "calibration";
+type TabId = "home" | "timers" | "nm" | "presets" | "counters" | "luShang" | "fish" | "clam" | "chocobo" | "raising" | "helm" | "weather" | "gardening" | "bcnm" | "drops" | "npc" | "bestiary" | "skillchains" | "crafting" | "printing" | "quests" | "atlas" | "calibration";
 
 type TabDef = {
   id: TabId;
@@ -201,8 +203,10 @@ const TABS: TabDef[] = [
   { id: "fish", label: "Fish", icon: "🐟" },
   { id: "clam", label: "Clam", icon: "🪣" },
   { id: "chocobo", label: "Digging", icon: "🐤" },
-  { id: "helm", label: "HELM", icon: <Pickaxe size={18} /> },
+  { id: "raising", label: "Raising", icon: "🐣" },
   { id: "weather", label: "Weather", icon: "🌦️" },
+  { id: "gardening", label: "Gardening", icon: "🌱" },
+  { id: "helm", label: "HELM", icon: <Pickaxe size={18} /> },
   { id: "bcnm", label: "BCNM", icon: "⚔️" },
   { id: "skillchains", label: "Skillchains", icon: "🔗" },
   { id: "bestiary", label: "Bestiary", icon: "📖" },
@@ -551,10 +555,6 @@ export default function AppShell() {
       });
       return {
         ...route, nextAt, departureAt, nextDepartureAt, nextArrivalAt,
-        alertVana: getVanaNow(nextAt, cal),
-        departureVana: getVanaNow(departureAt, cal),
-        nextDepartureVana: getVanaNow(nextDepartureAt, cal),
-        nextArrivalVana: getVanaNow(nextArrivalAt, cal),
       };
     }),
   })), [nowMs, cal, presetOffsetHours]);
@@ -2101,7 +2101,7 @@ export default function AppShell() {
 
               <div style={{ gridColumn: "1 / -1", ...styles.sub }}>
                 <h3 style={styles.h3}>Boats &amp; airships</h3>
-                Daily Vana&apos;diel departure schedules. Each route alerts before every departure until disabled.
+                Departures and destination arrivals are shown in local Earth time, with live countdowns. Each route alerts before every departure until disabled.
                 The offset is saved when you add the timer; if an alert time has passed, the next future alert is used.
                 Arrival countdowns track the next arrival at the destination, including a trip already underway.
                 Board before departure. Server timings may vary; confirm with the dock NPC.
@@ -2116,32 +2116,21 @@ export default function AppShell() {
                     <div key={route.id} style={styles.subCard}>
                       <div style={{ fontWeight: 800 }}>{route.label}</div>
                       <div style={{ marginTop: 8 }}>
-                        <strong>Next departure in: {formatCountdown(route.nextDepartureAt - nowMs)}</strong>
+                        <strong>Next departure from {route.departurePort} in: {formatCountdown(route.nextDepartureAt - nowMs)}</strong>
                         <br />
-                        <span style={weekdayStyle(route.nextDepartureVana.weekday)}>{route.nextDepartureVana.weekday}</span>{" "}
-                        {formatVanaTime(route.nextDepartureVana.hour, route.nextDepartureVana.minute)} (Vana)
-                        <br />
-                        {new Date(route.nextDepartureAt).toLocaleString()} (Earth)
+                        Leaves (Earth): {new Date(route.nextDepartureAt).toLocaleString()}
                       </div>
                       <div style={{ marginTop: 8 }}>
-                        <strong>Next arrival in: {formatCountdown(route.nextArrivalAt - nowMs)}</strong>
+                        <strong>Next arrival at {route.arrivalPort} in: {formatCountdown(route.nextArrivalAt - nowMs)}</strong>
                         <br />
-                        <span style={weekdayStyle(route.nextArrivalVana.weekday)}>{route.nextArrivalVana.weekday}</span>{" "}
-                        {formatVanaTime(route.nextArrivalVana.hour, route.nextArrivalVana.minute)} (Vana)
-                        <br />
-                        {new Date(route.nextArrivalAt).toLocaleString()} (Earth)
+                        Arrives (Earth): {new Date(route.nextArrivalAt).toLocaleString()}
                       </div>
                       <div style={{ marginTop: 8, ...styles.sub }}>
-                        Departs daily (Vana): {formatTransportDepartures(route.departureMinutes)}
+                        Alert lead time (Earth): {formatCountdown(presetOffsetHours * 144_000)}
                         <br />
-                        Next alert: <span style={weekdayStyle(route.alertVana.weekday)}>{route.alertVana.weekday}</span>{" "}
-                        {formatVanaTime(route.alertVana.hour, route.alertVana.minute)} (offset {presetOffsetHours}h)
+                        Next alert (Earth): {new Date(route.nextAt).toLocaleString()} — In: {formatCountdown(route.nextAt - nowMs)}
                         <br />
-                        {new Date(route.nextAt).toLocaleString()} — In: {formatCountdown(route.nextAt - nowMs)}
-                        <br />
-                        For departure: <span style={weekdayStyle(route.departureVana.weekday)}>{route.departureVana.weekday}</span>{" "}
-                        {formatVanaTime(route.departureVana.hour, route.departureVana.minute)}
-                        {" "}({new Date(route.departureAt).toLocaleString()})
+                        For departure from {route.departurePort} (Earth): {new Date(route.departureAt).toLocaleString()} — In: {formatCountdown(route.departureAt - nowMs)}
                       </div>
                       <div style={{ marginTop: 10, ...styles.buttonRow }}>
                         <button style={styles.buttonPrimary} onClick={() => addTransportTimer(route)}>
@@ -2218,7 +2207,7 @@ export default function AppShell() {
                 const departureAt = t.kind === "TRANSPORT" && nextAt !== null
                   ? nextAt + t.offsetHours * 144_000
                   : null;
-                const departureVana = departureAt === null ? null : getVanaNow(departureAt, cal);
+                const ports = t.kind === "TRANSPORT" ? getTransportPorts(t) : undefined;
                 const nextDepartureAt = t.kind === "TRANSPORT"
                   ? nextEarthMsForVanaDailySchedule({
                       nowEarthMs: nowMs,
@@ -2227,7 +2216,6 @@ export default function AppShell() {
                       offsetHours: 0,
                     })
                   : null;
-                const nextDepartureVana = nextDepartureAt === null ? null : getVanaNow(nextDepartureAt, cal);
                 const arrivalMinutes = t.kind === "TRANSPORT" ? getTransportArrivalMinutes(t) : undefined;
                 const nextArrivalAt = arrivalMinutes === undefined
                   ? null
@@ -2237,7 +2225,6 @@ export default function AppShell() {
                       departureMinutes: arrivalMinutes,
                       offsetHours: 0,
                     });
-                const nextArrivalVana = nextArrivalAt === null ? null : getVanaNow(nextArrivalAt, cal);
 
                 let detailLine: React.ReactNode = null;
 
@@ -2250,9 +2237,8 @@ export default function AppShell() {
                 } else if (t.kind === "TRANSPORT") {
                   detailLine = (
                     <div style={{ marginTop: 6, opacity: 0.9 }}>
-                      Transport: departs daily (Vana) {formatTransportDepartures(t.departureMinutes)}
-                      <br />
-                      Alerts {t.offsetHours} Vana hours before every departure.
+                      Alerts {formatCountdown(t.offsetHours * 144_000)} before every departure (Earth time).
+                      {!ports && <div>Port details unavailable. Recreate this timer from a transport preset.</div>}
                     </div>
                   );
                 } else if (t.kind === "MOON_STEP") {
@@ -2313,27 +2299,22 @@ export default function AppShell() {
 
                     {detailLine}
 
-                    {nextDepartureAt !== null && nextDepartureVana !== null && (
+                    {nextDepartureAt !== null && (
                       <div style={{ marginTop: 8 }}>
-                        <strong>Next departure in: {formatCountdown(nextDepartureAt - nowMs)}</strong>
-                        <br />
-                        Leaves (Vana):{" "}
-                        <span style={weekdayStyle(nextDepartureVana.weekday)}>{nextDepartureVana.weekday}</span>{" "}
-                        {formatVanaTime(nextDepartureVana.hour, nextDepartureVana.minute)}
+                        <strong>Next departure{ports ? ` from ${ports.departurePort}` : " (port unavailable)"} in: {formatCountdown(nextDepartureAt - nowMs)}</strong>
                         <br />
                         Leaves (Earth): {new Date(nextDepartureAt).toLocaleString()}
                       </div>
                     )}
 
-                    {nextArrivalAt !== null && nextArrivalVana !== null ? (
+                    {nextArrivalAt !== null ? (
                       <div style={{ marginTop: 8 }}>
-                        <strong>Next arrival in: {formatCountdown(nextArrivalAt - nowMs)}</strong>
-                        <br />
-                        Arrives (Vana):{" "}
-                        <span style={weekdayStyle(nextArrivalVana.weekday)}>{nextArrivalVana.weekday}</span>{" "}
-                        {formatVanaTime(nextArrivalVana.hour, nextArrivalVana.minute)}
+                        <strong>Next arrival{ports ? ` at ${ports.arrivalPort}` : " (port unavailable)"} in: {formatCountdown(nextArrivalAt - nowMs)}</strong>
                         <br />
                         Arrives (Earth): {new Date(nextArrivalAt).toLocaleString()}
+                        {nextDepartureAt !== null && nextArrivalAt < nextDepartureAt && (
+                          <div style={styles.muted}>This arrival is for a trip already underway.</div>
+                        )}
                       </div>
                     ) : t.kind === "TRANSPORT" ? (
                       <div style={{ marginTop: 8, ...styles.muted }}>
@@ -2347,21 +2328,19 @@ export default function AppShell() {
                       ) : (
                         <>
                           {t.kind === "TRANSPORT" ? "Next alert" : "Next"} (Earth): {new Date(nextAt).toLocaleString()} — In: {formatCountdown(inMs)}
-                          <br />
-                          {t.kind === "TRANSPORT" ? "Next alert" : "Next"} (Vana):{" "}
-                          <span style={weekdayStyle(vanaAt.weekday)}>{vanaAt.weekday}</span> {pad2(vanaAt.hour)}:
-                          {pad2(vanaAt.minute)}
+                          {t.kind !== "TRANSPORT" && <>
+                            <br />
+                            Next (Vana):{" "}
+                            <span style={weekdayStyle(vanaAt.weekday)}>{vanaAt.weekday}</span> {pad2(vanaAt.hour)}:
+                            {pad2(vanaAt.minute)}
+                          </>}
                         </>
                       )}
                     </div>
 
-                    {departureAt !== null && departureVana !== null && departureAt !== nextDepartureAt && (
+                    {departureAt !== null && departureAt !== nextDepartureAt && (
                       <div style={{ marginTop: 8 }}>
-                        <strong>Departure for this alert</strong>
-                        <br />
-                        Leaves (Vana):{" "}
-                        <span style={weekdayStyle(departureVana.weekday)}>{departureVana.weekday}</span>{" "}
-                        {formatVanaTime(departureVana.hour, departureVana.minute)}
+                        <strong>Departure{ports ? ` from ${ports.departurePort}` : ""} for this alert</strong>
                         <br />
                         Leaves (Earth): {new Date(departureAt).toLocaleString()} — In: {formatCountdown(departureAt - nowMs)}
                       </div>
@@ -2643,7 +2622,7 @@ export default function AppShell() {
 
       {activeTab === "fish" && (
         <div style={styles.tabContent}>
-          <FishTab />
+          <FishTab cal={cal} />
         </div>
       )}
 
@@ -2659,9 +2638,23 @@ export default function AppShell() {
         </div>
       )}
 
+      {activeTab === "raising" && (
+        <div style={styles.tabContent}>
+          <ChocoboRaisingTab />
+        </div>
+      )}
+
       {activeTab === "weather" && (
         <div style={styles.tabContent}>
           <WeatherTab cal={cal} countdownNowMs={nowMs} activeTimerIds={activeTimerIds} onSetTimer={addWeatherTimer} />
+        </div>
+      )}
+
+      {activeTab === "gardening" && (
+        <div style={styles.tabContent}>
+          <React.Suspense fallback={<div style={styles.card}>Loading gardening...</div>}>
+            <GardeningTab />
+          </React.Suspense>
         </div>
       )}
 

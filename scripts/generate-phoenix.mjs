@@ -136,12 +136,28 @@ const entries = Object.entries(digTable.zoneTable).flatMap(([zone, rows]) => Obj
   nightOnly: Boolean(digTable.nightOnlyItems[row[1]]),
 })));
 entries.sort((first, second) => first.zone.localeCompare(second.zone) || first.item.localeCompare(second.item));
+const baseDigging = evaluateLuaData([digBootstrap, digSource("scripts/globals/hobbies/chocobo_digging/data.lua")], "xi.chocoboDig");
+digSource("scripts/globals/hobbies/chocobo_digging/logic.lua");
+const referenceItemNames = new Map(parseSql(digSource("sql/item_basic.sql"), "item_basic").map(row => [
+  row.itemid, catalog.items[row.itemid]?.name ?? row.name.replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase()),
+]));
+const activeDigZones = new Set(entries.map(entry => entry.zone));
+const referenceLayers = Object.entries(baseDigging.digInfo).flatMap(([zone, layers]) => {
+  const name = digZoneName(zone);
+  if (!activeDigZones.has(name)) return [];
+  return ["BURROW", "BORE", "TREASURE"].flatMap(layer => Object.values(layers[baseDigging.layer[layer]] ?? {}).map(row => {
+    const item = referenceItemNames.get(row[1]);
+    if (!item) throw new Error(`Unknown base-layer digging item ${row[1]}`);
+    return { zone: name, itemId: row[1], item, layer: layer[0] + layer.slice(1).toLowerCase(), minimumRank: row[3] };
+  }));
+});
+referenceLayers.sort((first, second) => first.zone.localeCompare(second.zone) || first.item.localeCompare(second.item) || first.layer.localeCompare(second.layer));
 const days = ["Firesday", "Earthsday", "Watersday", "Windsday", "Iceday", "Lightningday", "Lightsday", "Darksday"];
 const digging = {
   source: { repository: "https://github.com/phoenixffxi/Phoenix", revision: diggingRevision, branch: "beta", inputs: diggingInputs },
   ranks, accuracy: rankValues(digTable.accuracy), experiencePerItem: rankValues(digTable.experiencePerItem),
   xpToLevel: Array.from({ length: 100 }, (_, index) => digTable.xpToLevel[index + 1]),
-  entries, oreZones: Object.keys(digTable.elementalOreZones).map(digZoneName).sort(),
+  entries, referenceLayers, oreZones: Object.keys(digTable.elementalOreZones).map(digZoneName).sort(),
   oreWeights: rankValues(digTable.elementalOreWeight),
   ores: Object.fromEntries(days.map((day, index) => [day, digName(digTable.elementalOreByDay[index])])),
   weather: [

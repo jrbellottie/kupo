@@ -62,11 +62,50 @@ const CITY_ZONES = new Set([
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 const sizeRank = (size: string) => (size === "L" ? 1 : 0);
 
-export type HookFish = SkillupFish & { hookBonus: number; rarity: number; shellfish?: boolean };
+export type HookFish = SkillupFish & { hookBonus: number; rarity: number; shellfish?: boolean; moonPattern?: number };
 
-export function calculateHookWeight(skill: number, fish: HookFish, rod: SkillupRod, shellfishBait = false): number {
+export type FishingMoonPhase = 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7;
+
+export function getFishingMoonPhase(moonStep: number): FishingMoonPhase {
+  if (!Number.isInteger(moonStep) || moonStep < 0 || moonStep >= 200) {
+    throw new RangeError("Fishing moon step must be an integer from 0 to 199");
+  }
+  const phase = moonStep <= 100 ? moonStep : 200 - moonStep;
+  const waxing = moonStep > 0 && moonStep < 100;
+  const waning = moonStep > 100;
+  // Use the source's fishing thresholds, including its new-moon fallback in gaps.
+  if (phase <= 5 || (phase <= 10 && waning)) return 0;
+  if (phase >= 7 && phase <= 38 && waxing) return 1;
+  if (phase >= 40 && phase <= 55 && waxing) return 2;
+  if (phase >= 57 && phase <= 88 && waxing) return 3;
+  if (phase >= 95 || (phase >= 90 && waxing)) return 4;
+  if (phase >= 62 && phase <= 93 && waning) return 5;
+  if (phase >= 45 && phase <= 60 && waning) return 6;
+  if (phase >= 12 && phase < 43 && waning) return 7;
+  return 0;
+}
+
+function moonPatternModifier(pattern: number, phase: FishingMoonPhase): number {
+  if (!Number.isInteger(pattern) || pattern < 0 || pattern > 5) {
+    throw new RangeError("Fishing moon pattern must be an integer from 0 to 5");
+  }
+  if (pattern === 0) return 1;
+  // MOONPATTERN_3 divides integer phase indices in the pinned source.
+  if (pattern === 3) return 1 - Math.floor(phase / 7);
+  const [frequency, offset] = pattern === 1 ? [1.75, 0.1]
+    : pattern === 2 ? [1.75, 3.3] : pattern === 4 ? [0.9, 3.14] : [0.9, 0];
+  const angle = Math.fround(Math.fround(Math.fround(frequency) * phase) + Math.fround(offset));
+  return clamp(Math.fround(Math.fround(0.5 * Math.fround(Math.cos(angle))) + 0.5), 0, 1);
+}
+
+export function calculateHookWeight(skill: number, fish: HookFish, rod: SkillupRod, shellfishBait = false, moonPhase?: FishingMoonPhase): number {
   if (fish.skillCap - skill > 100) return 0;
-  let weight = 50 + fish.hookBonus;
+  // The source routes fish pattern 5 through pattern 4 as well.
+  const pattern = fish.moonPattern === 5 ? 4 : fish.moonPattern ?? 0;
+  const moon = moonPhase === undefined ? 1 : moonPatternModifier(pattern, moonPhase);
+  const moonModifier = Math.fround(Math.fround(moon + 0.25) * 3);
+  const modifier = Math.fround(Math.fround(Math.fround(moonModifier + 1.5) + 0.75) / 3);
+  let weight = Math.floor(Math.fround(25 * modifier)) + fish.hookBonus;
   weight -= Math.min(weight, Math.floor(Math.max(0, fish.skillCap - skill) * 0.25));
   weight -= Math.min(weight, Math.floor(Math.max(0, skill - 10 - fish.skillCap) * 0.15));
   if (!rod.legendary && fish.size !== rod.size) weight -= Math.min(weight, fish.size === "S" ? 3 : 5);
@@ -78,14 +117,17 @@ export function calculateCastOdds(
   skill: number,
   rod: SkillupRod,
   fish: HookFish[],
-  options: { city: boolean; hasItems: boolean; hasMobs: boolean; difficulty: number; poorFish?: boolean; shellfishBait?: boolean },
+  options: { city: boolean; hasItems: boolean; hasMobs: boolean; difficulty: number; poorFish?: boolean; shellfishBait?: boolean; moonPhase?: FishingMoonPhase },
 ) {
-  const weights = fish.map(member => calculateHookWeight(skill, member, rod, options.shellfishBait));
+  const weights = fish.map(member => calculateHookWeight(skill, member, rod, options.shellfishBait, options.moonPhase));
   const total = weights.reduce((sum, weight) => sum + weight, 0);
-  let fishWeight = total ? clamp(Math.max(...weights) + (options.city ? 15 : 25), 10, 120) : (options.city ? 15 : 25);
-  let itemWeight = options.city ? 45 : 25;
-  let mobWeight = options.city ? 0 : 30;
-  let nothingWeight = (options.city ? 45 : 35) + options.difficulty * 24.5;
+  const moonWeight = (weight: number, pattern: number) => options.moonPhase === undefined
+    ? weight : Math.floor(Math.fround(weight * moonPatternModifier(pattern, options.moonPhase)));
+  const fishBonus = moonWeight(options.city ? 15 : 25, 4);
+  let fishWeight = total ? clamp(Math.max(...weights) + fishBonus, 10, 120) : fishBonus;
+  let itemWeight = options.city ? 25 + moonWeight(20, 2) : 10 + moonWeight(15, 2);
+  let mobWeight = options.city ? 0 : 15 + moonWeight(15, 3);
+  let nothingWeight = (options.city ? 30 + moonWeight(15, 5) : 15 + moonWeight(20, 5)) + options.difficulty * 24.5;
   if (options.poorFish) {
     fishWeight -= Math.floor(fishWeight * 0.25);
     itemWeight = fishWeight + Math.floor(fishWeight * 0.1);

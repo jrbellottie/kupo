@@ -9,12 +9,58 @@ async function load(entry) {
 }
 
 const { nextEarthMsForVanaDailySchedule: nextAlert, getVanaNow, DEFAULT_CALIBRATION } = await load("src\\vanadiel.ts");
-const { TRANSPORT_GROUPS, createTransportTimer, formatTransportDepartures, getTransportArrivalMinutes } = await load("src\\utils\\transport.ts");
+const { TRANSPORT_GROUPS, createTransportTimer, formatTransportDepartures, getTransportArrivalMinutes, getTransportPorts } = await load("src\\utils\\transport.ts");
 const { formatCountdown } = await load("src\\utils\\time.ts");
 const routes = TRANSPORT_GROUPS.flatMap(group => group.routes);
 const MINUTE = 2400;
 const DAY = 1440 * MINUTE;
 const cal = { timeOffsetMs: 0, newMoonStartEarthMs: 0 };
+
+test("every transport route names its departure dock and destination, including round-trip tours", () => {
+  const expected = {
+    "selbina-mhaura": ["Selbina", "Mhaura"],
+    "mhaura-selbina": ["Mhaura", "Selbina"],
+    "mhaura-whitegate": ["Mhaura", "Aht Urhgan Whitegate"],
+    "whitegate-mhaura": ["Aht Urhgan Whitegate", "Mhaura"],
+    "whitegate-nashmau": ["Aht Urhgan Whitegate", "Nashmau"],
+    "nashmau-whitegate": ["Nashmau", "Aht Urhgan Whitegate"],
+    "bibiki-purgonorgo": ["Bibiki Bay (Sunset Docks)", "Purgonorgo Isle"],
+    "purgonorgo-bibiki": ["Purgonorgo Isle", "Bibiki Bay (Sunset Docks)"],
+    "dhalmel-rock": ["Bibiki Bay (Sunset Docks)", "Bibiki Bay (Sunset Docks)"],
+    "maliyakaleya-reef": ["Bibiki Bay (Sunset Docks)", "Bibiki Bay (Sunset Docks)"],
+    "south-central": ["South Landing", "Central Landing"],
+    "central-south": ["Central Landing", "South Landing"],
+    "south-north": ["South Landing", "North Landing"],
+    "north-central": ["North Landing", "Central Landing"],
+    "sandoria-jeuno": ["Port San d'Oria", "Port Jeuno"],
+    "jeuno-sandoria": ["Port Jeuno", "Port San d'Oria"],
+    "bastok-jeuno": ["Port Bastok", "Port Jeuno"],
+    "jeuno-bastok": ["Port Jeuno", "Port Bastok"],
+    "windurst-jeuno": ["Port Windurst", "Port Jeuno"],
+    "jeuno-windurst": ["Port Jeuno", "Port Windurst"],
+    "kazham-jeuno": ["Kazham", "Port Jeuno"],
+    "jeuno-kazham": ["Port Jeuno", "Kazham"],
+  };
+  assert.deepEqual(Object.fromEntries(routes.map(route => [route.id, [route.departurePort, route.arrivalPort]])), expected);
+});
+
+test("port names survive saving and renaming, and existing timers resolve without a migration", () => {
+  for (const route of routes) {
+    const expected = { departurePort: route.departurePort, arrivalPort: route.arrivalPort };
+    const timer = JSON.parse(JSON.stringify(createTransportTimer(route, 2, 1000)));
+    assert.deepEqual(getTransportPorts(timer), expected);
+    assert.deepEqual(getTransportPorts({ ...timer, label: "My transport reminder" }), expected);
+    const legacy = { ...timer };
+    delete legacy.departurePort;
+    delete legacy.arrivalPort;
+    const before = JSON.stringify(legacy);
+    assert.deepEqual(getTransportPorts(legacy), expected);
+    assert.equal(JSON.stringify(legacy), before, "port resolution must not change the saved timer or schedules");
+    assert.equal(getTransportPorts({ ...legacy, label: "Unknown route" }), undefined);
+    assert.equal(getTransportPorts({ ...legacy, departureMinutes: [42] }), undefined);
+    assert.deepEqual(getTransportPorts({ ...legacy, departurePort: " ", arrivalPort: "" }), expected);
+  }
+});
 
 test("all 22 directional routes use the published departure columns, not boarding or out-of-service times", () => {
   const expected = {

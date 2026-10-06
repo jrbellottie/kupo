@@ -65,6 +65,139 @@ const craft = await loadUtility("craftingSkillup");
 const fishing = await loadUtility("fishingSkillup");
 const fishingSnapshot = JSON.parse(readFileSync(new URL("../src/data/fishingPlanner.json", import.meta.url), "utf8"));
 
+test("fishing moon phases use source thresholds and Kupo's calibrated moon step", async () => {
+  const clock = await loadUtility("../vanadiel");
+  const phaseSteps = [
+    [0, 5, 6, 39, 56, 89, 106, 139, 156, 157, 189, 190, 199],
+    [7, 38], [40, 55], [57, 88], [90, 95, 100, 105],
+    [107, 138], [140, 155], [158, 188],
+  ];
+  for (const [phase, steps] of phaseSteps.entries()) {
+    for (const step of steps) assert.equal(fishing.getFishingMoonPhase(step), phase, `step ${step}`);
+  }
+  for (const step of [-1, 200, 1.5, NaN, Infinity]) {
+    assert.throws(() => fishing.getFishingMoonPhase(step), RangeError);
+  }
+  const anchor = clock.DEFAULT_CALIBRATION.newMoonStartEarthMs;
+  const stepDuration = 1_451_520;
+  for (let step = 0; step < 200; step++) {
+    const snapshot = clock.getVanaNow(anchor + (step + 10) * stepDuration, clock.DEFAULT_CALIBRATION);
+    assert.equal(snapshot.moonStep, step);
+    assert.ok(fishing.getFishingMoonPhase(snapshot.moonStep) >= 0);
+    assert.ok(fishing.getFishingMoonPhase(snapshot.moonStep) <= 7);
+  }
+  const now = anchor + 110 * stepDuration;
+  assert.equal(fishing.getFishingMoonPhase(clock.getVanaNow(now, clock.DEFAULT_CALIBRATION).moonStep), 4);
+  const shifted = { ...clock.DEFAULT_CALIBRATION, newMoonStartEarthMs: anchor + 100 * stepDuration };
+  assert.equal(fishing.getFishingMoonPhase(clock.getVanaNow(now, shifted).moonStep), 0);
+});
+
+test("fishing snapshot preserves every fish's moon pattern and formula provenance", () => {
+  assert.match(fishingSnapshot.source.inputs["src/map/utils/fishingutils.h"], /^[a-f0-9]{64}$/);
+  for (const fish of Object.values(fishingSnapshot.fish)) {
+    assert.ok(Number.isInteger(fish.moonPattern), fish.fish);
+    assert.ok(fish.moonPattern >= 0 && fish.moonPattern <= 5, fish.fish);
+  }
+  assert.equal(fishingSnapshot.fish["Moat Carp"].moonPattern, 1);
+});
+
+test("fish moon preferences match source weights for all patterns and phases", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rodId === 17389);
+  const fish = { ...fishingSnapshot.fish["Moat Carp"], hookBonus: 35 };
+  const expected = [
+    [85, 85, 85, 85, 85, 85, 85, 85],
+    [84, 69, 61, 79, 81, 62, 67, 84],
+    [60, 76, 83, 64, 64, 83, 76, 60],
+    [85, 85, 85, 85, 85, 85, 85, 60],
+    [60, 64, 75, 83, 83, 75, 64, 60],
+    [60, 64, 75, 83, 83, 75, 64, 60],
+  ];
+  for (const [moonPattern, weights] of expected.entries()) {
+    assert.equal(fishing.calculateHookWeight(11, { ...fish, moonPattern }, rod), 85, "Omitted moon preserves neutral behavior");
+    for (const [phase, weight] of weights.entries()) {
+      assert.equal(fishing.calculateHookWeight(11, { ...fish, moonPattern }, rod, false, phase), weight);
+      assert.equal(fishing.calculateHookWeight(11, { ...fish, moonPattern, rarity: 0.01 }, rod, false, phase), 20);
+      assert.equal(fishing.calculateHookWeight(0, { ...fish, moonPattern, skillCap: 101 }, rod, false, phase), 0);
+      assert.equal(fishing.calculateHookWeight(11, { ...fish, moonPattern, shellfish: true }, rod, true, phase), Math.min(120, weight + 50));
+    }
+  }
+  assert.throws(() => fishing.calculateHookWeight(11, { ...fish, moonPattern: 6 }, rod, false, 0), RangeError);
+});
+
+test("moon adjusts city and outdoor catch pools with source rounding and empty-pool redistribution", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rodId === 17389);
+  const fish = { ...fishingSnapshot.fish["Moat Carp"], hookBonus: 0, moonPattern: 0 };
+  const expected = [
+    [[50, 10, 30, 35], [54, 19, 30, 31], [65, 24, 30, 22], [73, 12, 30, 15],
+      [73, 12, 30, 16], [65, 24, 30, 22], [54, 19, 30, 31], [50, 10, 15, 34]],
+    [[50, 25, 0, 45], [52, 38, 0, 42], [59, 43, 0, 35], [64, 28, 0, 30],
+      [64, 28, 0, 30], [59, 43, 0, 35], [52, 38, 0, 42], [50, 25, 0, 44]],
+  ];
+  for (const [city, phases] of expected.entries()) {
+    for (const [moonPhase, weights] of phases.entries()) {
+      const options = { city: Boolean(city), hasItems: true, hasMobs: true, difficulty: 0, moonPhase };
+      const odds = fishing.calculateCastOdds(11, rod, [fish], options);
+      const total = weights.reduce((sum, weight) => sum + weight, 0);
+      for (const [index, key] of ["fishPct", "itemPct", "mobPct", "nothingPct"].entries()) {
+        assert.ok(Math.abs(odds[key] - 100 * weights[index] / total) < 1e-10, `${city}/${moonPhase}/${key}`);
+      }
+      assert.equal(odds.targetPct[0], odds.fishPct);
+      const empty = fishing.calculateCastOdds(11, rod, [], { ...options, hasItems: false, hasMobs: false });
+      assert.deepEqual(empty, { fishPct: 0, itemPct: 0, mobPct: 0, nothingPct: 100, targetPct: [] });
+      const noItems = fishing.calculateCastOdds(11, rod, [fish], { ...options, hasItems: false, hasMobs: false });
+      const adjustedTotal = weights[0] + weights[3] + Math.floor(weights[1] / 2) + Math.floor(weights[2] / 2);
+      assert.equal(noItems.itemPct, 0);
+      assert.equal(noItems.mobPct, 0);
+      assert.ok(Math.abs(noItems.fishPct - 100 * weights[0] / adjustedTotal) < 1e-10);
+    }
+  }
+});
+
+test("moon changes species shares and forecasts without changing direct skill-up rolls", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rodId === 17389);
+  const fish = [
+    { ...fishingSnapshot.fish["Moat Carp"], hookBonus: 35, moonPattern: 1 },
+    { ...fishingSnapshot.fish["Crayfish"], hookBonus: 35, moonPattern: 2 },
+  ];
+  const options = { city: false, hasItems: true, hasMobs: true, difficulty: 0 };
+  const settings = { baseSkill: 0, bonusSkill: 0, zone: "East Sarutabaruta", rod, fish, options };
+  const direct = fish.map(member => fishing.calculateSkillup(0, member.skillCap, settings.zone, rod.rod));
+  const estimates = [0, 2, 4, 7].map(moonPhase => {
+    const conditions = { ...options, moonPhase };
+    const odds = fishing.calculateCastOdds(0, rod, fish, conditions);
+    const gains = fishing.calculatePoolSkillup(0, 0, settings.zone, rod, fish, odds.targetPct);
+    for (const [index, member] of fish.entries()) {
+      const fight = fishing.calculateFishingFight(0, member, rod);
+      assert.equal(gains.gains[index], direct[index].expectedGainPerTargetHook * odds.targetPct[index] * fight.skillupResolvePct / 100);
+    }
+    const session = fishing.calculatePoolSession({ ...settings, options: conditions });
+    assert.ok(session.catchTimeSeconds > 0);
+    assert.ok(session.skillGain > 0);
+    assert.deepEqual(fishing.calculatePoolSession({ ...settings, options: conditions }), session);
+    return { odds, session };
+  });
+  assert.notEqual(estimates[0].odds.targetPct[0] / estimates[0].odds.fishPct, estimates[1].odds.targetPct[0] / estimates[1].odds.fishPct);
+  assert.notEqual(estimates[0].session.catchTimeSeconds, estimates[1].session.catchTimeSeconds);
+  assert.notEqual(estimates[0].session.skillGain, estimates[1].session.skillGain);
+  assert.notDeepEqual(estimates[0].session.catches, estimates[1].session.catches);
+
+  const eel = { ...fishingSnapshot.fish["Black Eel"], hookBonus: 35 };
+  const snap = moonPhase => {
+    const odds = fishing.calculateCastOdds(31, rod, [eel], { ...options, moonPhase });
+    const plan = fishing.calculateSnapPlan({ baseSkill: 31, bonusSkill: 0, zone: "Zeruhn Mines", rod,
+      fish: [eel], weights: odds.targetPct, landed: 0, fatigueUsed: 0, reserve: 1000 });
+    assert.equal(plan.status, "Ready");
+    return { plan, time: fishing.calculateSnapTime(plan, odds.fishPct), bait: fishing.calculateSnapBait(plan, odds) };
+  };
+  const newMoon = snap(0);
+  const fullMoon = snap(4);
+  assert.ok(newMoon.time && fullMoon.time);
+  assert.notEqual(newMoon.time.seconds, fullMoon.time.seconds);
+  assert.notEqual(newMoon.time.casts, fullMoon.time.casts);
+  assert.notEqual(newMoon.bait, fullMoon.bait);
+  assert.ok(Math.abs(newMoon.plan.expectedGain - fullMoon.plan.expectedGain) < 1e-10);
+});
+
 test("fishing skill-up table and expanded details have no native hover tooltips", () => {
   const source = readFileSync(new URL("../src/BaitTab.tsx", import.meta.url), "utf8");
   const file = ts.createSourceFile("BaitTab.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);

@@ -8,6 +8,7 @@ import fishingPlanner from "./data/fishingPlanner.json";
 import { loadJson, saveJson } from "./utils/storage";
 import { formatVendorPrice, getVendorPriceEach } from "./utils/vendorPrice";
 import { getFishingVendorOptions } from "./utils/fishingVendor";
+import { type Calibration, DEFAULT_CALIBRATION, getVanaNow, moonDirectionFromStep } from "./vanadiel";
 import {
   SkillupFish,
   SkillupRod,
@@ -23,6 +24,7 @@ import {
   formatCatchTime,
   groupSkillupRows,
   isCityFishingZone,
+  getFishingMoonPhase,
 } from "./utils/fishingSkillup";
 
 type BaitEntry = {
@@ -65,7 +67,7 @@ const SKILLUP_RODS: SkillupRod[] = (fishingPlanner.rods as SkillupRod[]).filter(
   (rod) => rod.era === "TOAU" && rod.rod !== "Judges Rod" && rod.rod !== "Goldfish Basket"
 );
 const SKILLUP_ROD_NAMES = SKILLUP_RODS.map((rod) => rod.rod);
-const PLANNER_FISH = fishingPlanner.fish as Record<string, SkillupFish & { rarity: number; shellfish: boolean; item: boolean; restricted: boolean; requiredKeyItem: number; questRestricted: boolean }>;
+const PLANNER_FISH = fishingPlanner.fish as Record<string, SkillupFish & { rarity: number; shellfish: boolean; item: boolean; restricted: boolean; requiredKeyItem: number; questRestricted: boolean; moonPattern: number }>;
 const PLANNER_BAITS = fishingPlanner.baits as Record<string, { poorFish: boolean; shellfishBait: boolean; fish: Record<string, number> }>;
 const PLANNER_AREAS = fishingPlanner.areas as Record<string, { difficulty: number; hasMobs: boolean; members: string[]; allMembers: string[] }>;
 const GUTTING_REWARDS = fishingPlanner.guttingRewards as Record<string, { gil: number; items: { itemId: number; name: string; chancePct: number; min: number; max: number }[] }>;
@@ -345,7 +347,7 @@ function shareColor(pct: number | null): React.CSSProperties {
   return { color: "#ff9c7a", fontWeight: 700 };
 }
 
-export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mode; onModeChange?: (mode: Mode) => void } = {}) {
+export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, onModeChange }: { cal?: Calibration; mode?: Mode; onModeChange?: (mode: Mode) => void } = {}) {
   const rodsDropdownRef = useRef<HTMLDetailsElement | null>(null);
   const resultsRef = useRef<HTMLDivElement | null>(null);
   const resultsHeight = useTableViewportHeight(resultsRef);
@@ -542,6 +544,11 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
   const [uSortKey, setUSortKey] = useState<SkillupKey>(initialUi.uSortKey);
   const [uSortDir, setUSortDir] = useState<SortDir>(initialUi.uSortDir);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [moonSnapshot, setMoonSnapshot] = useState(() => getVanaNow(Date.now(), cal));
+  useEffect(() => {
+    setMoonSnapshot(getVanaNow(Date.now(), cal));
+  }, [cal, mode]);
+  const moonPhase = getFishingMoonPhase(moonSnapshot.moonStep);
   const activeSearch = mode === "affinity" ? aGlobal : mode === "spots" ? sGlobal : uGlobal;
 
   useEffect(() => {
@@ -962,6 +969,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
           const options = {
             city: isCityFishingZone(pool.zone), hasItems: items.length > 0, hasMobs: area.hasMobs,
             difficulty: area.difficulty, poorFish: bait.poorFish, shellfishBait: bait.shellfishBait,
+            moonPhase,
           };
           const odds = calculateCastOdds(effectiveSkill, rod, members, options);
           const gains = calculatePoolSkillup(baseSkill, effectiveSkill, pool.zone, rod, members, odds.targetPct, pool.kind, uIncludeAllFish);
@@ -1072,6 +1080,7 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
       return uSortDir === "asc" ? comparison : -comparison;
     });
   }, [
+    moonPhase,
     uSkill,
     fishSeconds,
     otherSeconds,
@@ -1511,8 +1520,13 @@ export default function BaitTab({ mode: activeMode, onModeChange }: { mode?: Mod
         )}
         </CollapsibleSection>
 
+        {mode === "skillup" && <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, fontSize: 13 }}>
+          <span>Moon snapshot: {moonDirectionFromStep(moonSnapshot.moonStep)} {moonSnapshot.moonPercent}% ({moonSnapshot.moonPhaseName})</span>
+          <button type="button" style={styles.buttonCompact} onClick={() => setMoonSnapshot(getVanaNow(Date.now(), cal))}>Recalculate with current moon</button>
+        </div>}
         {mode === "skillup" && <details style={{ fontSize: 13, opacity: 0.85 }}>
           <summary style={{ cursor: "pointer" }}>Planning assumptions</summary>
+          <p>Moon is sampled when this planner opens or you select Recalculate with current moon. The snapshot stays fixed as you change settings and throughout the projected session. Moon affects fish preferences and fish/item/monster/no-bite odds, not the direct skill-up roll. Time of day, season and weather remain neutral; cast timings remain your estimates. Live conditions can differ.</p>
           <p>{SESSION_SKILL_ASSUMPTIONS}</p>
           <p>{catchTimeAssumptions}</p>
           <p>{TARGET_COUNT_ASSUMPTIONS}</p>

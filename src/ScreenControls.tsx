@@ -13,7 +13,7 @@ type Controls = {
   setSections: Dispatch<SetStateAction<Section[]>>;
 };
 const ControlsContext = createContext<Controls | null>(null);
-const COLLAPSIBLE_SCOPES = new Set(["fish", "chocobo", "weather", "drops", "crafting", "bcnm"]);
+const COLLAPSIBLE_SCOPES = new Set(["fish", "chocobo", "raising", "weather", "gardening", "drops", "crafting", "bcnm"]);
 
 export function useTableViewportHeight(ref: RefObject<HTMLDivElement>) {
   const [height, setHeight] = useState<number>();
@@ -88,27 +88,29 @@ export function ScreenControlToggles({ children }: { children?: ReactNode }) {
   })}</div>;
 }
 
-export function CollapsibleSection({ kind, children, style, collapsedLabel }: { kind: SectionKind; children: ReactNode; style?: CSSProperties; collapsedLabel?: string }) {
+export function CollapsibleSection({ kind, children, style, collapsedLabel, collapseInPlace = false }: { kind: SectionKind; children: ReactNode; style?: CSSProperties; collapsedLabel?: string; collapseInPlace?: boolean }) {
   const controls = useContext(ControlsContext);
   const id = useId();
   const scope = controls?.scope;
   const enabled = scope !== undefined && COLLAPSIBLE_SCOPES.has(scope);
   const setSections = controls?.setSections;
   useLayoutEffect(() => {
-    if (!enabled || !setSections || !scope) return;
+    if (!enabled || !setSections || !scope || collapseInPlace) return;
     setSections(previous => [...previous, { id, kind, scope, collapsedLabel }]);
     return () => setSections(previous => previous.filter(section => section.id !== id));
-  }, [enabled, id, kind, scope, setSections, collapsedLabel]);
+  }, [enabled, id, kind, scope, setSections, collapsedLabel, collapseInPlace]);
   if (!enabled) return style ? <div style={style}>{children}</div> : <>{children}</>;
   const collapsed = controls?.collapsed[`${scope}:${kind}`] === true;
-  const action = `Collapse ${kind}`;
-  return <div id={id} data-screen-section={kind} hidden={collapsed}
-    style={{ ...(kind === "tabs" ? { border: "1px solid #333", borderRadius: 12, padding: 8, background: "rgba(255,255,255,0.02)" } : {}), ...style, display: collapsed ? "none" : "grid", gridTemplateColumns: controls ? "32px minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 8, alignItems: "start", minWidth: 0 }}>
-    {controls && <button type="button" title={action} aria-label={action} aria-expanded={true} aria-controls={`${id}-content`}
-      onClick={() => controls.setCollapsed(previous => ({ ...previous, [`${scope}:${kind}`]: true }))}
+  const action = `${collapsed ? "Expand" : "Collapse"} ${kind}`;
+  const hidden = collapsed && !collapseInPlace;
+  return <div id={id} data-screen-section={kind} hidden={hidden}
+    style={{ ...(kind === "tabs" ? { border: "1px solid #333", borderRadius: 12, padding: 8, background: "rgba(255,255,255,0.02)" } : {}), ...style, display: hidden ? "none" : "grid", gridTemplateColumns: controls ? "32px minmax(0, 1fr)" : "minmax(0, 1fr)", gap: 8, alignItems: "start", minWidth: 0 }}>
+    {controls && <button type="button" title={action} aria-label={action} aria-expanded={!collapsed} aria-controls={`${id}-content`}
+      onClick={() => controls.setCollapsed(previous => ({ ...previous, [`${scope}:${kind}`]: !collapsed }))}
       style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 32, height: 32, padding: 0, border: "1px solid #444", borderRadius: 8, background: "#111", color: "#eaeaea", cursor: "pointer" }}>
-      <PanelTopClose size={16} aria-hidden="true" />
+      {collapsed ? <PanelTopOpen size={16} aria-hidden="true" /> : <PanelTopClose size={16} aria-hidden="true" />}
     </button>}
-    <div id={`${id}-content`} style={{ display: "grid", gap: 12, minWidth: 0 }}>{children}</div>
+    {collapseInPlace && collapsed && <span style={{ alignSelf: "center", fontSize: 13 }}>{collapsedLabel ?? (kind === "tabs" ? "Tabs" : "Search")}</span>}
+    <div id={`${id}-content`} hidden={collapsed} style={{ display: collapsed ? "none" : "grid", gap: 12, minWidth: 0 }}>{children}</div>
   </div>;
 }
