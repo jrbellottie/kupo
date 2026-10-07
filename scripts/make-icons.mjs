@@ -1,5 +1,4 @@
-// Generates build/icon.ico from src/assets/kupo.svg.
-// electron-builder embeds it in the exe/installer; the dev window also uses it (see electron/main.ts).
+// Generates Windows and Linux packaging icons from src/assets/kupo.svg.
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import sharp from "sharp";
@@ -33,5 +32,6 @@ await mkdir(buildDir, { recursive: true });
 const icoSizes = [16, 24, 32, 48, 64, 128, 256];
 const icoPngs = await Promise.all(icoSizes.map(renderPng));
 await writeFile(path.join(buildDir, "icon.ico"), await pngToIco(icoPngs));
+await writeFile(path.join(buildDir, "icon.png"), await renderPng(512));
 
-console.log("Icon written: build/icon.ico");
+console.log("Icons written: build/icon.ico, build/icon.png");

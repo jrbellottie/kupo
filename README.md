@@ -122,9 +122,44 @@ npm install          # install dependencies
 npm run dev          # run in development (Vite + Electron)
 npm run build        # type-check + build renderer/main
 npm run dist:win     # build the Windows installer
+npm run dist:linux   # build the Linux AppImage (uses WSL on Windows)
 ```
 
 The Windows installer is produced at `release\Kupo Setup <version>.exe`.
+
+### Linux AppImage from Windows
+
+Run `npm run dist:linux` from PowerShell. It uses your default WSL distribution,
+copies the current build sources (including uncommitted edits) into a temporary
+Linux workspace, installs Linux dependencies, and copies the finished AppImage
+to `release\<version>\Kupo-Linux-<version>.AppImage`. The temporary workspace is
+removed afterward. Windows dependencies, icons, build outputs, and the
+`npm run dist:win` command are left unchanged.
+
+One-time setup: run `wsl --install -d Ubuntu` in an administrator PowerShell,
+restart if requested, and open Ubuntu to complete its first-run setup. Install
+Linux Node.js 22 or newer with npm inside that distribution (a default nvm
+installation is supported). Windows Node.js does not replace Linux Node.js.
+The build uses the default distribution selected by `wsl --set-default <name>`
+and needs network access for npm dependencies and packaging tools.
+
+Alternatively, no local Linux installation is needed with GitHub Actions. Push the build
+workflow and source changes to GitHub's default branch, then open the repository's
+**Actions** tab, select **Build AppImage**, and choose **Run workflow**. Once the
+run succeeds, download **Kupo-Linux-x64-AppImage** from its **Artifacts** section
+and extract the ZIP to get `Kupo-Linux-<version>.AppImage`. This builds a Linux x64
+app; it does not run on Windows or publish a GitHub release.
+
+On Linux, mark the extracted AppImage as executable in its file properties before
+launching it. To build locally on Linux or in a separate WSL Linux checkout with
+Node.js 22 installed, run `npm ci` followed by `npm run dist:linux`. The output is
+in the versioned `release` directory. Do not reuse Windows `node_modules` in WSL.
+The Linux command generates its PNG icon automatically and explicitly uses
+`electron-builder.json5`; Windows packaging continues to use the configuration
+in `package.json`. AppImage packaging requires Linux tools such as `mksquashfs`;
+Windows builds run those tools inside WSL rather than directly on Windows.
+On macOS, use GitHub Actions or a Linux environment. Vite's large-chunk warning
+does not fail the build and is unrelated to AppImage packaging.
 
 ### Data checks and refreshes
 
