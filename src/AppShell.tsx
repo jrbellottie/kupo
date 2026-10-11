@@ -20,11 +20,14 @@ import { ScreenControlsProvider, ScreenControlToggles } from "./ScreenControls";
 import { loadJson, saveJson } from "./utils/storage";
 import { advanceEarthTimer, formatCountdown, nextOccurrenceLocal, pad2, parseDurationToMs, parseLocalDateTimeToMs, uid } from "./utils/time";
 import { createWeatherWindowTimer, type WeatherRow } from "./utils/weather";
-import { AnyTimer, MoonDirection } from "./types";
+import { AnyTimer, MoonDirection, type GardeningTimer, type EarthTimer } from "./types";
+import { advanceGardeningTimer, nextGardeningEvent, recordGardeningFeed } from "./utils/gardeningTimers";
+import GardeningTimerDetails from "./GardeningTimerDetails";
 import { WEEKDAYS, WEEKDAY_COLORS, weekdayStyle } from "./utils/weekday";
 import { moonDirGlyph, moonGlyphStyle, moonPhaseStyle } from "./utils/moon";
-import { buildTenshodoPresets, GUILD_PRESETS, nextGuildAlertTarget } from "./utils/guilds";
-import { TRANSPORT_GROUPS, createTransportTimer, getTransportArrivalMinutes, getTransportPorts, type TransportPreset } from "./utils/transport";
+import { buildTenshodoPresets, GUILD_COLORS, GUILD_PRESETS, nextGuildAlertTarget, type GuildPreset } from "./utils/guilds";
+import { TRANSPORT_GROUPS, createTransportTimer, getTransportArrivalMinutes, getTransportPorts, getTransportPortColor, type TransportPreset } from "./utils/transport";
+import TransportLabel from "./TransportLabel";
 import { registerTabSwitcher, switchTabWithScroll, setCurrentTab } from "./utils/tabNav";
 import { getNextNmLotteryEvent, getNextNmTimedWindowEvent } from "./utils/nm";
 import FishTab from "./FishTab";
@@ -71,7 +74,7 @@ type TenshodoTarget = {
 };
 
 type GuildPreview = {
-  id: string;
+  id: GuildPreset["id"];
   label: string;
   openHour: number;
   openMinute: number;
@@ -106,6 +109,14 @@ function mergeTenshodoTargets(targets: TenshodoTarget[]): TenshodoTarget[] {
   }
 
   return Array.from(map.values());
+}
+
+function colorWeekdays(text: string): React.ReactNode {
+  const weekdayPattern = new RegExp(`(${WEEKDAYS.join("|")})`, "g");
+  return text.split(weekdayPattern).map((part, index) => {
+    const weekday = WEEKDAYS.find(day => day === part);
+    return weekday ? <span key={index} style={weekdayStyle(weekday)}>{weekday}</span> : part;
+  });
 }
 
 const PRESET_OFFSET_MIN = 0;
@@ -584,6 +595,7 @@ export default function AppShell() {
 
       const timedWindowExpiredIds: string[] = [];
       const lotteryClearPhIds: string[] = [];
+      const gardeningUpdates = new Map<string, { before: GardeningTimer; after: GardeningTimer }>();
 
       for (const t of timers) {
         if (!t.enabled) continue;
@@ -603,7 +615,15 @@ export default function AppShell() {
             }
           | null = null;
 
-        if (t.kind === "NM_TIMED_WINDOW") {
+        if (t.kind === "GARDENING") {
+          const advanced = advanceGardeningTimer(t, nowMs2);
+          if (advanced.timer !== t) gardeningUpdates.set(t.id, { before: t, after: advanced.timer });
+          if (advanced.event) event = {
+            atMs: advanced.event.atMs, title: "Kupo",
+            body: `${t.label}: ${advanced.event.label} (estimated). Check the plant with the Moogle.`,
+            fireKey: advanced.event.id, repeat: false,
+          };
+        } else if (t.kind === "NM_TIMED_WINDOW") {
           const endAt = t.baseEarthMs + t.windowEndOffsetMs;
           if (nowMs2 > endAt + 60_000) {
             timedWindowExpiredIds.push(t.id);
@@ -621,7 +641,7 @@ export default function AppShell() {
           if (event) event = { ...event, repeat: false };
         }
 
-        if (!event && (t.kind === "NM_TIMED_WINDOW" || t.kind === "NM_LOTTERY")) {
+        if (!event && (t.kind === "GARDENING" || t.kind === "NM_TIMED_WINDOW" || t.kind === "NM_LOTTERY")) {
           continue;
         }
 
@@ -702,9 +722,11 @@ export default function AppShell() {
         }
       }
 
-      if (timedWindowExpiredIds.length > 0 || lotteryClearPhIds.length > 0) {
+      if (timedWindowExpiredIds.length > 0 || lotteryClearPhIds.length > 0 || gardeningUpdates.size > 0) {
         setTimers((prev) =>
           prev.map((x) => {
+            const gardening = gardeningUpdates.get(x.id);
+            if (gardening?.before === x) return gardening.after;
             if (timedWindowExpiredIds.includes(x.id)) return { ...x, enabled: false };
             if (lotteryClearPhIds.includes(x.id) && x.kind === "NM_LOTTERY") return { ...x, phNextAtMs: null };
             return x;
@@ -785,6 +807,25 @@ export default function AppShell() {
     }
     const timer = createWeatherWindowTimer(row, digMode, nowT);
     setTimers(prev => [timer, ...prev.filter(existing => existing.id !== timer.id)]);
+  }
+
+  function addGardeningTimer(timer: GardeningTimer) {
+    setTimers(prev => [timer, ...prev]);
+  }
+
+  function addGuildOpeningTimer(timer: EarthTimer) {
+    if (!Number.isFinite(timer.targetEarthMs) || timer.targetEarthMs <= Date.now()) {
+      alert("This guild opening has already passed. Set a reminder for the next opening.");
+      return;
+    }
+    setTimers(prev => [timer, ...prev.filter(existing => existing.id !== timer.id)]);
+  }
+
+  function recordGardenFeed(id: string, index: number, atMs: number | null) {
+    const timer = timers.find(timer => timer.id === id);
+    if (!timer || timer.kind !== "GARDENING") throw new Error("This gardening timer is no longer available.");
+    const updated = recordGardeningFeed(timer, index, atMs, Date.now());
+    setTimers(prev => prev.map(entry => entry.id === id ? updated : entry));
   }
 
   function addRealLifeTimer() {
@@ -874,6 +915,7 @@ export default function AppShell() {
         )}`,
         enabled: true,
         createdAtMs: Date.now(),
+        accentColor: GUILD_COLORS[guild.id],
         targetWeekday: guild.targetWeekday,
         targetHour: guild.targetHour,
         targetMinute: guild.targetMinute,
@@ -905,6 +947,7 @@ export default function AppShell() {
         )}`,
         enabled: true,
         createdAtMs: Date.now(),
+        accentColor: GUILD_COLORS.TENSHODO,
         targetWeekday: t.targetWeekday,
         targetHour: t.targetHour,
         targetMinute: t.targetMinute,
@@ -2043,11 +2086,12 @@ export default function AppShell() {
               </div>
 
               {guildPreviews.map((guild) => (
-                <div key={guild.id} style={styles.subCard}>
+                <div key={guild.id} style={{ ...styles.subCard, borderColor: `${GUILD_COLORS[guild.id]}66` }}>
                   <div style={styles.titleRow}>
-                    <div style={{ fontWeight: 800 }}>{guild.label}</div>
+                    <div style={{ fontWeight: 800, color: GUILD_COLORS[guild.id] }}>{guild.label}</div>
                     <div style={styles.sub}>
-                      Opens {formatVanaTime(guild.openHour, guild.openMinute)}–{formatVanaTime(guild.closeHour, guild.closeMinute)} → fires {pad2(guild.targetHour)}:{pad2(guild.targetMinute)} (offset {presetOffsetHours}h), closed {guild.closedOn ?? "Never"}
+                      Opens {formatVanaTime(guild.openHour, guild.openMinute)}–{formatVanaTime(guild.closeHour, guild.closeMinute)} → fires {pad2(guild.targetHour)}:{pad2(guild.targetMinute)} (offset {presetOffsetHours}h), closed{" "}
+                      {guild.closedOn ? <span style={weekdayStyle(guild.closedOn)}>{guild.closedOn}</span> : "Never"}
                     </div>
                   </div>
 
@@ -2060,7 +2104,7 @@ export default function AppShell() {
                   </div>
 
                   <div style={{ marginTop: 10, ...styles.buttonRow }}>
-                    <button style={styles.buttonPrimary} onClick={() => addGuildTimer(guild)}>
+                    <button style={{ ...styles.buttonPrimary, color: GUILD_COLORS[guild.id], borderColor: `${GUILD_COLORS[guild.id]}99` }} onClick={() => addGuildTimer(guild)}>
                       Add {guild.label} timer
                     </button>
                   </div>
@@ -2068,16 +2112,16 @@ export default function AppShell() {
               ))}
 
               {/* Tenshodo */}
-              <div style={styles.subCard}>
+              <div style={{ ...styles.subCard, borderColor: `${GUILD_COLORS.TENSHODO}66` }}>
                 <div style={styles.titleRow}>
-                  <div style={{ fontWeight: 800 }}>Tenshodo</div>
+                  <div style={{ fontWeight: 800, color: GUILD_COLORS.TENSHODO }}>Tenshodo</div>
                   <div style={styles.sub}>Adds 2–3 timers (merged when fire time matches)</div>
                 </div>
 
                 <div style={{ marginTop: 8, display: "grid", gap: 10 }}>
                   {tenshodoPreviews.map((t) => (
                     <div key={t.label} style={{ ...styles.sub, opacity: 0.95 }}>
-                      <div style={{ fontWeight: 800 }}>{t.label}</div>
+                      <div style={{ fontWeight: 800 }}>{colorWeekdays(t.label)}</div>
                       Will set:{" "}
                       <span style={weekdayStyle(t.targetWeekday)}>{t.targetWeekday}</span> {pad2(t.targetHour)}:
                       {pad2(t.targetMinute)}
@@ -2088,13 +2132,13 @@ export default function AppShell() {
                 </div>
 
                 <div style={{ marginTop: 10, ...styles.buttonRow }}>
-                  <button style={styles.buttonPrimary} onClick={addTenshodoTimers}>
+                  <button style={{ ...styles.buttonPrimary, color: GUILD_COLORS.TENSHODO, borderColor: `${GUILD_COLORS.TENSHODO}99` }} onClick={addTenshodoTimers}>
                     Add Tenshodo timers
                   </button>
                 </div>
 
                 <div style={{ marginTop: 8, ...styles.sub }}>
-                  Notes: Lower Jeuno closed Earthsday; Port Bastok closed Iceday; Norg closed Darksday. Offset is {presetOffsetHours}h
+                  {colorWeekdays(`Notes: Lower Jeuno closed Earthsday; Port Bastok closed Iceday; Norg closed Darksday. Offset is ${presetOffsetHours}h`)}
                   before open.
                 </div>
               </div>
@@ -2114,14 +2158,14 @@ export default function AppShell() {
                   </div>
                   {group.routes.map((route) => (
                     <div key={route.id} style={styles.subCard}>
-                      <div style={{ fontWeight: 800 }}>{route.label}</div>
+                      <div style={{ fontWeight: 800 }}><TransportLabel label={route.label} ports={route} /></div>
                       <div style={{ marginTop: 8 }}>
-                        <strong>Next departure from {route.departurePort} in: {formatCountdown(route.nextDepartureAt - nowMs)}</strong>
+                        <strong style={{ color: getTransportPortColor(route.departurePort) }}>Next departure from {route.departurePort} in: {formatCountdown(route.nextDepartureAt - nowMs)}</strong>
                         <br />
                         Leaves (Earth): {new Date(route.nextDepartureAt).toLocaleString()}
                       </div>
                       <div style={{ marginTop: 8 }}>
-                        <strong>Next arrival at {route.arrivalPort} in: {formatCountdown(route.nextArrivalAt - nowMs)}</strong>
+                        <strong style={{ color: getTransportPortColor(route.arrivalPort) }}>Next arrival at {route.arrivalPort} in: {formatCountdown(route.nextArrivalAt - nowMs)}</strong>
                         <br />
                         Arrives (Earth): {new Date(route.nextArrivalAt).toLocaleString()}
                       </div>
@@ -2130,7 +2174,7 @@ export default function AppShell() {
                         <br />
                         Next alert (Earth): {new Date(route.nextAt).toLocaleString()} — In: {formatCountdown(route.nextAt - nowMs)}
                         <br />
-                        For departure from {route.departurePort} (Earth): {new Date(route.departureAt).toLocaleString()} — In: {formatCountdown(route.departureAt - nowMs)}
+                        <span style={{ color: getTransportPortColor(route.departurePort) }}>For departure from {route.departurePort} (Earth): {new Date(route.departureAt).toLocaleString()} — In: {formatCountdown(route.departureAt - nowMs)}</span>
                       </div>
                       <div style={{ marginTop: 10, ...styles.buttonRow }}>
                         <button style={styles.buttonPrimary} onClick={() => addTransportTimer(route)}>
@@ -2159,7 +2203,9 @@ export default function AppShell() {
               {timers.map((t) => {
                 let nextAt: number | null = null;
 
-                if (t.kind === "NM_TIMED_WINDOW") {
+                if (t.kind === "GARDENING") {
+                  nextAt = nextGardeningEvent(t)?.atMs ?? null;
+                } else if (t.kind === "NM_TIMED_WINDOW") {
                   const ev = getNextNmTimedWindowEvent(t, nowMs);
                   nextAt = ev?.atMs ?? null;
                 } else if (t.kind === "NM_LOTTERY") {
@@ -2228,7 +2274,9 @@ export default function AppShell() {
 
                 let detailLine: React.ReactNode = null;
 
-                if (t.kind === "VANA_WEEKDAY_TIME") {
+                if (t.kind === "GARDENING") {
+                  detailLine = <GardeningTimerDetails timer={t} nowMs={nowMs} onRecordFeed={recordGardenFeed} />;
+                } else if (t.kind === "VANA_WEEKDAY_TIME") {
                   detailLine = (
                     <div style={{ marginTop: 6, opacity: 0.9 }}>
                       Vana: {t.targetWeekday} {pad2(t.targetHour)}:{pad2(t.targetMinute)}
@@ -2289,9 +2337,9 @@ export default function AppShell() {
                 }
 
                 return (
-                  <div key={t.id} style={styles.timerItem}>
+                  <div key={t.id} style={{ ...styles.timerItem, ...(t.kind === "VANA_WEEKDAY_TIME" && t.accentColor ? { borderColor: `${t.accentColor}99` } : {}) }}>
                     <div style={styles.timerTop}>
-                      <div style={styles.timerLabel}>{t.label}</div>
+                      <div style={{ ...styles.timerLabel, ...(t.kind === "VANA_WEEKDAY_TIME" && t.accentColor ? { color: t.accentColor } : {}) }}>{t.kind === "TRANSPORT" ? <TransportLabel label={t.label} ports={ports} /> : t.label}</div>
                       <div style={styles.muted}>
                         {pausedMs !== null ? "Paused" : t.enabled ? "Enabled" : "Disabled"}
                       </div>
@@ -2301,7 +2349,7 @@ export default function AppShell() {
 
                     {nextDepartureAt !== null && (
                       <div style={{ marginTop: 8 }}>
-                        <strong>Next departure{ports ? ` from ${ports.departurePort}` : " (port unavailable)"} in: {formatCountdown(nextDepartureAt - nowMs)}</strong>
+                        <strong style={{ color: getTransportPortColor(ports?.departurePort) }}>Next departure{ports ? ` from ${ports.departurePort}` : " (port unavailable)"} in: {formatCountdown(nextDepartureAt - nowMs)}</strong>
                         <br />
                         Leaves (Earth): {new Date(nextDepartureAt).toLocaleString()}
                       </div>
@@ -2309,7 +2357,7 @@ export default function AppShell() {
 
                     {nextArrivalAt !== null ? (
                       <div style={{ marginTop: 8 }}>
-                        <strong>Next arrival{ports ? ` at ${ports.arrivalPort}` : " (port unavailable)"} in: {formatCountdown(nextArrivalAt - nowMs)}</strong>
+                        <strong style={{ color: getTransportPortColor(ports?.arrivalPort) }}>Next arrival{ports ? ` at ${ports.arrivalPort}` : " (port unavailable)"} in: {formatCountdown(nextArrivalAt - nowMs)}</strong>
                         <br />
                         Arrives (Earth): {new Date(nextArrivalAt).toLocaleString()}
                         {nextDepartureAt !== null && nextArrivalAt < nextDepartureAt && (
@@ -2322,7 +2370,7 @@ export default function AppShell() {
                       </div>
                     ) : null}
 
-                    <div style={{ marginTop: 6, ...styles.muted }}>
+                    {t.kind !== "GARDENING" && <div style={{ marginTop: 6, ...styles.muted }}>
                       {nextAt === null ? (
                         <>Next: No upcoming events.</>
                       ) : (
@@ -2336,11 +2384,11 @@ export default function AppShell() {
                           </>}
                         </>
                       )}
-                    </div>
+                    </div>}
 
                     {departureAt !== null && departureAt !== nextDepartureAt && (
                       <div style={{ marginTop: 8 }}>
-                        <strong>Departure{ports ? ` from ${ports.departurePort}` : ""} for this alert</strong>
+                        <strong style={{ color: getTransportPortColor(ports?.departurePort) }}>Departure{ports ? ` from ${ports.departurePort}` : ""} for this alert</strong>
                         <br />
                         Leaves (Earth): {new Date(departureAt).toLocaleString()} — In: {formatCountdown(departureAt - nowMs)}
                       </div>
@@ -2391,7 +2439,7 @@ export default function AppShell() {
                         </>
                       )}
 
-                      <button style={styles.button} onClick={() => toggleTimer(t.id)}>
+                      <button style={styles.button} disabled={t.kind === "GARDENING" && !nextGardeningEvent(t)} onClick={() => toggleTimer(t.id)}>
                         {t.enabled ? "Disable" : "Enable"}
                       </button>
                       <button style={styles.button} onClick={() => deleteTimer(t.id)}>
@@ -2622,7 +2670,7 @@ export default function AppShell() {
 
       {activeTab === "fish" && (
         <div style={styles.tabContent}>
-          <FishTab cal={cal} />
+          <FishTab cal={cal} nowMs={nowMs} activeTimerIds={activeTimerIds} onSetGuildTimer={addGuildOpeningTimer} />
         </div>
       )}
 
@@ -2653,7 +2701,7 @@ export default function AppShell() {
       {activeTab === "gardening" && (
         <div style={styles.tabContent}>
           <React.Suspense fallback={<div style={styles.card}>Loading gardening...</div>}>
-            <GardeningTab />
+            <GardeningTab timers={timers.filter((timer): timer is GardeningTimer => timer.kind === "GARDENING")} nowMs={nowMs} onSetTimer={addGardeningTimer} onRecordFeed={recordGardenFeed} />
           </React.Suspense>
         </div>
       )}
@@ -2721,7 +2769,7 @@ export default function AppShell() {
       {activeTab === "crafting" && (
         <div style={styles.tabContent}>
           <React.Suspense fallback={<div style={styles.card}>Loading recipes...</div>}>
-            <CraftingTab />
+            <CraftingTab cal={cal} nowMs={nowMs} activeTimerIds={activeTimerIds} onSetGuildTimer={addGuildOpeningTimer} />
           </React.Suspense>
         </div>
       )}

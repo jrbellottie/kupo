@@ -33,13 +33,30 @@ export type GuildPreset = {
     | "GOLDSMITHING"
     | "BONECRAFT"
     | "ALCHEMY"
+    | "ALCHEMY_WHITEGATE"
     | "COOKING"
     | "FISHING"
+    | "FISHING_WHITEGATE"
     | "LEATHERCRAFT";
   label: string;
   schedule: GuildSchedule;
   closeHour: number;
   closeMinute?: number;
+};
+
+export const GUILD_COLORS: Record<GuildPreset["id"] | "TENSHODO", string> = {
+  WOODWORKING: "#8ed08b",
+  CLOTHCRAFT: "#efa6d2",
+  SMITHING: "#aebdce",
+  GOLDSMITHING: "#e6c35c",
+  BONECRAFT: "#e8dcc0",
+  ALCHEMY: "#66d9bd",
+  ALCHEMY_WHITEGATE: "#66d9bd",
+  COOKING: "#ffab70",
+  FISHING: "#79bfff",
+  FISHING_WHITEGATE: "#79bfff",
+  LEATHERCRAFT: "#c99c72",
+  TENSHODO: "#bda0ed",
 };
 
 export const GUILD_PRESETS: GuildPreset[] = [
@@ -86,6 +103,13 @@ export const GUILD_PRESETS: GuildPreset[] = [
     closeMinute: 0,
   },
   {
+    id: "ALCHEMY_WHITEGATE",
+    label: "Alchemy Guild — Whitegate",
+    schedule: { openHour: 8, openMinute: 0, closedOn: "Lightningday" },
+    closeHour: 23,
+    closeMinute: 0,
+  },
+  {
     id: "COOKING",
     label: "Cooking Guild",
     schedule: { openHour: 5, openMinute: 0, closedOn: "Darksday" },
@@ -96,6 +120,13 @@ export const GUILD_PRESETS: GuildPreset[] = [
     id: "FISHING",
     label: "Fishing Guild",
     schedule: { openHour: 3, openMinute: 0, closedOn: "Lightningday" },
+    closeHour: 18,
+    closeMinute: 0,
+  },
+  {
+    id: "FISHING_WHITEGATE",
+    label: "Fishing Guild — Whitegate",
+    schedule: { openHour: 1, openMinute: 0, closedOn: "Lightsday" },
     closeHour: 18,
     closeMinute: 0,
   },

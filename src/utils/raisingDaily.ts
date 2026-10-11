@@ -1,12 +1,16 @@
 import { RAISING, STAT_KEYS, PROJECTION_FOODS, type RaisingStats } from "./chocoboRaising";
 import { LAST_RAISING_DAY, RAISING_ABILITIES, type RaisingGoalInput, type TrainingDay } from "./chocoboRaisingPlanner";
-import { BIRD_CONDITIONS, FEEDING_FOODS, validateFeedingReport, type FeedingReport } from "./chocoboFeeding";
+import { BIRD_CONDITIONS, PLANNER_FEEDING_FOODS, validateFeedingReport, type FeedingReport } from "./chocoboFeeding";
+import { PARASITE_WORM_ID, type ColorGoal } from "./chocoboColor";
 
 export const RAISING_DAILY_KEY = "kupo.raising.daily.v1";
-export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "currentDay" | "today"> & {
+export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "currentDay" | "today" | "colorGoal"> & {
   current: Record<keyof RaisingStats, string>;
   target: Record<keyof RaisingStats, string>;
   useExactStats?: boolean;
+  avoidYellow?: boolean;
+  eggId?: string;
+  wormsFed?: string;
 };
 export type DailyStep = Pick<TrainingDay, "day" | "foodId" | "foodCount" | "story" | "careId" | "feeding">;
 export type DailySchedule = {
@@ -36,7 +40,13 @@ export function feedingInputKey(form: PlannerForm, report: FeedingReport): strin
   return JSON.stringify([
     STAT_KEYS.map(key => form.current[key]), STAT_KEYS.map(key => form.target[key]), form.useExactStats === true,
     form.desiredAbilities, form.knownAbilities, form.priority, report.affection, report.fullness, report.condition, report.day,
+    form.avoidYellow === true, form.eggId ?? "", form.wormsFed ?? "0",
   ]);
+}
+export function plannerColorGoal(form: PlannerForm): ColorGoal | undefined {
+  if (!form.avoidYellow) return undefined;
+  const number = (value: string) => value.trim() === "" ? NaN : Number(value);
+  return { eggId: number(form.eggId ?? ""), wormsFed: number(form.wormsFed ?? "0") };
 }
 const wholeRange = (value: unknown, min: number, max: number): value is number =>
   typeof value === "number" && Number.isInteger(value) && value >= min && value <= max;
@@ -47,8 +57,9 @@ function validFeeding(value: unknown, day: number): boolean {
   let affection = Number(value.affectionBefore);
   let fullness = Number(value.fullnessBefore);
   for (const id of value.items) {
-    const food = FEEDING_FOODS.find(food => food.id === id);
+    const food = PLANNER_FEEDING_FOODS.find(food => food.id === id);
     if (!food || day < RAISING.settings.daysToChick || fullness >= 224) return false;
+    if (id === PARASITE_WORM_ID && day >= RAISING.settings.daysToAdolescent) return false;
     const variant = day < RAISING.settings.daysToAdolescent ? food.chick : food;
     affection = Math.min(255, affection + variant.affection);
     fullness = Math.min(255, fullness + variant.fullness);
@@ -62,6 +73,9 @@ function isSavedDaily(value: unknown): value is SavedRaisingDaily {
   if (!statInputs(form.current) || !statInputs(form.target) || !abilityNames(form.desiredAbilities)
     || !abilityNames(form.knownAbilities) || !STAT_KEYS.some(key => key === form.priority)
     || (form.useExactStats !== undefined && typeof form.useExactStats !== "boolean")
+    || (form.avoidYellow !== undefined && typeof form.avoidYellow !== "boolean")
+    || (form.eggId !== undefined && typeof form.eggId !== "string")
+    || (form.wormsFed !== undefined && typeof form.wormsFed !== "string")
     || (value.defaultsVersion !== undefined && typeof value.defaultsVersion !== "number")) return false;
   if (form.feedingReport !== undefined) {
     const report = form.feedingReport;

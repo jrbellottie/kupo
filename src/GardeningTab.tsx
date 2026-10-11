@@ -1,10 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { styles } from "./styles";
 import { CollapsibleSection } from "./ScreenControls";
+import type { GardeningTimer } from "./types";
+import GardeningTimerDetails, { type RecordGardeningFeed } from "./GardeningTimerDetails";
+import { formatLocalDateTime, parseLocalDateTimeToMs } from "./utils/time";
 import { peekRestoredTabState, rememberTabState } from "./utils/tabNav";
 import {
   GARDENING, GARDEN_ROWS, DEFAULT_GARDEN_FILTERS, crystalName, filterGardenRows,
-  gardenDuration, gardenDurationRange, gardenOutcomes, gardenQuantity, gardenSeed, gardenTiming,
+  gardenDuration, gardenDurationRange, gardenOutcomes, gardenQuantity, gardenSeed, gardenTiming, createGardeningTimer,
   type GardenFilters, type GardenRecipe,
 } from "./utils/gardening";
 import "./GardeningTab.css";
@@ -19,7 +22,27 @@ function SourceLink({ file, children }: { file: string; children: React.ReactNod
   return <a href={`${SOURCE_ROOT}${file}`} target="_blank" rel="noreferrer">{children}</a>;
 }
 
-function RecipeDetails({ recipe, pot, onClose }: { recipe: GardenRecipe; pot: string; onClose: () => void }) {
+function RecipeDetails({ recipe, pot, onClose, onSetTimer }: {
+  recipe: GardenRecipe; pot: string; onClose: () => void; onSetTimer?: (timer: GardeningTimer) => void;
+}) {
+  const [planted, setPlanted] = useState(() => formatLocalDateTime(Date.now()));
+  const [label, setLabel] = useState("");
+  const [timerError, setTimerError] = useState<string | null>(null);
+  const [addedKey, setAddedKey] = useState<string | null>(null);
+  const draftKey = `${planted}|${label}`;
+  const addTimer = () => {
+    try {
+      const plantedAtMs = parseLocalDateTimeToMs(planted);
+      if (plantedAtMs === undefined) throw new Error("Enter a valid local planting date and time.");
+      if (!onSetTimer) throw new Error("Gardening timers are unavailable.");
+      onSetTimer(createGardeningTimer(recipe, plantedAtMs, Date.now(), label));
+      setTimerError(null);
+      setAddedKey(draftKey);
+    } catch (cause) {
+      console.error("Unable to create gardening timer.", cause);
+      setTimerError(cause instanceof Error ? cause.message : "Unable to create gardening timer.");
+    }
+  };
   const seed = gardenSeed(recipe.seedId);
   const timing = gardenTiming(recipe);
   const outcomes = gardenOutcomes(recipe);
@@ -40,6 +63,18 @@ function RecipeDetails({ recipe, pot, onClose }: { recipe: GardenRecipe; pot: st
       </table>
     </div>
     <p className="gardening-small">Feed when the Moogle offers it, not solely by these estimates. The second window shifts with the first feeding. Continue examining even when deliberately skipping a crystal.</p>
+    {onSetTimer && <section aria-label="Create gardening timer">
+      <h4>One timer for this planting</h4>
+      <p className="gardening-small">Set the actual planting time. The timer advances through each feeding window's opening and closing, then harvest readiness. By default it assumes feeding near the end of each window; optional actual feeding records adjust later events. Feed before the closing deadline and record earlier feeding so later reminders are not late. Past feeding milestones are skipped when adding an existing planting.</p>
+      <div className="gardening-controls">
+        <label>Planted at (local time)<input type="datetime-local" step="1" style={styles.input} value={planted} onChange={event => setPlanted(event.target.value)} /></label>
+        <button type="button" style={styles.buttonCompact} onClick={() => setPlanted(formatLocalDateTime(Date.now()))}>Planted now</button>
+        <label>Timer label (optional)<input style={styles.input} value={label} onChange={event => setLabel(event.target.value)} placeholder="Character / pot name" /></label>
+        <button type="button" style={styles.buttonPrimary} disabled={addedKey === draftKey} onClick={addTimer}>{addedKey === draftKey ? "Timer added" : "Set gardening timer"}</button>
+      </div>
+      {timerError && <p role="alert" style={{ color: "#ff8a8a" }}>{timerError}</p>}
+      {addedKey === draftKey && <p role="status">Gardening timer added below and to the saved Timers list. It stops after the estimated schedule finishes.</p>}
+    </section>}
     <div className="gardening-table-wrap">
       <table aria-label="All recipe outcomes">
         <caption>All outcomes, including source-listed results the default model cannot select</caption>
@@ -54,7 +89,12 @@ function RecipeDetails({ recipe, pot, onClose }: { recipe: GardenRecipe; pot: st
   </section>;
 }
 
-export default function GardeningTab() {
+export default function GardeningTab({ timers = [], nowMs = Date.now(), onSetTimer, onRecordFeed }: {
+  timers?: GardeningTimer[];
+  nowMs?: number;
+  onSetTimer?: (timer: GardeningTimer) => void;
+  onRecordFeed?: RecordGardeningFeed;
+} = {}) {
   const [view, setView] = useState<GardenView>(() => peekRestoredTabState<GardenView>("gardening") ?? {
     filters: { ...DEFAULT_GARDEN_FILTERS }, page: 0, selected: null,
   });
@@ -72,6 +112,14 @@ export default function GardeningTab() {
   return <section className="gardening" style={styles.card}>
     <div style={styles.titleRow}><h3 style={styles.h3}>Gardening</h3><span style={styles.sub}>Mog House pots - {GARDENING.recipes.length} recipes / {RESULT_NAMES.length} harvest items</span></div>
     <p className="gardening-notice">Find what to plant for an item, or explore a seed and crystal combination. This reference uses LSB-based gardening code from a pinned public source snapshot. Private-server modules and settings may override these rules; unpublished overrides cannot be reviewed or verified here. In the pinned settings, pot choice, weekday, moon phase and room aura do not modify results. This is flowerpot gardening, not Mog Garden gathering.</p>
+    {timers.length > 0 && <section aria-label="Saved gardening timers" className="gardening-detail">
+      <h4>Gardening timers</h4>
+      <p className="gardening-small">One countdown per planting. Disable or delete reminders from the main Timers list. Keep Kupo running for notifications.</p>
+      {timers.map(timer => <section key={timer.id} style={styles.subCard}>
+        <h4>{timer.label}{timer.enabled ? "" : " (disabled)"}</h4>
+        <GardeningTimerDetails timer={timer} nowMs={nowMs} onRecordFeed={onRecordFeed} />
+      </section>)}
+    </section>}
     <CollapsibleSection kind="search">
       <div className="gardening-controls">
         <label>Search pot, seed, crystal or item<input style={styles.input} value={filters.query} onChange={event => update({ query: event.target.value })} placeholder="Arcane, tree saplings, fire..." /></label>
@@ -98,7 +146,7 @@ export default function GardeningTab() {
       </div>
       <label className="gardening-checkbox"><input type="checkbox" checked={filters.includeUnreachable} onChange={event => update({ includeUnreachable: event.target.checked })} /> Include source-listed outcomes with 0% modeled chance</label>
     </CollapsibleSection>
-    {selected && <RecipeDetails recipe={selected} pot={pot?.name ?? ""} onClose={() => setView(previous => ({ ...previous, selected: null }))} />}
+    {selected && <RecipeDetails key={selected.id} recipe={selected} pot={pot?.name ?? ""} onSetTimer={onSetTimer} onClose={() => setView(previous => ({ ...previous, selected: null }))} />}
     <div className="gardening-results-header">
       <p role="status"><strong>{filtered.length.toLocaleString()} matching outcomes</strong> across {recipeCount} recipes. {filtered.length > 0 && `Showing ${page * PAGE_SIZE + 1}-${Math.min((page + 1) * PAGE_SIZE, filtered.length)}.`}</p>
       <div className="gardening-pages">

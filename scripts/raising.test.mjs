@@ -7,9 +7,11 @@ import { buildSync } from "esbuild";
 const bundle = buildSync({ entryPoints: ["src/utils/chocoboRaising.ts"], bundle: true, write: false, platform: "node", format: "esm" });
 const { RAISING, STAT_KEYS, STAT_BANDS, PROJECTION_FOODS, foodStatText, foodEffects, projectFoodOnly, validateFoodProjection, ridingEstimate, statRank, carePlanRange, applyRaisingStatChanges } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 const plannerBundle = buildSync({ entryPoints: ["src/utils/chocoboRaisingPlanner.ts"], bundle: true, write: false, platform: "node", format: "esm" });
-const { RAISING_ABILITIES, RAISING_PRESETS, STORY_ATTEMPTS_95, LAST_RAISING_DAY, RAISING_START_KEY, validateRaisingGoal, planRaisingGoal, applyTrainingAction, trainingActionName, storyLearningProbability, careAvailableDay, trainingFoodLimit, groupTrainingDays, raisingDayAt, parseRaisingStart, localRaisingStart } = await import(`data:text/javascript;base64,${Buffer.from(plannerBundle.outputFiles[0].text).toString("base64")}`);
+const { RAISING_ABILITIES, RAISING_PRESETS, STORY_ATTEMPTS_95, LAST_RAISING_DAY, RAISING_START_KEY, validateRaisingGoal, planRaisingGoal, applyTrainingAction, trainingActionName, storyLearningProbability, careAvailableDay, trainingFoodLimit, trainingFoodTotals, groupTrainingDays, raisingDayAt, parseRaisingStart, localRaisingStart } = await import(`data:text/javascript;base64,${Buffer.from(plannerBundle.outputFiles[0].text).toString("base64")}`);
 const dailyBundle = buildSync({ entryPoints: ["src/utils/raisingDaily.ts"], bundle: true, write: false, platform: "node", format: "esm" });
-const { RAISING_DAILY_KEY, parseSavedRaisingDaily, dailyProgress, todayCare, feedingInputKey } = await import(`data:text/javascript;base64,${Buffer.from(dailyBundle.outputFiles[0].text).toString("base64")}`);
+const { RAISING_DAILY_KEY, parseSavedRaisingDaily, dailyProgress, todayCare, feedingInputKey, plannerColorGoal } = await import(`data:text/javascript;base64,${Buffer.from(dailyBundle.outputFiles[0].text).toString("base64")}`);
+const colorBundle = buildSync({ entryPoints: ["src/utils/chocoboColor.ts"], bundle: true, write: false, platform: "node", format: "esm" });
+const { CHOCOBO_COLORS, PARASITE_WORM_ID, geneColor, eggGeneDistribution, chocoboColorOdds, colorStrategy } = await import(`data:text/javascript;base64,${Buffer.from(colorBundle.outputFiles[0].text).toString("base64")}`);
 const feedingBundle = buildSync({ entryPoints: ["src/utils/chocoboFeeding.ts"], bundle: true, write: false, platform: "node", format: "esm" });
 const { AFFECTION_TARGET, AFFECTION_REPORTS, HUNGER_REPORTS, FEEDING_FOODS, feedingOptions, feedingFood, feedingSummary, careSuccessChance } = await import(`data:text/javascript;base64,${Buffer.from(feedingBundle.outputFiles[0].text).toString("base64")}`);
 const food = name => {
@@ -484,6 +486,255 @@ test("feeding menus respect stage, report uncertainty, source effects and the fo
   assert.throws(() => feedingFood(-1), /Unsupported/);
 });
 
+test("color probabilities match an exhaustive gene transition, including repeated rolls and source egg patterns", () => {
+  assert.deepEqual(RAISING.eggColorOdds.map(egg => egg.genePatterns), [
+    [25, 50, 25], [17.5, 60, 22.5], [16, 65, 19], [15, 70, 15], [10, 75, 15],
+  ]);
+  const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-12, `${actual} != ${expected}`);
+  const dna = Array.from({ length: 125 }, (_, index) => [Math.floor(index / 25), Math.floor(index / 5) % 5, index % 5]);
+  const displayed = genes => {
+    const counts = [0, 0, 0, 0, 0];
+    for (const value of genes) counts[value]++;
+    const majority = counts.findIndex(count => count > 1);
+    return majority >= 0 ? majority : counts[0] || !counts[1] ? 0 : 1;
+  };
+  for (const genes of dna) assert.equal(geneColor(genes), displayed(genes));
+  assert.equal(geneColor([0, 0, 2]), 0);
+  assert.equal(geneColor([2, 3, 4]), 0);
+  assert.equal(geneColor([1, 3, 4]), 1);
+  for (const egg of RAISING.eggColorOdds) {
+    let distribution = eggGeneDistribution(egg.id);
+    close(distribution.reduce((sum, probability) => sum + probability, 0), 1);
+    close(distribution[0], egg.yellow / 100 * egg.genePatterns[0] / 100);
+    close(distribution[62], egg.blue / 100 * egg.genePatterns[0] / 100);
+    for (let worms = 0; worms <= 12; worms++) {
+      const odds = chocoboColorOdds(egg.id, worms);
+      const expected = [0, 0, 0, 0, 0];
+      distribution.forEach((probability, index) => { expected[displayed(dna[index])] += probability; });
+      CHOCOBO_COLORS.forEach((color, index) => {
+        close(odds[color], expected[index]);
+        if (!worms) close(odds[color], egg[color] / 100);
+        assert.ok(odds[color] >= 0 && odds[color] <= 1);
+      });
+      close(Object.values(odds).reduce((sum, probability) => sum + probability, 0), 1);
+      const next = Array(125).fill(0);
+      distribution.forEach((probability, index) => {
+        for (let slot = 0; slot < 3; slot++) for (let color = 0; color < 5; color++) {
+          const genes = [...dna[index]];
+          genes[slot] = color;
+          next[genes[0] * 25 + genes[1] * 5 + genes[2]] += probability / 15;
+        }
+      });
+      distribution = next;
+    }
+    close(1 - chocoboColorOdds(egg.id, 1000).yellow, 0.56);
+  }
+  close(1 - chocoboColorOdds(2312, 1).yellow, 0.19041666666666667);
+  close(1 - chocoboColorOdds(2312, 4).yellow, 0.4337067901234568);
+  for (const eggId of [2312, 2314, 2317]) assert.equal(colorStrategy({ eggId, wormsFed: 0 }, 12).best.worms, 12);
+  for (const eggId of [2318, 2319]) assert.equal(colorStrategy({ eggId, wormsFed: 0 }, 60).best.worms, 0);
+  assert.equal(colorStrategy({ eggId: 2318, wormsFed: 2 }, 12).best.worms, 12, "prior worms can change which strategy is best");
+  for (const [egg, worms] of [[0, 0], [2312, -1], [2312, 1.5], [2312, NaN], [2312, Infinity]]) {
+    assert.throws(() => chocoboColorOdds(egg, worms));
+  }
+  assert.throws(() => geneColor([0, 1]));
+  assert.throws(() => colorStrategy({ eggId: 2312, wormsFed: 0 }, 61));
+});
+
+test("color worm meals are opt-in, affection-aware and safe across the chick cutoff", () => {
+  for (const day of [3, 4, 18, 19]) for (const fullness of [0, 31, 95, 159, 191, 223, 224, 255]) {
+    assert.ok(feedingOptions(stats(), 224, fullness, day).every(meal => !meal.items.includes(PARASITE_WORM_ID)));
+    for (const meal of feedingOptions(stats(), 224, fullness, day, true, true)) {
+      let filled = fullness;
+      let affection = 224;
+      for (const id of meal.items) {
+        assert.ok(filled < 224);
+        if (id === PARASITE_WORM_ID) assert.ok(day >= 4 && day < 19);
+        const entry = feedingFood(id);
+        const variant = day < 19 ? entry.chick : entry;
+        filled = Math.min(255, filled + variant.fullness);
+        affection = Math.min(255, affection + variant.affection);
+      }
+      assert.equal(filled, meal.fullness);
+      assert.equal(affection, meal.affection);
+      assert.ok(meal.items.length <= 4);
+    }
+  }
+  assert.equal(feedingSummary([PARASITE_WORM_ID, PARASITE_WORM_ID, 5606]), "2 Parasite Worm, then 1 Azouph Greens");
+});
+
+test("color planner uses safe capacity before day 19 and respects completed feeding and previous worms", () => {
+  const run = (patch = {}) => planRaisingGoal(goal({
+    currentDay: 18, target: stats(), desiredAbilities: [],
+    today: { feedingDone: false, storyDone: false },
+    feedingReport: { affection: 224, fullness: 0, condition: "healthy", day: 18 },
+    colorGoal: { eggId: 2312, wormsFed: 2 }, ...patch,
+  }));
+  const planned = run();
+  assert.equal(planned.color.plannedWorms, 4);
+  assert.deepEqual(planned.days[0].feeding.items, Array(4).fill(PARASITE_WORM_ID));
+  assert.deepEqual(planned.color.before, chocoboColorOdds(2312, 2));
+  assert.deepEqual(planned.color.after, chocoboColorOdds(2312, 6));
+  assert.ok(planned.days.slice(1).every(day => !day.feeding.items.includes(PARASITE_WORM_ID)));
+  assert.deepEqual(trainingFoodTotals(planned.days).find(food => food.id === PARASITE_WORM_ID),
+    { id: PARASITE_WORM_ID, name: "Parasite Worm", count: 4 });
+  for (const patch of [
+    { today: { feedingDone: true, storyDone: false } },
+    ...["unwell", "sleeping", "away"].map(condition => ({ feedingReport: { affection: 224, fullness: 0, condition, day: 18 } })),
+    { feedingReport: { affection: 224, fullness: 224, condition: "healthy", day: 18 } },
+    { currentDay: 19, feedingReport: { affection: 224, fullness: 0, condition: "healthy", day: 19 } },
+  ]) {
+    const plan = run(patch);
+    assert.equal(plan.color.plannedWorms, 0);
+    assert.deepEqual(plan.color.before, plan.color.after);
+    assert.equal(plan.color.wormsFed, 2, "completed feeding does not invent or erase eaten worms");
+    assert.equal(plan.color.locked, patch.currentDay === 19);
+  }
+  const low = run({ feedingReport: { affection: 0, fullness: 0, condition: "healthy", day: 18 } });
+  const bestAffection = Math.min(224, Math.max(...feedingOptions(stats(), 0, 0, 18, true, true).map(meal => meal.affection)));
+  assert.equal(Math.min(224, low.days[0].feeding.affectionAfter), bestAffection);
+  assert.ok(low.color.plannedWorms < 4, "recovery food takes priority over gene rolls");
+  const normal = run({ colorGoal: undefined });
+  assert.equal(normal.color, undefined);
+  assert.ok(normal.days.every(day => !day.feeding.items.includes(PARASITE_WORM_ID)));
+  const favorable = run({ colorGoal: { eggId: 2319, wormsFed: 0 } });
+  assert.equal(favorable.color.plannedWorms, 0);
+  assert.deepEqual(favorable.days, normal.days, "a favorable egg keeps the ordinary training plan");
+  assert.match(validateRaisingGoal(goal({ colorGoal: { eggId: 0, wormsFed: 0 } })), /starting egg/);
+  assert.match(validateRaisingGoal(goal({ colorGoal: { eggId: 2312, wormsFed: 0 } })), /feeding reports/);
+  assert.match(validateRaisingGoal(goal({ colorGoal: { eggId: 2312, wormsFed: 1 },
+    feedingReport: { affection: 255, fullness: 255, condition: "healthy", day: 0 } })), /Eggs cannot be fed/);
+});
+
+test("color lifetime route keeps affection before worms and still meets the digging build", () => {
+  const plan = planRaisingGoal(goal({
+    today: { feedingDone: false, storyDone: false },
+    feedingReport: { affection: 255, fullness: 255, condition: "healthy", day: 0 },
+    colorGoal: { eggId: 2312, wormsFed: 0 },
+  }));
+  assert.equal(plan.complete, true);
+  assert.equal(plan.color.plannedWorms, 1, "care-only chick hunger permits one worm after prioritizing affection recovery");
+  assert.ok(plan.color.after.yellow < plan.color.before.yellow);
+  assert.ok(plan.days.filter(day => day.day < 19).every(day => day.feeding.affectionAfter >= 224),
+    "do not greedily feed an early worm at the expense of later chick affection");
+  let count = 0;
+  for (const day of plan.days) {
+    let fullness = day.feeding.fullnessBefore;
+    let affection = day.feeding.affectionBefore;
+    let current = applyTrainingAction(day.before, { kind: "care", id: day.careId }, day.day, day.carePoints);
+    for (const id of day.feeding.items) {
+      assert.ok(day.day >= 4 && fullness < 224);
+      if (id === PARASITE_WORM_ID) { assert.ok(day.day < 19); count++; }
+      const entry = feedingFood(id);
+      const variant = day.day < 19 ? entry.chick : entry;
+      fullness = Math.min(255, fullness + variant.fullness);
+      affection = Math.min(255, affection + variant.affection);
+      current = applyRaisingStatChanges(current, entry.stats);
+    }
+    if (day.story) current = applyRaisingStatChanges(current, stats(0, 0, 1, 0));
+    assert.deepEqual(current, day.after);
+    assert.equal(fullness, day.feeding.fullnessAfter);
+    assert.equal(affection, day.feeding.affectionAfter);
+  }
+  assert.equal(count, plan.color.plannedWorms);
+});
+
+test("color form and worm meals persist without treating planned or skipped food as eaten", () => {
+  const form = {
+    current: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+    target: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+    desiredAbilities: [], knownAbilities: [], priority: "endurance",
+    avoidYellow: true, eggId: "2312", wormsFed: "2",
+  };
+  const report = { affection: 224, fullness: 191, condition: "healthy", day: 18 };
+  const progress = { startedAt: 100, day: 18, feedingDone: true, storyDone: false, careKey: null };
+  const daily = { startedAt: 100, plannedDay: 18, days: Array.from({ length: 111 }, (_, index) => ({
+    day: index + 18, foodId: null, foodCount: 0, story: null, careId: 0,
+    feeding: { items: index === 0 ? [PARASITE_WORM_ID] : [], affectionBefore: 224, affectionAfter: 224,
+      fullnessBefore: index === 0 ? 191 : 255, fullnessAfter: 255, careSuccess: 95 },
+  })) };
+  const saved = { form, daily, progress, defaultsVersion: 1 };
+  const parsed = parseSavedRaisingDaily(JSON.stringify(saved));
+  assert.deepEqual(parsed, saved);
+  assert.deepEqual(plannerColorGoal(parsed.form), { eggId: 2312, wormsFed: 2 });
+  assert.equal(plannerColorGoal({ ...form, avoidYellow: false }), undefined);
+  assert.ok(Number.isNaN(plannerColorGoal({ ...form, wormsFed: "" }).wormsFed));
+  for (const patch of [{ avoidYellow: false }, { eggId: "2319" }, { wormsFed: "3" }]) {
+    assert.notEqual(feedingInputKey(form, report), feedingInputKey({ ...form, ...patch }, report));
+  }
+  for (const patch of [{ avoidYellow: "yes" }, { eggId: 2312 }, { wormsFed: 2 }]) {
+    assert.throws(() => parseSavedRaisingDaily(JSON.stringify({ ...saved, form: { ...form, ...patch } })), /invalid/);
+  }
+  const invalid = structuredClone(saved);
+  invalid.daily.days[1].feeding.items = [PARASITE_WORM_ID];
+  invalid.daily.days[1].feeding.fullnessBefore = 191;
+  assert.throws(() => parseSavedRaisingDaily(JSON.stringify(invalid)), /invalid/, "no post-lock worm meal in saved plans");
+});
+
+test("color preference and actual worm history reach the live planner worker request", () => {
+  const { outputFiles } = buildSync({
+    stdin: { contents: 'export { default as Planner } from "./src/ChocoboRaisingPlanner";', resolveDir: process.cwd() },
+    bundle: true, write: false, platform: "node", format: "cjs", external: ["react"],
+    define: { "import.meta.url": JSON.stringify("file:///E:/kupo/src/ChocoboRaisingPlanner.tsx") },
+  });
+  const require = createRequire(import.meta.url);
+  const React = require("react");
+  let states;
+  let stateIndex;
+  const effects = [];
+  let request;
+  const module = { exports: {} };
+  new Function("require", "module", "exports", "Worker", outputFiles[0].text)(
+    name => name === "react" ? {
+      ...React, useId: () => "color-worker-test", useEffect: callback => { effects.push(callback); },
+      useState: () => [states[stateIndex++], () => {}],
+    } : require(name), module, module.exports,
+    class {
+      postMessage(input) { request = input; }
+      terminate() {}
+    },
+  );
+  for (const avoidYellow of [true, false]) {
+    states = [{
+      form: {
+        current: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+        target: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+        desiredAbilities: [], knownAbilities: [], priority: "endurance",
+        feedingReport: { affection: 224, fullness: 31, condition: "healthy", day: 18 },
+        avoidYellow, eggId: "2312", wormsFed: "2",
+      },
+      defaultsVersion: 1, calculatedDay: 18, calculatedStart: 0, todayMode: true, feedingMode: true,
+    }, { startedAt: 0, error: null }, "", null, 18 * 86400000, null];
+    stateIndex = 0;
+    effects.length = 0;
+    module.exports.Planner();
+    const cleanup = effects.at(-1)();
+    assert.equal(request.currentDay, 18);
+    assert.deepEqual(request.colorGoal, avoidYellow ? { eggId: 2312, wormsFed: 2 } : undefined);
+    cleanup();
+  }
+});
+
+test("food totals combine repeated mixed meals by item without double-counting legacy fields", () => {
+  const days = [
+    { foodId: 5608, foodCount: 3, feeding: { items: [5608, 5606, 5608] } },
+    { foodId: 5608, foodCount: 3, feeding: { items: [5608, 5608, 5606] } },
+    { foodId: 5607, foodCount: 4 },
+    { foodId: 5607, foodCount: 4, feeding: { items: [] } },
+    { foodId: null, foodCount: 0 },
+  ];
+  const before = structuredClone(days);
+  assert.deepEqual(trainingFoodTotals(days), [
+    { id: 5606, name: "Azouph Greens", count: 2 },
+    { id: 5607, name: "Vomp Carrot", count: 4 },
+    { id: 5608, name: "Zegham Carrot", count: 4 },
+  ]);
+  assert.deepEqual(days, before);
+  assert.deepEqual(trainingFoodTotals([]), []);
+  assert.deepEqual(trainingFoodTotals([{ foodId: null, foodCount: 0, feeding: { items: [] } }]), []);
+  assert.throws(() => trainingFoodTotals([{ foodId: -1, foodCount: 1 }]), /Unknown food/);
+});
+
 test("reported meals choose stat food at high affection and safely recover low affection", () => {
   const run = (patch = {}) => planRaisingGoal(goal({
     currentDay: 128, target: stats(0, 0, 6, 6), desiredAbilities: [],
@@ -493,6 +744,7 @@ test("reported meals choose stat food at high affection and safely recover low a
   const trained = run();
   assert.equal(trained.complete, true);
   assert.deepEqual(trained.days[0].feeding.items, [5608, 5608, 5608]);
+  assert.deepEqual(trainingFoodTotals(trained.days), [{ id: 5608, name: "Zegham Carrot", count: 3 }]);
   assert.equal(trained.days[0].feeding.affectionAfter, 255);
   const recovery = run({ target: stats(), feedingReport: { affection: 0, fullness: 0, condition: "healthy", day: 128 } });
   assert.ok(recovery.days[0].feeding.affectionAfter >= 224);
@@ -503,7 +755,9 @@ test("reported meals choose stat food at high affection and safely recover low a
     assert.deepEqual(paused.days[0].feeding.items, []);
     assert.equal(paused.complete, false);
   }
-  assert.deepEqual(run({ today: { feedingDone: true, storyDone: false } }).days[0].feeding.items, []);
+  const alreadyFed = run({ today: { feedingDone: true, storyDone: false } });
+  assert.deepEqual(alreadyFed.days[0].feeding.items, []);
+  assert.deepEqual(trainingFoodTotals(alreadyFed.days), []);
   assert.deepEqual(run({ feedingReport: { affection: 0, fullness: 255, condition: "healthy", day: 128 } }).days[0].feeding.items, []);
   const tired = run({
     current: stats(0, 0, 160), desiredAbilities: ["Bore"],
@@ -557,6 +811,11 @@ test("report-aware full routes meet all preset goals while maintaining affection
       assert.deepEqual(step.after, current);
     }
     assert.equal(plan.foodItems, plan.days.reduce((sum, step) => sum + step.feeding.items.length, 0));
+    const totals = trainingFoodTotals(plan.days);
+    assert.equal(totals.reduce((sum, food) => sum + food.count, 0), plan.foodItems);
+    const items = plan.days.flatMap(step => step.feeding.items);
+    assert.equal(totals.length, new Set(items).size);
+    for (const food of totals) assert.equal(food.count, items.filter(id => id === food.id).length);
     assert.ok(plan.days.some(step => step.day < 19 && step.feeding.items.length), "hunger-aware chick meals are included");
     const saved = {
       form: { ...input, current: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])), target: Object.fromEntries(STAT_KEYS.map(key => [key, String(input.target[key])])) },
@@ -703,7 +962,16 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     assert.equal(calculate.props.disabled, calculation === undefined, "only loading disables Calculate for valid inputs");
     assert.equal(calculate.props.form, findElement(tree, element => element.type === "form").props.id);
     if (!calculation) assert.ok(findElement(tree, element => element.props.className === "raising-plan-spinner"), "loading spinner remains");
-    if (calculation?.status === "success") assert.ok(findElement(tree, element => element.props.className === "raising-plan-result"));
+    if (calculation?.status === "success") {
+      assert.ok(findElement(tree, element => element.props.className === "raising-plan-result"));
+      const totals = findElement(tree, element => element.props["aria-label"] === "Estimated food totals");
+      assert.ok(totals);
+      assert.ok(React.Children.toArray(totals.props.children).includes(
+        trainingFoodTotals(result.days).map(food => `${food.count} ${food.name}`).join("; "),
+      ));
+    } else {
+      assert.equal(findElement(tree, element => element.props["aria-label"] === "Estimated food totals"), undefined);
+    }
   }
   states = [view, { startedAt: start, error: null }, localRaisingStart(start), null, start + 4 * day];
   stateIndex = 0;
@@ -1081,6 +1349,18 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(colorHelp, /5% mutation roll/);
   assert.match(colorHelp, /Even matching-color parents are not a guarantee/);
   assert.match(colorHelp, /randomly replaces one of the three color genes/);
+  const wormOdds = colorHelp.match(/<table aria-label="Parasite Worm gene color chances">[\s\S]*?<\/table>/)?.[0];
+  assert.ok(wormOdds);
+  assert.match(wormOdds, /not final plumage odds/);
+  for (const color of ["Yellow", "Black", "Blue", "Red", "Green"]) {
+    assert.ok(wormOdds.includes(`<th scope="row">${color}</th><td>20%</td>`));
+  }
+  assert.equal((wormOdds.match(/<td>20%<\/td>/g) ?? []).length, 5);
+  assert.match(colorHelp, /1-in-3 chance of being selected/);
+  assert.match(colorHelp, /20% chance of staying the same and an 80% chance of changing to a different color/);
+  assert.match(colorHelp, /not an 80% chance of changing plumage/);
+  assert.match(colorHelp, /three yellow genes, one worm has a 0% chance/);
+  assert.match(colorHelp, /Exact plumage odds require knowing the hidden genes/);
   assert.match(colorHelp, /From adolescence onward \(day 19\)/);
   assert.match(colorHelp, /the displayed color is fixed/);
   assert.match(colorHelp, /they do not dye the bird/);
@@ -1191,6 +1471,22 @@ test("restored planner state requires an explicit opt-in for exact current stats
   assert.match(circuitHtml, /Circuit assumes an Elm saddle and NPC-heavy competition/);
   assert.match(circuitHtml, /Trainer descriptions cannot confirm the exact 254\/34\/224\/128 allocation/);
   assert.match(circuitHtml, /<input type="checkbox"\/>Use exact current stats/);
+  assert.match(circuitHtml, /<input type="checkbox"\/>Avoid a yellow bird/);
+  assert.match(circuitHtml, /Starting egg warmth/);
+  restored = {
+    form: { ...form, avoidYellow: true, eggId: "2312", wormsFed: "0" },
+    defaultsVersion: 1, calculatedDay: null,
+  };
+  const colorHtml = module.exports.render();
+  assert.match(colorHtml, /<input type="checkbox" checked=""\/>Avoid a yellow bird/);
+  assert.match(colorHtml, /value="2312" selected="">Faintly warm/);
+  assert.match(colorHtml, /Parasite Worms already eaten before day 19/);
+  assert.match(colorHtml, /checking Feeding finished for today does not record worms/);
+  assert.doesNotMatch(colorHtml, /role="alert"/);
+  for (const patch of [{ eggId: "" }, { wormsFed: "" }, { wormsFed: "1" }]) {
+    restored = { ...restored, form: { ...restored.form, eggId: "2312", wormsFed: "0", ...patch } };
+    assert.match(module.exports.render(), /role="alert"/, "missing egg/history or feeding an egg cannot become a valid estimate");
+  }
 });
 
 test("food reference starts closed and the food-only calculator is absent", () => {

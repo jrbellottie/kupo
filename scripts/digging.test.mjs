@@ -354,4 +354,88 @@ test("digging table exposes opt-in conditional browsing and source limitations",
   assert.match(html, /Ore weight \(not %\)/);
   assert.match(html, /aria-label="Elemental ore rank scaling"/);
   assert.match(html, /Their rates remain unmodeled/);
+  assert.match(html, /<button type="button"[^>]*>Recalculate<\/button>/);
+  assert.match(html, /Use Recalculate after leaving the app idle/);
+});
+
+test("Recalculate samples click-time moon and day, refreshes ore availability, and preserves selections", t => {
+  const { outputFiles } = buildSync({
+    stdin: { contents: `
+      export { default as Digging } from "./src/ChocoboTab";
+      export { DEFAULT_CALIBRATION, getVanaNow } from "./src/vanadiel";
+    `, resolveDir: process.cwd() },
+    bundle: true, write: false, platform: "node", format: "cjs",
+    external: ["react", "./utils/itemPrices"], loader: { ".css": "empty" },
+    logOverride: { "empty-import-meta": "silent" },
+  });
+  const require = createRequire(import.meta.url);
+  const React = require("react");
+  const module = { exports: {} };
+  const prices = { market: {}, sell: {}, sellMode: {}, effectiveBuy: {}, error: null };
+  const states = [["Valkurm Dunes"], 5, "ore", "item", "asc", 3, false, "All"];
+  const memos = [];
+  let stateIndex = 0;
+  let memoIndex = 0;
+  let now;
+  t.mock.method(Date, "now", () => now);
+  new Function("require", "module", "exports", outputFiles[0].text)(
+    name => name === "react" ? {
+      ...React, memo: component => component, useEffect: () => {},
+      useState: initial => {
+        const index = stateIndex++;
+        if (index >= states.length) states[index] = typeof initial === "function" ? initial() : initial;
+        return [states[index], value => { states[index] = typeof value === "function" ? value(states[index]) : value; }];
+      },
+      useMemo: (compute, deps) => {
+        const index = memoIndex++;
+        const previous = memos[index];
+        if (!previous || deps.some((dep, i) => !Object.is(dep, previous.deps[i]))) {
+          memos[index] = { deps, value: compute() };
+        }
+        return memos[index].value;
+      },
+    } : name === "./utils/itemPrices" ? {
+      useItemPrices: () => prices,
+      itemPrices: { setPrice: () => assert.fail("Recalculate must not change prices") },
+    } : require(name), module, module.exports,
+  );
+  const { Digging, DEFAULT_CALIBRATION: cal, getVanaNow } = module.exports;
+  const find = (element, predicate) => {
+    if (!React.isValidElement(element)) return undefined;
+    if (predicate(element)) return element;
+    return React.Children.toArray(element.props.children).map(child => find(child, predicate)).find(Boolean);
+  };
+  const text = element => React.isValidElement(element) ? text(element.props.children)
+    : Array.isArray(element) ? element.map(text).join("") : element == null || typeof element === "boolean" ? "" : String(element);
+  const render = () => { stateIndex = 0; memoIndex = 0; return Digging({ cal }); };
+  const hasOre = tree => !!find(tree, element => element.type === "td"
+    && Object.values(DIG_DAY_ITEMS).some(ore => ore.item === text(element)));
+  const stepMs = 1451520;
+  now = cal.newMoonStartEarthMs + 15 * stepMs;
+  let tree = render();
+  assert.equal(getVanaNow(now, cal).moonPercent, 5);
+  assert.equal(hasOre(tree), false);
+  const saved = structuredClone(states.slice(0, 8));
+  for (const [step, active] of [[16, true], [32, false]]) {
+    const previousText = text(tree);
+    now = cal.newMoonStartEarthMs + step * stepMs;
+    assert.equal(text(render()), previousText, "ordinary renders do not advance the sampled clock");
+    const recalculate = find(tree, element => element.type === "button" && element.props.children === "Recalculate");
+    assert.ok(recalculate);
+    const resultsPanel = find(tree, element => {
+      const children = React.Children.toArray(element.props.children);
+      return children.length === 2 && find(children[0], child => child.type === "button" && child.props.children === "Recalculate")
+        && (find(children[1], child => child.type === "table" && child.props["aria-label"] === "Chocobo digging")
+          || text(children[1]).startsWith("No dig results match"));
+    });
+    assert.ok(resultsPanel, "Recalculate sits above the table or empty results, outside the scroll area");
+    recalculate.props.onClick();
+    tree = render();
+    assert.equal(states[8], now, "samples time when clicked, not when rendered");
+    assert.deepEqual(states.slice(0, 8), saved, "all filters, rank, weather, and sorting are retained");
+    assert.equal(hasOre(tree), active);
+    const vana = getVanaNow(now, cal);
+    assert.ok(text(tree).includes(`Calculated at: ${vana.weekday} / ${String(vana.hour).padStart(2, "0")}:${String(vana.minute).padStart(2, "0")} / Waxing ${vana.moonPercent}%`));
+    if (active) assert.ok(text(tree).includes(DIG_DAY_ITEMS[vana.weekday].item));
+  }
 });

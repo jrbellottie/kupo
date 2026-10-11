@@ -7,9 +7,10 @@ import {
   RAISING_ABILITIES, RAISING_PRESETS, STORY_ATTEMPTS_95, validateRaisingGoal,
   storyLearningProbability, trainingActionName, LAST_RAISING_DAY, RAISING_START_KEY,
   raisingDayAt, localRaisingStart, parseRaisingStart, type RaisingGoalInput,
-  groupTrainingDays,
+  groupTrainingDays, trainingFoodTotals,
 } from "./utils/chocoboRaisingPlanner";
-import { RAISING_DAILY_KEY, parseSavedRaisingDaily, dailyProgress, todayCare, feedingInputKey, type PlannerForm, type SavedRaisingDaily } from "./utils/raisingDaily";
+import { RAISING_DAILY_KEY, parseSavedRaisingDaily, dailyProgress, todayCare, feedingInputKey, plannerColorGoal, type PlannerForm, type SavedRaisingDaily } from "./utils/raisingDaily";
+import { CHOCOBO_COLORS } from "./utils/chocoboColor";
 import {
   AFFECTION_REPORTS, HUNGER_REPORTS, BIRD_CONDITIONS, AFFECTION_TARGET, feedingSummary, validateFeedingReport, type FeedingReport,
 } from "./utils/chocoboFeeding";
@@ -138,6 +139,7 @@ export default function ChocoboRaisingPlanner() {
     ...form, current: currentStats(form), target: parseStats(form.target), currentDay,
     today: { feedingDone: progress.feedingDone, storyDone: progress.storyDone },
     feedingReport: feedingReport(form, currentDay),
+    colorGoal: plannerColorGoal(form),
   };
   const selectedPreset = RAISING_PRESETS.find(preset =>
     STAT_KEYS.every(key => preset.target[key] === input.target[key]) && preset.priority === form.priority
@@ -148,6 +150,7 @@ export default function ChocoboRaisingPlanner() {
   const calculation = isCurrent ? view.calculation : undefined;
   const isCalculating = !!isCurrent && !calculation;
   const plan = calculation?.status === "success" ? calculation.plan : null;
+  const colorPlan = plan?.color;
   useEffect(() => {
     if (!isCalculating) return;
     let worker: Worker | undefined;
@@ -179,6 +182,7 @@ export default function ChocoboRaisingPlanner() {
         ...view.form, current: currentStats(view.form), target: parseStats(view.form.target), currentDay,
         today: { feedingDone: progress.feedingDone, storyDone: progress.storyDone },
         feedingReport: feedingReport(view.form, currentDay),
+        colorGoal: plannerColorGoal(view.form),
       };
       worker.postMessage(request);
     } catch (error) {
@@ -254,6 +258,7 @@ export default function ChocoboRaisingPlanner() {
   const todayStory = RAISING_ABILITIES.find(ability => ability.name === today?.story);
   const care = schedule ? todayCare(schedule, currentDay) : null;
   const futureDays = plan?.days.filter(step => step.day > currentDay) ?? [];
+  const foodTotals = plan ? trainingFoodTotals(plan.days) : [];
   const canComplete = clock.startedAt !== null && !futureStart && currentDay <= LAST_RAISING_DAY && !isCalculating;
   const report = feedingReport(form, currentDay);
   const reportError = validateFeedingReport(report, currentDay);
@@ -309,6 +314,8 @@ export default function ChocoboRaisingPlanner() {
       <p><strong>Getting hungry again:</strong> a newly hatched chick starts full. Chicks lose fullness at the daily update according to energy spent; adolescent and adult birds reset to starving at rollover in the pinned model. Raising days last 24 Earth hours, anchored to egg hand-in rather than midnight or the shorter Vana'diel day. Reports are processed when visiting the home stable. Eggs cannot be fed.</p>
       <p><strong>Calculator food totals are not days:</strong> a result of 80 Zegham Carrots means 80 items actually eaten, not 80 days. Food totals include both training and affection meals. Follow each day's order, one item per trade: mixed trades are reordered by the game. Check hunger between items and stop at completely full.</p>
       <p><strong>Affection and stat training together:</strong> the search compares single foods and two-food mixtures, aiming to keep affection in the highest band ({AFFECTION_TARGET}-255) while meeting your chosen build. It does not automatically feed Azouph Greens: training carrots also raise affection, while greens, suitable pastes or Cupid Worms can help with recovery. Stat losses and the shared stat cap still apply. Random food bonuses are not credited as guaranteed gains.</p>
+      <p><strong>Optional non-yellow goal:</strong> choose the original egg warmth and check Avoid a yellow bird. For non-bred eggs, the calculator follows the pinned hidden-gene distribution through each worm roll. It prioritizes top-band affection, then non-yellow odds, then stat training, comparing safe ordered meals including Parasite Worms before day {RAISING.settings.daysToAdolescent}. Zero worms can be best for a favorable egg. This is a bounded search under the displayed care and hunger assumptions, not proof of an optimal schedule or a guaranteed color.</p>
+      <p>Record the total Parasite Worms actually eaten before adolescence, including today's worms, before recalculating. Planned meals and Feeding finished for today never increase that count automatically: the checkbox can also mean you skipped feeding. Missed worms do not count. For a different bird, update the egg selection and reset the count. Bred eggs and unknown egg origins need different genetic information and are not supported by this estimate.</p>
       <p><strong>Today's reports matter:</strong> select the trainer's current hunger and affection descriptions and the bird's condition. Calculate becomes available when all required fields are valid. These three fields reset on a new raising day. The estimate uses the lowest affection and highest fullness in those descriptions, so it does not assume extra feeding capacity. Eggs cannot eat. Future chick meals assume only the displayed care plans, with no extra hunger from walks; actual activity and illness can change the amount. Recheck reports each day rather than forcing the future ration.</p>
       <h4>One timeline through day 128</h4>
       <p>The planner includes today's unfinished feeding and story actions, then the days through day {LAST_RAISING_DAY}. Today's care gains are already included in the reports you enter, so the model does not add them again. Day 0 is egg hand-in. Basic Care covers the egg stage; chick plans can be queued after hatching, and more plans become available at adolescence and adulthood. New care takes effect no earlier than two days after it is selected. Tomorrow's already-locked plan is assumed to be Basic Care with no random stat gain; update the reports at your next visit rather than treating that assumption as a change to the trainer's schedule.</p>
@@ -402,6 +409,28 @@ export default function ChocoboRaisingPlanner() {
           <option value="" disabled>Custom goals</option>
         </select></label>
       </div>
+      <section aria-label="Chocobo color goal">
+        <h4>Color preference</h4>
+        <div className="raising-controls">
+          <label>Starting egg warmth<select style={styles.select} value={form.eggId ?? ""}
+            required={form.avoidYellow === true} onChange={event => update({ eggId: event.target.value })}>
+            <option value="">Choose a non-bred egg</option>
+            {RAISING.eggColorOdds.map(egg => <option key={egg.id} value={egg.id}>{egg.name}</option>)}
+          </select></label>
+        </div>
+        <label className="raising-exact-toggle"><input type="checkbox" checked={form.avoidYellow === true}
+          onChange={event => update({ avoidYellow: event.target.checked })} />Avoid a yellow bird</label>
+        {form.avoidYellow && <>
+          <div className="raising-controls">
+            <label>Parasite Worms already eaten before day {RAISING.settings.daysToAdolescent}<input style={styles.input}
+              type="number" min={0} step={1} required value={form.wormsFed ?? "0"}
+              onChange={event => update({ wormsFed: event.target.value })} /></label>
+          </div>
+          <p className="raising-small">Affection first, then the best non-yellow odds found, then stat training. Worm meals appear in today's checklist, food totals and timeline. A favorable egg may need no worms; no color is guaranteed. Only non-bred eggs with a known warmth are supported.</p>
+          <p className="raising-small">Count only worms actually eaten before day {RAISING.settings.daysToAdolescent}, including any eaten today. Update this total before recalculating; checking Feeding finished for today does not record worms. Reset it for a new bird.</p>
+          {currentDay >= RAISING.settings.daysToAdolescent && <p role="status" className="raising-notice">Plumage is already fixed. No Parasite Worms will be planned; further worms affect breeding genes only. The estimate describes historical odds, not the color you can now see.</p>}
+        </>}
+      </section>
       <p className="raising-small">Presets replace your targets, desired abilities and most important stat. Current reports, exact-stat mode, already-learned abilities and egg time stay unchanged. Change any goal to customize the build.</p>
       {selectedPreset && selectedPreset.id !== "digging" && <p className="raising-notice">Community racing goal only: racing is marked disabled in the pinned public source. Confirm live availability before raising a racer. This calculator predicts training, not race wins.</p>}
       {selectedPreset?.id === "circuit" && <p className="raising-notice">Circuit assumes an Elm saddle and NPC-heavy competition. Its low Endurance is a deliberate equipment-dependent tradeoff. Confirm saddle availability and effects before committing; saddle bonuses are not included in the training plan. Trainer descriptions cannot confirm the exact 254/34/224/128 allocation.</p>}
@@ -524,6 +553,28 @@ export default function ChocoboRaisingPlanner() {
     {plan && <div className="raising-plan-result" aria-live="polite">
       <h4>Estimated plan</h4>
       <p>{useExactStats ? "Starting points (exact overrides)" : "Starting-point estimate (lower ends of the selected ranges)"}: <strong>{statSummary(input.current)}</strong>. This is a scenario, not a measurement of your bird.</p>
+      {colorPlan && <section aria-label="Estimated non-yellow strategy">
+        <h4>{colorPlan.locked ? "Color already locked" : "Non-yellow feeding strategy"}</h4>
+        <p><strong>{colorPlan.plannedWorms} additional Parasite Worms</strong> planned before day {RAISING.settings.daysToAdolescent}; {colorPlan.wormsFed} already eaten. Estimated non-yellow chance: <strong>{((1 - colorPlan.before.yellow) * 100).toFixed(2)}% before this plan</strong> to <strong>{((1 - colorPlan.after.yellow) * 100).toFixed(2)}% after the planned worms</strong>.</p>
+        <div className="raising-table-wrap"><table aria-label="Planned plumage color chances">
+          <caption>Final plumage odds from the starting egg and worm count, not individual gene-roll odds</caption>
+          <thead><tr><th scope="col">Color</th><th scope="col">Before remaining meals</th><th scope="col">After remaining meals</th></tr></thead>
+          <tbody>{CHOCOBO_COLORS.map(color => <tr key={color}>
+            <th scope="row">{color[0].toUpperCase() + color.slice(1)}</th>
+            <td>{(colorPlan.before[color] * 100).toFixed(2)}%</td><td>{(colorPlan.after[color] * 100).toFixed(2)}%</td>
+          </tr>)}</tbody>
+        </table></div>
+        <p className="raising-small">{colorPlan.locked
+          ? "These are historical model probabilities, not a new chance to change the bird's visible color."
+          : colorPlan.plannedWorms === 0
+            ? "No beneficial worm meal was found within the remaining safe feeding opportunities while prioritizing affection. This may be because the egg already has better odds without worms."
+            : "Follow the listed meal order and recheck hunger between items. Do not add worms on top of these meals or force-feed to meet the estimated count."} The calculation averages over hidden genes and assumes the recorded egg and worm history are correct. It is not a measurement or a guarantee; live settings may differ.</p>
+        <p className="raising-small">Best route found by a bounded search: top-band affection takes priority over color, and color takes priority over stat training. Future chick hunger assumes scheduled care only. Recalculate after reports or missed meals; training goals may take longer or remain incomplete.</p>
+      </section>}
+      <p className="raising-notice" aria-label="Estimated food totals"><strong>Total food needed for this plan:</strong>{" "}
+        {foodTotals.length ? foodTotals.map(food => `${food.count} ${food.name}`).join("; ") : "No food needed in this estimate"}.
+        {" "}Includes today's remaining planned food and all future meals through day {LAST_RAISING_DAY}, including affection meals. Use these estimates to plan gardening; recalculate after daily reports. Already-completed feeding is excluded.
+      </p>
       <p className="raising-notice">Conditional scenario, not guaranteed results: today's care is already in your reports. Future care rows assume the displayed good-day roll ({RAISING.planStatPoints.join(" or ")} points per arrow); the listed chance is a source-model estimate, not a live guarantee. Food and care affection changes are included, but random food bonuses and Basic Care's random stat gains are not. Chick hunger assumes scheduled care only, with no extra hunger credited for today's unmeasured energy use. Actual walks, illness and recovery can change the plan. Recalculate from reports each day.</p>
       {plan.days.some(day => day.day >= RAISING.settings.daysToChick && day.feeding && day.feeding.affectionAfter < AFFECTION_TARGET)
         && <p role="status" className="raising-notice">Some days remain below the highest affection band in this estimate. Safe feeding capacity or the reported condition limits recovery. Do not force-feed; prioritize the next safe recovery meal and check actual care results.</p>}

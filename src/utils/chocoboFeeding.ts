@@ -1,4 +1,5 @@
 import { RAISING, STAT_KEYS, applyRaisingStatChanges, type RaisingStats } from "./chocoboRaising";
+import { PARASITE_WORM_ID } from "./chocoboColor";
 
 export const AFFECTION_TARGET = 224;
 export const AFFECTION_REPORTS = [
@@ -39,7 +40,8 @@ export const FEEDING_FOODS = RAISING.foods.filter(food =>
   (food.category === "Food" || food.category === "Training") && !food.forgetsAbility && !food.rerollGene
   && !food.wakes && !food.random.eitherWay
   && (food.affection > 0 || food.chick.affection > 0 || STAT_KEYS.some(key => food.stats[key] > 0)));
-const foodsById = new Map(FEEDING_FOODS.map(food => [food.id, food]));
+export const PLANNER_FEEDING_FOODS = [...FEEDING_FOODS, ...RAISING.foods.filter(food => food.id === PARASITE_WORM_ID)];
+const foodsById = new Map(PLANNER_FEEDING_FOODS.map(food => [food.id, food]));
 
 export function feedingFood(id: number) {
   const food = foodsById.get(id);
@@ -80,8 +82,8 @@ export function careSuccessChance(stats: RaisingStats, affection: number, careId
 
 type Meal = { items: number[]; stats: RaisingStats; affection: number; fullness: number };
 const menuCache = new Map<string, number[][]>();
-function menus(fullness: number, chick: boolean): number[][] {
-  const key = `${fullness}:${chick}`;
+function menus(fullness: number, chick: boolean, worms: boolean): number[][] {
+  const key = `${fullness}:${chick}:${worms}`;
   const cached = menuCache.get(key);
   if (cached) return cached;
   const result = new Map<string, number[]>();
@@ -104,6 +106,18 @@ function menus(fullness: number, chick: boolean): number[][] {
         if (first.id === second.id) continue;
         for (let rest = 1; count + rest <= 4; rest++) add([...prefix, ...Array<number>(rest).fill(second.id)]);
       }
+      if (worms) {
+        const wormFoods = [...foods, feedingFood(PARASITE_WORM_ID)];
+        const visit = (items: number[], filled: number) => {
+          if (filled >= 224) {
+            add(items);
+            return;
+          }
+          if (items.length === 4) return;
+          for (const food of wormFoods) visit([...items, food.id], Math.min(255, filled + food.chick.fullness));
+        };
+        visit([], fullness);
+      }
     }
   }
   const values = [...result.values()];
@@ -111,7 +125,7 @@ function menus(fullness: number, chick: boolean): number[][] {
   return values;
 }
 
-export function feedingOptions(stats: RaisingStats, affection: number, fullness: number, day: number, allowed = true): Meal[] {
+export function feedingOptions(stats: RaisingStats, affection: number, fullness: number, day: number, allowed = true, allowWorms = false): Meal[] {
   if (![affection, fullness].every(value => Number.isInteger(value) && value >= 0 && value <= 255)
     || !Number.isInteger(day) || day < 0 || day >= RAISING.settings.daysToAdult4) {
     throw new Error("Feeding estimates require valid affection, fullness and raising day.");
@@ -119,7 +133,8 @@ export function feedingOptions(stats: RaisingStats, affection: number, fullness:
   const empty: Meal = { items: [], stats, affection, fullness };
   if (!allowed || day < RAISING.settings.daysToChick || fullness >= 224) return [empty];
   const candidates = new Map<string, Meal>();
-  for (const items of menus(fullness, day < RAISING.settings.daysToAdolescent)) {
+  const chick = day < RAISING.settings.daysToAdolescent;
+  for (const items of menus(fullness, chick, allowWorms && chick)) {
     let next = { ...empty };
     for (const id of items) {
       const food = feedingFood(id);
@@ -130,7 +145,7 @@ export function feedingOptions(stats: RaisingStats, affection: number, fullness:
         fullness: Math.min(255, next.fullness + variant.fullness),
       };
     }
-    const key = `${STAT_KEYS.map(key => next.stats[key]).join(",")}:${next.affection}:${next.fullness}`;
+    const key = `${STAT_KEYS.map(key => next.stats[key]).join(",")}:${next.affection}:${next.fullness}:${items.filter(id => id === PARASITE_WORM_ID).length}`;
     const previous = candidates.get(key);
     const randomness = (meal: Meal) => meal.items.reduce((sum, id) => sum + feedingFood(id).random.chance, 0);
     if (!previous || items.length < previous.items.length

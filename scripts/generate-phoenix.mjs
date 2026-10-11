@@ -186,6 +186,47 @@ for (const [npc, guild] of Object.entries(guilds)) {
   for (const row of Object.values(stock)) guildOffers.push({ n: names.get(row.id), npc: npc.replaceAll("_", " "), zone: npcZones.get(npc), price: guildPrice(row), initial: row.initial, restockRate: row.restockRate, stocked: row.initial > 0 || row.restockRate > 0 });
 }
 guildOffers.sort((first, second) => first.npc.localeCompare(second.npc) || first.n.localeCompare(second.n));
+source("scripts/globals/guild_shops.lua");
+const holidaySetting = source("settings/default/main.lua").match(/^\s*GUILD_SHOP_HOLIDAYS\s*=\s*(true|false)\s*,/m);
+if (!holidaySetting) throw new Error("Missing guild shop holiday setting");
+const guildShopHolidays = holidaySetting[1] === "true";
+const guildShopGroups = {
+  Smithing: ["Amulya", "Doggomehr", "Kamilah", "Ndego"],
+  Goldsmithing: ["Bornahn", "Visala", "Yabby_Tanmikey"],
+  Woodworking: ["Chaupire", "Beugungel", "Dehbi_Moshal"],
+  Clothcraft: ["Kuzah_Hpirohpon", "Taten-Bilten", "Tilala"],
+  Leathercraft: ["Kueh_Igunahmori"],
+  Bonecraft: ["Shih_Tayuun"],
+  Alchemy: ["Maymunah", "Wahraga"],
+  Cooking: ["Kopopo"],
+  Fishing: ["Babubu", "Cehn_Teyohngo", "Graegham", "Jidwahn", "Lokhong", "Mep_Nhapopoluko", "Pashi_Maccaleh", "Rajmonda", "Wahnid", "Yahliq"],
+};
+const economy = new Map(db.prepare("SELECT itemid, BaseSell FROM item_basic").all().map(row => [row.itemid, row.BaseSell]));
+const guildSelling = Object.entries(guildShopGroups).flatMap(([guild, pools]) => pools.map(pool => {
+  const shop = guilds[pool];
+  if (!shop?.stock || !shop.hours) throw new Error(`Missing selling guild pool ${pool}`);
+  const merchants = Object.entries(guilds).filter(([npc, cfg]) => (cfg.sharedStock ?? npc) === pool).map(([npc]) => {
+    const zones = [...npcPaths.matchAll(/scripts\/zones\/([^/]+)\/npcs\/([^/]+)\.lua/g)]
+      .filter(match => match[2] === npc)
+      .map(match => match[1].replaceAll("_", " ").replace(/ Pirates$/, "").replace(/\bd([A-Z])/g, "d'$1"));
+    if (!zones.length) throw new Error(`Missing selling guild location ${npc}`);
+    return { name: npc.replaceAll("_", " "), zones: [...new Set(zones)].sort() };
+  });
+  const stock = Object.values(shop.stock).filter(row => !row.noSell).map(row => {
+    const item = names.get(row.id);
+    const baseSell = economy.get(row.id);
+    for (const key of ["initial", "maxStock", "targetStock", "restockRate"]) {
+      if (!Number.isInteger(row[key]) || row[key] < 0) throw new Error(`Invalid ${pool} ${item} ${key}`);
+    }
+    if (!item || baseSell === undefined || row.targetStock > row.maxStock || row.maxStock <= 0) {
+      throw new Error(`Invalid guild selling item ${pool} ${row.id}`);
+    }
+    return { itemId: row.id, item, initial: row.initial, maxStock: row.maxStock, targetStock: row.targetStock,
+      restockRate: row.restockRate, baseSell, sellPrice: row.sellPrice ?? null, hidden: Boolean(row.hidden) };
+  }).sort((a, b) => a.item.localeCompare(b.item));
+  return { pool, guild, merchants, hours: Object.values(shop.hours), holiday: shop.holiday ?? null,
+    ferry: merchants.some(npc => npc.zones.some(zone => /^(Ship bound|Open sea route|Silver Sea route)/.test(zone))), stock };
+})).sort((a, b) => a.guild.localeCompare(b.guild) || a.pool.localeCompare(b.pool));
 const guildNames = new Map(Object.entries(enumValues("scripts/enum/guild.lua")).map(([name, id]) => [id, name[0] + name.slice(1).toLowerCase()]));
 const basicNames = new Map(basic.map(row => [row.itemid, row.name]));
 source("src/map/guild.cpp");
@@ -221,7 +262,7 @@ const guildPoints = db.prepare("SELECT * FROM guild_item_points ORDER BY guildid
   return { guild, itemId: row.itemid, item, rank: row.rank, pattern: row.pattern, points: row.points, maxPoints: row.max_points };
 });
 db.close();
-const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, branch: "beta", eraScenario: "ToAU (pre-WotG)", itemDetailSqlOrder: itemDetails.sqlOrder, guildPointSqlOrder, guildPointScenario: "Global cap rollback before item-specific era corrections; live Greedie cap confirmed at 1520 GP", inputs }, items, itemDetails: itemDetails.items, fishing, clamming, helm, helmZones, helmGear, valerianoOffers, guildNpcs: Object.keys(guilds).map(npc => npc.replaceAll("_", " ")).sort(), guildOffers, guildPoints, digging };
+const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, branch: "beta", eraScenario: "ToAU (pre-WotG)", itemDetailSqlOrder: itemDetails.sqlOrder, guildPointSqlOrder, guildPointScenario: "Global cap rollback before item-specific era corrections; live Greedie cap confirmed at 1520 GP", inputs }, items, itemDetails: itemDetails.items, fishing, clamming, helm, helmZones, helmGear, valerianoOffers, guildNpcs: Object.keys(guilds).map(npc => npc.replaceAll("_", " ")).sort(), guildOffers, guildSelling, guildShopHolidays, guildPoints, digging };
 const filename = "src/data/phoenix.json";
 const text = JSON.stringify(output) + "\n";
 if (process.argv.includes("--check")) { if (readFileSync(filename, "utf8") !== text) throw new Error("Phoenix snapshot differs; regenerate explicitly"); }

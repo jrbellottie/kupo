@@ -3,6 +3,7 @@ import type { VanaWeekday } from "./vanadiel";
 export type TimerKind =
   | "VANA_WEEKDAY_TIME"
   | "TRANSPORT"
+  | "GARDENING"
   | "MOON_STEP"
   | "MOON_PERCENT"
   | "EARTH_TIME"
@@ -19,6 +20,7 @@ export type BaseTimer = {
 
 export type WeekdayTimer = BaseTimer & {
   kind: "VANA_WEEKDAY_TIME";
+  accentColor?: string;
   targetWeekday: VanaWeekday;
   targetHour: number;
   targetMinute: number;
@@ -53,6 +55,21 @@ export type EarthTimer = BaseTimer & {
   pausedRemainingMs?: number | null;
 };
 
+export type GardeningTimer = BaseTimer & {
+  kind: "GARDENING";
+  recipeId: string;
+  plantedAtMs: number;
+  feeds: {
+    crystal: string;
+    skip: boolean;
+    growthMs: number;
+    windowMs: number;
+    fedAtMs: number | null;
+  }[];
+  harvestGrowthMs: number;
+  notifiedEvents: string[];
+};
+
 export type NmTimedWindowTimer = BaseTimer & {
   kind: "NM_TIMED_WINDOW";
   baseEarthMs: number;
@@ -70,6 +87,6 @@ export type NmLotteryTimer = BaseTimer & {
   phNextAtMs: number | null;
 };
 
-export type AnyTimer = WeekdayTimer | TransportTimer | MoonStepTimer | MoonPercentTimer | EarthTimer | NmTimedWindowTimer | NmLotteryTimer;
+export type AnyTimer = WeekdayTimer | TransportTimer | GardeningTimer | MoonStepTimer | MoonPercentTimer | EarthTimer | NmTimedWindowTimer | NmLotteryTimer;
 
 export type MoonDirection = "WAXING" | "WANING";

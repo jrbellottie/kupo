@@ -1,4 +1,7 @@
 import data from "../data/gardening.json";
+import type { GardeningTimer } from "../types";
+import { uid } from "./time";
+import { gardeningEvents } from "./gardeningTimers";
 
 export const GARDENING = data;
 export type GardenRecipe = typeof data.recipes[number];
@@ -52,6 +55,26 @@ export function gardenTiming(recipe: GardenRecipe): GardenTiming {
   return { minDays, maxDays, windows };
 }
 
+export function createGardeningTimer(recipe: GardenRecipe, plantedAtMs: number, nowMs: number, label = ""): GardeningTimer {
+  if (!Number.isFinite(nowMs) || !Number.isFinite(plantedAtMs) || plantedAtMs < 0 || plantedAtMs > nowMs) {
+    throw new Error("Enter a valid planting time that is not in the future.");
+  }
+  const timing = gardenTiming(recipe);
+  const dayMs = GARDENING.daySeconds * 1000;
+  let previousEnd = 0;
+  const feeds = timing.windows.map(window => {
+    const growthMs = (window.earliest - previousEnd) * dayMs;
+    previousEnd = window.earliest + (window.crystal === 0 ? window.duration : 0);
+    return { crystal: crystalName(window.crystal), skip: window.crystal === 0, growthMs, windowMs: window.duration * dayMs, fedAtMs: null };
+  });
+  const timer: GardeningTimer = {
+    id: uid(), kind: "GARDENING", label: label.trim() || `Gardening: ${gardenSeed(recipe.seedId).name}`,
+    enabled: true, createdAtMs: nowMs, recipeId: recipe.id, plantedAtMs, feeds,
+    harvestGrowthMs: (timing.minDays - previousEnd) * dayMs, notifiedEvents: [],
+  };
+  timer.notifiedEvents = gardeningEvents(timer).filter(event => event.atMs <= nowMs && event.id !== "harvest").map(event => event.id);
+  return timer;
+}
 export function gardenBaseStrength(recipe: GardenRecipe): number {
   const seed = gardenSeed(recipe.seedId);
   const common = seed.feeds === 2 ? recipe.second : recipe.first;

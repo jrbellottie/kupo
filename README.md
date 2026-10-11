@@ -29,7 +29,7 @@ Timers use Windows system notifications. Some alerts repeat until dismissed; cli
 View the current Vana'diel time and moon phase, and manage your saved timers and upcoming alerts.
 
 ### ⏱️ Time Tools
-Create Vana'diel, real-world, countdown, and moon-phase timers, or use a stopwatch to track elapsed time.
+Create Vana'diel, real-world, countdown, and moon-phase timers, use color-coded ports and countdowns on every transport route, or use a stopwatch to track elapsed time.
 
 ### 👹 NM Timers
 Track notorious monster spawn windows and lottery placeholders, with reminders to help you follow each camp.
@@ -44,7 +44,7 @@ Keep manual tallies of session results, including success rates and synthesis ou
 Track progress toward the 10,000 moat carp needed for Lu Shang's Fishing Rod.
 
 ### 🐟 Fish
-Explore fish, bait, rods, and fishing locations, and plan skill-ups or daily fishing sessions using estimated catches, fatigue, equipment risks, and a snapshot of the current moon.
+Explore fish, bait, rods, and fishing locations, plan skill-ups or daily fishing sessions, and compare fishing-guild selling prices, stock capacity, and opening countdowns with reminders using the pinned reference ruleset.
 
 ### 🪣 Clam
 Browse clamming locations and possible rewards, with information to help manage bucket weight and equipment choices.
@@ -53,13 +53,13 @@ Browse clamming locations and possible rewards, with information to help manage 
 Compare chocobo digging locations and estimated returns, including ore, weather and night-drop rates under their required conditions, alongside clearly labeled base-source ability-layer references.
 
 ### Chocobo Raising
-Save your egg's start time and use trainer reports to plan meals that support affection and your build's stats, track today's activities in a saved checklist, and estimate training through day 128 with digging and racing presets. Racing advice is community-based; training follows a pinned reference ruleset, and live availability and outcomes may differ.
+Save your egg's start time and use trainer reports to plan meals, track daily activities, and estimate training through day 128 with digging and racing presets. An optional non-yellow goal estimates color odds and plans worm feedings from your starting egg. Training follows a pinned reference ruleset, racing advice is community-based, and live availability and outcomes may differ.
 
 ### 🌦️ Weather
 Look ahead at estimated weather and elemental-ore opportunities, and set reminders for upcoming windows. Forecasts are not guaranteed in-game conditions.
 
 ### Gardening
-Find Mog House gardening recipes by harvest item, pot, seed, or crystal, with possible yields, modeled chances, feeding windows, and growth-time estimates from a pinned reference ruleset.
+Find Mog House gardening recipes by harvest item, pot, seed, or crystal, with yields and growth estimates from a pinned reference ruleset. Set one rolling timer per planting for feeding windows and harvest readiness, with optional actual feeding records to refine later estimates.
 
 ### HELM
 Find mining, harvesting, excavation, and logging opportunities, with gathering maps and information about rewards and equipment.
@@ -80,7 +80,7 @@ Browse an offline monster reference with combat statistics and behavior for ToAU
 Find two- and three-step skillchain combinations for your chosen weapons and weapon skills.
 
 ### 🔨 Crafting
-Browse era-appropriate recipes and guild-point items, or plan a crafting skill-up path using estimated success and skill gains.
+Browse era-appropriate recipes and guild-point items, plan a crafting skill-up path, or compare selling prices, locations, stock capacity, and opening countdowns with reminders across all nine guilds.
 
 ### Profits
 Compare crafting costs and estimated returns from NPC or auction-house sales, using a local price book shared with Chocobo Digging.
@@ -200,6 +200,8 @@ npm run test:items
 ```
 
 Metadata generation reads committed source revisions, records input hashes, and uses `scripts/lsb-data/synth_recipes.sql` for recipe aliases. Reapply pinned overrides after refreshing base metadata; `--check` verifies the saved reference snapshot. Wiki imports save progress in batches and resolve missing titles only through unique exact normalized matches, preserving HQ identities.
+
+Guild selling uses the pinned stock definitions, era overrides, and stock-based payout rules. Some target stocks are source assumptions. Opening reminders enable weekly holidays by default to match confirmed live behavior, while retaining the public source's disabled-holidays setting as provenance; the Guilds view lets you change this assumption. Validate guild calculations with `npm run test:guilds`.
 
 The raising reference is independently pinned to [source revision 9b93232](https://github.com/phoenixffxi/Phoenix/tree/9b93232a0cc1e4a5a50b0f988f37d7ae63b8fcfa), checked October 5, 2026. Source mechanics and numeric tables are credited to the source fork and LandSandBoat contributors ([GPL-3.0 source license](https://github.com/phoenixffxi/Phoenix/blob/9b93232a0cc1e4a5a50b0f988f37d7ae63b8fcfa/LICENSE)); explanatory text is independently written. Input hashes are recorded in `src/data/chocoboRaising.json`. The public configuration does not enable the optional accelerated-raising module, and its active digging override does not apply personal-chocobo bonuses. Public source is not proof of live deployment; several implemented formulas are themselves estimates of retail behavior.
 

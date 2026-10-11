@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
+import { createRequire } from "node:module";
 import { buildSync } from "esbuild";
 
 async function load(entry) {
@@ -9,12 +10,76 @@ async function load(entry) {
 }
 
 const { nextEarthMsForVanaDailySchedule: nextAlert, getVanaNow, DEFAULT_CALIBRATION } = await load("src\\vanadiel.ts");
-const { TRANSPORT_GROUPS, createTransportTimer, formatTransportDepartures, getTransportArrivalMinutes, getTransportPorts } = await load("src\\utils\\transport.ts");
+const { TRANSPORT_GROUPS, createTransportTimer, formatTransportDepartures, getTransportArrivalMinutes, getTransportPorts, getTransportPortColor } = await load("src\\utils\\transport.ts");
 const { formatCountdown } = await load("src\\utils\\time.ts");
 const routes = TRANSPORT_GROUPS.flatMap(group => group.routes);
 const MINUTE = 2400;
 const DAY = 1440 * MINUTE;
 const cal = { timeOffsetMs: 0, newMoonStartEarthMs: 0 };
+
+test("city colors stay consistent in both directions and on restored timers", () => {
+  const expected = new Map([
+    ["Port San d'Oria", "#ff8a8a"], ["Port Windurst", "#f6e58d"], ["Port Bastok", "#8ab4ff"],
+    ["Kazham", "#ffb36b"], ["Aht Urhgan Whitegate", "#e6b85c"],
+    ["Selbina", "#6ed6c5"], ["Mhaura", "#c8a2ff"],
+    ["Port Jeuno", "#efacd4"], ["Nashmau", "#c7db83"],
+    ["Bibiki Bay (Sunset Docks)", "#79d9ed"], ["Purgonorgo Isle", "#8edb91"],
+    ["South Landing", "#d7b58c"], ["Central Landing", "#a3c4a8"], ["North Landing", "#b4bddb"],
+  ]);
+  for (const [port, color] of expected) assert.equal(getTransportPortColor(port), color);
+  assert.equal(new Set(expected.values()).size, expected.size, "each port has a distinct color");
+  for (const port of [undefined, "Unknown port"]) {
+    assert.equal(getTransportPortColor(port), undefined, "unassigned ports retain the default text color");
+  }
+  for (const route of routes) {
+    const timer = JSON.parse(JSON.stringify(createTransportTimer(route, 2, 1000)));
+    const original = JSON.stringify(timer);
+    for (const field of ["departurePort", "arrivalPort"]) {
+      assert.ok(expected.has(route[field]), `${route.id}: ${field} needs a color`);
+      assert.equal(getTransportPortColor(getTransportPorts(timer)[field]), expected.get(route[field]));
+    }
+    assert.equal(JSON.stringify(timer), original, "colors do not alter timer data or schedules");
+    delete timer.departurePort;
+    delete timer.arrivalPort;
+    for (const field of ["departurePort", "arrivalPort"]) {
+      assert.equal(getTransportPortColor(getTransportPorts(timer)[field]), expected.get(route[field]));
+    }
+  }
+});
+
+test("transport labels color each city separately while preserving route and custom labels", () => {
+  const { outputFiles } = buildSync({
+    stdin: { contents: `
+      import React from "react";
+      import { renderToStaticMarkup } from "react-dom/server";
+      import TransportLabel from "./src/TransportLabel";
+      export const render = (label, ports) => renderToStaticMarkup(<TransportLabel label={label} ports={ports} />);
+    `, resolveDir: process.cwd(), loader: "tsx" },
+    bundle: true, write: false, platform: "node", format: "cjs",
+    define: { "process.env.NODE_ENV": '"production"' },
+  });
+  const module = { exports: {} };
+  new Function("require", "module", "exports", outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
+  const { render } = module.exports;
+  assert.equal(render("Selbina to Mhaura", { departurePort: "Selbina", arrivalPort: "Mhaura" }),
+    '<span style="color:#6ed6c5">Selbina</span> to <span style="color:#c8a2ff">Mhaura</span>');
+  assert.equal(render("Mhaura to Selbina", { departurePort: "Mhaura", arrivalPort: "Selbina" }),
+    '<span style="color:#c8a2ff">Mhaura</span> to <span style="color:#6ed6c5">Selbina</span>');
+  for (const route of routes) {
+    const html = render(route.label, route);
+    assert.equal(html.replace(/<[^>]*>/g, "").replaceAll("&#x27;", "'"), route.label);
+    for (const port of [route.departurePort, route.arrivalPort]) {
+      const color = getTransportPortColor(port);
+      if (color) assert.ok(html.includes(`style="color:${color}"`), route.id);
+    }
+    const custom = render("My transport reminder", route);
+    assert.equal(custom.replace(/<[^>]*>/g, ""), "My transport reminder");
+    if (route.departurePort === route.arrivalPort) {
+      assert.ok(custom.includes(`style="color:${getTransportPortColor(route.departurePort)}"`));
+    } else assert.equal(custom, "My transport reminder");
+  }
+  assert.equal(render("Unknown route"), "Unknown route");
+});
 
 test("every transport route names its departure dock and destination, including round-trip tours", () => {
   const expected = {

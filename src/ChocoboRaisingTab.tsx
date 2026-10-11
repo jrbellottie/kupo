@@ -173,11 +173,24 @@ export default function ChocoboRaisingTab() {
       <p>Two or three matching genes determine the color. With three different genes, the result is yellow if yellow is present; otherwise it is black if black is present, and yellow if neither is present. Hidden genes and mutations prevent an exact offspring-color prediction from the parents' appearances alone. Honeymoon plans seed a stat, not a chosen color.</p>
       <h4>What Parasite Worm actually changes</h4>
       <p>Each Parasite Worm randomly replaces one of the three color genes with one of the five colors. It can roll the same gene value again, and changing one gene may not change the resulting color. You cannot choose the replacement color.</p>
+      <div className="raising-table-wrap"><table aria-label="Parasite Worm gene color chances">
+        <caption>Replacement gene odds per Parasite Worm in the pinned source, not final plumage odds</caption>
+        <thead><tr><th scope="col">Replacement gene color</th><th scope="col">Chance</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Yellow</th><td>20%</td></tr>
+          <tr><th scope="row">Black</th><td>20%</td></tr>
+          <tr><th scope="row">Blue</th><td>20%</td></tr>
+          <tr><th scope="row">Red</th><td>20%</td></tr>
+          <tr><th scope="row">Green</th><td>20%</td></tr>
+        </tbody>
+      </table></div>
+      <p>Each of the three genes has a 1-in-3 chance of being selected. The selected gene has a 20% chance of staying the same and an 80% chance of changing to a different color. This is <strong>not an 80% chance of changing plumage</strong>: the eventual color depends on all three genes. For example, with three yellow genes, one worm has a 0% chance of changing the eventual yellow plumage, because two yellow genes always remain. Exact plumage odds require knowing the hidden genes; appearance alone is not enough.</p>
       <ul>
         <li><strong>Before adolescence:</strong> feeding a chick a Parasite Worm can change its eventual displayed color. Eggs cannot be fed. The color is not yet visible, so you cannot reliably stop on a desired color by looking at the chick.</li>
         <li><strong>From adolescence onward (day {RAISING.settings.daysToAdolescent}):</strong> the displayed color is fixed. A worm changes genes for future breeding, not the color of this bird.</li>
       </ul>
       <p>Do not mass-feed worms to force a color: normal fullness and force-feeding risks still apply. For a specific non-yellow color, start with better egg odds or breed suitable parents and allow for retries. Vomp Carrots and Zegham Carrots train stats; they do not dye the bird.</p>
+      <p>To plan for any non-yellow color, choose Starting egg warmth in the planner and check Avoid a yellow bird. Enter the number of Parasite Worms actually eaten before day {RAISING.settings.daysToAdolescent}. The plan estimates final plumage odds and includes beneficial worm meals in its checklist and totals, prioritizing top-band affection before color and stat training. It can recommend no worms when they would worsen the odds; bred or unknown eggs are not supported.</p>
       <p className="raising-small">These are source-specific rules, not universal retail guarantees. The source labels some genetics parameters as estimates, and live overrides may differ. <a href="https://wiki.phoenix-xi.com/Chocobo_raising" target="_blank" rel="noreferrer">Source-derived raising guide</a> / <ReferenceLink file="scripts/globals/hobbies/chocobo_raising/breeding.lua">Egg odds and inheritance</ReferenceLink> / <ReferenceLink file="scripts/globals/hobbies/chocobo_raising/event_vm.lua">Parasite Worm behavior</ReferenceLink></p>
     </details>
 

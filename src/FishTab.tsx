@@ -9,10 +9,11 @@ import { formatGuildPointCap, getGuildPointItemsToCap } from "./utils/guildPoint
 import BaitTab from "./BaitTab";
 import RodsTab from "./RodsTab";
 import SnapSkillTab from "./SnapSkillTab";
-import { type Calibration } from "./vanadiel";
+import GuildSellingTab, { type GuildTimerControls } from "./GuildSellingTab";
 
 const FISH_VIEWS = [
   { id: "fish", label: "Fish list" },
+  { id: "guilds", label: "Guild selling" },
   { id: "affinity", label: "Bait list" },
   { id: "spots", label: "Best spots" },
   { id: "skillup", label: "Skill-up planner" },
@@ -22,7 +23,7 @@ const FISH_VIEWS = [
 ] as const;
 type FishView = typeof FISH_VIEWS[number]["id"];
 
-export default function FishTab({ cal }: { cal: Calibration }) {
+export default function FishTab({ cal, ...timerControls }: GuildTimerControls) {
   const [view, setView] = useState<FishView>(() => {
     const activeTab = loadJson<string>("ffxi_active_tab_v1", "fish");
     const saved = activeTab === "bait"
@@ -57,6 +58,7 @@ export default function FishTab({ cal }: { cal: Calibration }) {
       </CollapsibleSection>
       <div role="tabpanel" id={`fish-panel-${view}`} aria-labelledby={`fish-tab-${view}`} style={{ minWidth: 0 }}>
         {view === "fish" ? <FishList />
+          : view === "guilds" ? <GuildSellingTab fishingOnly cal={cal} {...timerControls} />
           : view === "snap" ? <SnapSkillTab cal={cal} />
           : view === "matrix" || view === "rods" ? <RodsTab mode={view} />
             : <BaitTab cal={cal} mode={view} onModeChange={setView} />}

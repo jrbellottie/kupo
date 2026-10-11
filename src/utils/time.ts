@@ -19,6 +19,11 @@ export function formatCountdown(ms: number): string {
 
 // -------------------- Date parsing (LOCAL) --------------------
 
+export function formatLocalDateTime(ms: number): string {
+  const date = new Date(ms);
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}:${pad2(date.getSeconds())}`;
+}
+
 export function parseLocalDateTimeToMs(raw: string): number | undefined {
   const s = raw.trim();
   if (!s) return undefined;

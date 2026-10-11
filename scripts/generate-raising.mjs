@@ -90,15 +90,21 @@ const abilities = thresholds.map(([, key, threshold]) => ({
 const learnChance = Number(walks.match(/walks\.learnChance = (\d+)/)?.[1]);
 if (!Number.isFinite(learnChance)) throw new Error("Missing story learning chance");
 const breeding = source(`${root}breeding.lua`);
-const eggColorOdds = [...breeding.matchAll(/^\s*\[xi\.item\.CHOCOBO_EGG_(\w+)\s*\]\s*=\s*\{ colors = \{([^}]+)\}/gm)].map(([, name, weights]) => {
+const eggColorOdds = [...breeding.matchAll(/^\s*\[xi\.item\.CHOCOBO_EGG_(\w+)\s*\]\s*=\s*\{ colors = \{([^}]+)\}, pattern = \{([^}]+)\}/gm)].map(([, name, weights, patterns]) => {
   const chances = weights.split(",").map(value => Number(value.trim()));
+  const genePatterns = patterns.split(",").map(value => Number(value.trim()));
   if (chances.length !== 5 || chances.some(value => !Number.isFinite(value) || value < 0) || Math.abs(chances.reduce((sum, value) => sum + value, 0) - 100) > 0.000001) {
     throw new Error(`Invalid egg color odds: ${name}`);
+  }
+  if (genePatterns.length !== 3 || genePatterns.some(value => !Number.isFinite(value) || value < 0)
+    || Math.abs(genePatterns.reduce((sum, value) => sum + value, 0) - 100) > 0.000001) {
+    throw new Error(`Invalid egg gene patterns: ${name}`);
   }
   return {
     id: items[`CHOCOBO_EGG_${name}`],
     name: name.toLowerCase().replaceAll("_", " ").replace(/^./, letter => letter.toUpperCase()),
     yellow: chances[0], black: chances[1], blue: chances[2], red: chances[3], green: chances[4],
+    genePatterns,
   };
 });
 if (eggColorOdds.length !== 5 || eggColorOdds.some(egg => !Number.isInteger(egg.id))) throw new Error("Expected five egg color distributions");

@@ -1129,7 +1129,12 @@
       "black": 3,
       "blue": 1,
       "red": 0.5,
-      "green": 0.5
+      "green": 0.5,
+      "genePatterns": [
+        25,
+        50,
+        25
+      ]
     },
     {
       "id": 2314,
@@ -1138,7 +1143,12 @@
       "black": 5,
       "blue": 3.4,
       "red": 3.3,
-      "green": 3.3
+      "green": 3.3,
+      "genePatterns": [
+        17.5,
+        60,
+        22.5
+      ]
     },
     {
       "id": 2317,
@@ -1147,7 +1157,12 @@
       "black": 10,
       "blue": 5,
       "red": 5,
-      "green": 5
+      "green": 5,
+      "genePatterns": [
+        16,
+        65,
+        19
+      ]
     },
     {
       "id": 2318,
@@ -1156,7 +1171,12 @@
       "black": 18,
       "blue": 18,
       "red": 16,
-      "green": 16
+      "green": 16,
+      "genePatterns": [
+        15,
+        70,
+        15
+      ]
     },
     {
       "id": 2319,
@@ -1165,7 +1185,12 @@
       "black": 22,
       "blue": 22,
       "red": 22,
-      "green": 22
+      "green": 22,
+      "genePatterns": [
+        10,
+        75,
+        15
+      ]
     }
   ],
   "foodStatPoints": 2,

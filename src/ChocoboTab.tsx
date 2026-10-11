@@ -207,7 +207,7 @@ function ChocoboTab({ cal }: { cal: Calibration }) {
             <details style={{ marginTop: 10, ...styles.sub }}>
               <summary>Digging rules and estimate assumptions</summary>
               <p>Zone XP / 100 items is the expected digging XP from the full zone pool at the daily cap: 100 times each item's share of successful digs times its XP, summed across all eligible items. Click its header to rank zones by highest XP first. Item search does not change this total. Estimates hold rank and conditions fixed; Expert (level 100) earns no further XP.</p>
-              <p>Time, day, and moon are sampled when this tab opens or you change filters, sorting, rank, weather, or prices. The table stays fixed between changes, including while menus are open.</p>
+              <p>Time, day, and moon are sampled when this tab opens, you select Recalculate, or you change filters, sorting, rank, weather, or prices. Use Recalculate after leaving the app idle; it keeps your selected weather, filters, rank, sorting, and prices. The table stays fixed between changes, including while menus are open.</p>
               <p>Moon changes elemental-ore availability and expected loot, not digging accuracy or the greens needed to reach the daily cap.</p>
               <p>One rank-based success roll, then one weighted item. Moon does not change general success. Each item's weights depend on your rank; its XP tier is not a minimum rank requirement. Seeds and tree cuttings appear only from 20:00 to before 04:00. Colored rocks are zone drops, not day bonuses.</p>
               <p>The active digging calculations do not use Burrow, Bore, treasure/cache layers, personal chocobo stat bonuses, or rare-item/fatigue-bypass equipment bonuses. Include conditional items exposes the pinned base-source Bore, Burrow and Treasure lists for reference, not as extra rewards in the active pool. Treasure is a separate base layer, not the Treasure Finder ability. Dig XP stops at level 100.</p>
@@ -221,6 +221,9 @@ function ChocoboTab({ cal }: { cal: Calibration }) {
           </div>
         </CollapsibleSection>
         <div style={{ ...styles.subCard, minWidth: 0 }}>
+          <div style={{ marginBottom: 10 }}>
+            <button type="button" style={styles.buttonCompact} title="Refresh estimates with the current time, day, and moon; keep your selected weather and filters." onClick={() => setNowMs(Date.now())}>Recalculate</button>
+          </div>
           {filtered.length === 0 ? <div style={styles.sub}>No dig results match {includeConditional ? "the zone, condition and search filters" : "the sampled time, selected rank, weather, and filters"}.{!includeConditional && " Try Include conditional items to search unavailable rewards."}</div> :
             <div style={{ border: "1px solid rgba(255,255,255,0.10)", borderRadius: 12, overflow: "auto", maxHeight: "62vh", background: "rgba(255,255,255,0.015)" }}>
               <table style={{ borderCollapse: "collapse", width: "100%" }} aria-label="Chocobo digging">

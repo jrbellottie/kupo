@@ -11,6 +11,8 @@ import { getPurification, purificationMatches } from "./utils/purification";
 import { navigateToTab, peekNavQuery, peekNavRecipeId, hasBackTab, goBackTab, peekBackTabSeq, nextNavSeq } from "./utils/tabNav";
 import { captureScrollPosition, restoreScrollPosition, type ScrollPosition } from "./utils/scrollPosition";
 import { rememberTabState, peekRestoredTabState } from "./utils/tabNav";
+import GuildSellingTab, { type GuildTimerControls } from "./GuildSellingTab";
+import { WEEKDAY_COLORS } from "./utils/weekday";
 
 type RecipeItem = { n: string; q: number };
 type RecipeSub = { c: string; l: number };
@@ -68,9 +70,19 @@ const CRAFTS = [
 ];
 
 const CRYSTAL_OPTIONS = ["Fire", "Ice", "Wind", "Earth", "Lightning", "Water", "Light", "Dark"];
+const CRYSTAL_COLORS: Record<(typeof CRYSTAL_OPTIONS)[number], string> = {
+  Fire: WEEKDAY_COLORS.Firesday,
+  Ice: WEEKDAY_COLORS.Iceday,
+  Wind: WEEKDAY_COLORS.Windsday,
+  Earth: WEEKDAY_COLORS.Earthsday,
+  Lightning: WEEKDAY_COLORS.Lightningday,
+  Water: WEEKDAY_COLORS.Watersday,
+  Light: WEEKDAY_COLORS.Lightsday,
+  Dark: WEEKDAY_COLORS.Darksday,
+};
 const ERA_OPTIONS = ["Base", "RotZ", "CoP", "ToAU", "WotG"];
 
-type Mode = "recipes" | "planner";
+type Mode = "recipes" | "planner" | "guilds";
 type SortDir = "asc" | "desc";
 type RecipeKey = "res" | "craft" | "lvl" | "crystal" | "era" | "gpItemsToCap";
 type PlannerKey =
@@ -363,7 +375,7 @@ const defaultUi: CraftingUiState = {
   pSortDir: "desc",
 };
 
-export default function CraftingTab() {
+export default function CraftingTab(timerControls: GuildTimerControls) {
   const restored = peekRestoredTabState<{ ui: CraftingUiState; selectedRowKey: string | null }>("crafting");
   const initialUi = useMemo(() => {
     if (restored) return restored.ui;
@@ -396,7 +408,7 @@ export default function CraftingTab() {
     return { ...defaultUi, ...loaded, ...navOverride };
   }, []);
 
-  const [mode, setMode] = useState<Mode>(initialUi.mode === "recipes" ? "recipes" : "planner");
+  const [mode, setMode] = useState<Mode>(initialUi.mode === "guilds" ? "guilds" : initialUi.mode === "recipes" ? "recipes" : "planner");
   const [includeWotg, setIncludeWotg] = useState(initialUi.includeWotg);
 
   const [rGlobal, setRGlobal] = useState(initialUi.rGlobal);
@@ -886,14 +898,14 @@ export default function CraftingTab() {
     <section style={styles.card}>
       <div style={styles.titleRow}>
         <h3 style={styles.h3}>
-          {mode === "recipes" ? "Crafting Recipes (ToAU Era)" : "Crafting Skill-up Planner"}
+          {mode === "guilds" ? "Crafting Guilds" : mode === "recipes" ? "Crafting Recipes (ToAU Era)" : "Crafting Skill-up Planner"}
         </h3>
         <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-          <div style={styles.sub}>
+          {mode !== "guilds" && <div style={styles.sub}>
             {`${visibleCount.toLocaleString()} of ${eraFiltered.length.toLocaleString()} recipes${
               visibleCount > MAX_VISIBLE_ROWS ? ` (showing first ${MAX_VISIBLE_ROWS} — refine filters)` : ""
             }`}
-          </div>
+          </div>}
           {canGoBack && (
             <button style={styles.buttonCompact} onClick={goBack} title="Return to your previous search">
               ← Back
@@ -924,9 +936,16 @@ export default function CraftingTab() {
           >
             Skill-up planner
           </button>
+          <button
+            style={mode === "guilds" ? styles.buttonPrimaryCompact : styles.buttonCompact}
+            onClick={() => setMode("guilds")}
+          >
+            Guilds
+          </button>
         </div>
         </CollapsibleSection>
 
+        {mode === "guilds" ? <GuildSellingTab {...timerControls} /> : <>
         <CollapsibleSection kind="search">
         {mode === "recipes" ? (
           <div style={styles.subCard}>
@@ -1257,7 +1276,7 @@ export default function CraftingTab() {
                         </td>
                         <td style={tdStyle}>{row.avgGain.toFixed(2)}</td>
                         <td style={tdStyle}>{Number.isFinite(row.synthsPerLevel) ? Math.ceil(row.synthsPerLevel) : "—"}</td>
-                        <td style={tdStyle}>{row.recipe.crystal}</td>
+                        <td style={{ ...tdStyle, color: CRYSTAL_COLORS[row.recipe.crystal] }}>{row.recipe.crystal}</td>
                         <td style={{ ...tdStyle, ...(row.recipe.era === "WotG" ? { color: "#D8B04B" } : {}) }}>
                           {eraLabel(row.recipe.era)}
                         </td>
@@ -1276,6 +1295,7 @@ export default function CraftingTab() {
             </table>
           )}
         </div>
+        </>}
       </div>
     </section>
   );

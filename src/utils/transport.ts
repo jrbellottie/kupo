@@ -16,6 +16,27 @@ export type TransportGroup = {
   routes: TransportPreset[];
 };
 
+const PORT_COLORS = new Map([
+  ["Port San d'Oria", "#ff8a8a"],
+  ["Port Windurst", "#f6e58d"],
+  ["Port Bastok", "#8ab4ff"],
+  ["Kazham", "#ffb36b"],
+  ["Aht Urhgan Whitegate", "#e6b85c"],
+  ["Selbina", "#6ed6c5"],
+  ["Mhaura", "#c8a2ff"],
+  ["Port Jeuno", "#efacd4"],
+  ["Nashmau", "#c7db83"],
+  ["Bibiki Bay (Sunset Docks)", "#79d9ed"],
+  ["Purgonorgo Isle", "#8edb91"],
+  ["South Landing", "#d7b58c"],
+  ["Central Landing", "#a3c4a8"],
+  ["North Landing", "#b4bddb"],
+]);
+
+export function getTransportPortColor(port: string | undefined): string | undefined {
+  return port === undefined ? undefined : PORT_COLORS.get(port);
+}
+
 // Published departures and destination arrivals. Each route repeats daily.
 export const TRANSPORT_GROUPS: TransportGroup[] = [
   {
