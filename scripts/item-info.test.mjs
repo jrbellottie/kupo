@@ -110,7 +110,7 @@ test("shared catalog applies equipment, pet food, cooldown and EXP overrides wit
   }
 });
 
-test("item details render corrected levels and keep retail text and images behind labeled disclosure", async () => {
+test("item details render corrected levels and keep supplementary wiki text and images visible", async () => {
   const { outputFiles } = buildSync({
     stdin: { contents: 'import React from "react"; import { renderToStaticMarkup } from "react-dom/server"; import ItemInfo from "./src/ItemInfo"; export const render = name => renderToStaticMarkup(<ItemInfo name={name} />);', resolveDir: process.cwd(), loader: "tsx" },
     bundle: true, write: false, platform: "node", format: "cjs", loader: { ".css": "empty" }, define: { "import.meta.env.BASE_URL": '"/"' },
@@ -120,17 +120,17 @@ test("item details render corrected levels and keep retail text and images behin
   new Function("require", "module", "exports", outputFiles[0].text)(createRequire(import.meta.url), module, module.exports);
   for (const [name, level] of [["Reraise", 33], ["Reraise II", 60], ["Reraise III", 75]]) {
     const html = module.exports.render(`Scroll of ${name}`);
-    const primary = html.replace(/<details\b[\s\S]*?<\/details>/g, "");
-    assert.match(primary, new RegExp(`WHM Lv\\. ${level}`));
-    assert.doesNotMatch(primary, /WHM Lv\. (25|56|70)\b/);
-    assert.match(html, /<details><summary[^>]*>Wiki statistics and notes \(may show later-retail values\)/);
+    assert.match(html, new RegExp(`WHM Lv\\. ${level}`));
+    assert.doesNotMatch(html, /WHM Lv\. (25|56|70)\b/);
+    assert.match(html, /Wiki statistics and notes \(may show later-retail values\)/);
     assert.match(html, /Wiki tooltip image \(may show later-retail values\)/);
-    assert.doesNotMatch(html, /<details[^>]*\bopen\b/);
-    assert.match(primary, /pinned source overrides/);
+    assert.match(html, /<img[^>]+in-game item description/);
+    assert.doesNotMatch(html, /<(?:details|summary)\b/);
+    assert.match(html, /pinned source overrides/);
   }
-  const shield = module.exports.render("Kite Shield").replace(/<details\b[\s\S]*?<\/details>/g, "");
-  assert.match(shield, /PLD \/ DRK/);
-  assert.doesNotMatch(shield, /WAR/);
+  const shield = module.exports.render("Kite Shield");
+  assert.match(shield, /<span>PLD \/ DRK<\/span>/);
+  assert.match(shield, /WAR \/ PLD \/ DRK/);
   assert.match(module.exports.render("Warp Cudgel"), /24h/);
   assert.match(module.exports.render("Scroll of Inundation"), /not defined in the pinned source snapshot/);
 });

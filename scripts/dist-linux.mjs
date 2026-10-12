@@ -69,7 +69,7 @@ export function distLinux({ platform = process.platform, root = projectRoot, run
     const details = result.error?.message ?? `${result.stderr ?? ""}${result.stdout ?? ""}`.replaceAll("\0", "").trim();
     throw new Error(
       `WSL is unavailable. In an administrator PowerShell, run wsl --install -d Ubuntu, ` +
-      `restart if requested, and complete Ubuntu's first-run setup. Install Linux Node.js 22 in WSL, ` +
+      `restart if requested, and complete Ubuntu's first-run setup. Install Linux Node.js 22.13 or later in the 22.x line, or 24 or later, in WSL, ` +
       `then retry npm run dist:linux.\n${details}`
     );
   }

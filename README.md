@@ -115,7 +115,7 @@ Kupo uses bundled source snapshots and cached wiki references, not live game dat
 
 ## Building from source
 
-Requirements: Node.js.
+Requirements: Node.js 22.13 or later in the 22.x line, or Node.js 24 or later.
 
 ```powershell
 npm install          # install dependencies
@@ -138,8 +138,9 @@ removed afterward. Windows dependencies, icons, build outputs, and the
 
 One-time setup: run `wsl --install -d Ubuntu` in an administrator PowerShell,
 restart if requested, and open Ubuntu to complete its first-run setup. Install
-Linux Node.js 22 or newer with npm inside that distribution (a default nvm
-installation is supported). Windows Node.js does not replace Linux Node.js.
+Linux Node.js 22.13 or later in the 22.x line, or Node.js 24 or later, with npm
+inside that distribution (a default nvm installation is supported). Windows
+Node.js does not replace Linux Node.js.
 The build uses the default distribution selected by `wsl --set-default <name>`
 and needs network access for npm dependencies and packaging tools.
 
@@ -152,7 +153,8 @@ app; it does not run on Windows or publish a GitHub release.
 
 On Linux, mark the extracted AppImage as executable in its file properties before
 launching it. To build locally on Linux or in a separate WSL Linux checkout with
-Node.js 22 installed, run `npm ci` followed by `npm run dist:linux`. The output is
+Node.js 22.13 or later in the 22.x line, or Node.js 24 or later, installed, run
+`npm ci` followed by `npm run dist:linux`. The output is
 in the versioned `release` directory. Do not reuse Windows `node_modules` in WSL.
 The Linux command generates its PNG icon automatically and explicitly uses
 `electron-builder.json5`; Windows packaging continues to use the configuration

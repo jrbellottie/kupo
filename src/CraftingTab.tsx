@@ -1,7 +1,7 @@
 // src/CraftingTab.tsx
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { styles } from "./styles";
-import { CollapsibleSection } from "./ScreenControls";
+import { CollapsibleSection, useTableViewportHeight } from "./ScreenControls";
 import recipesData from "./data/recipes.json";
 import { loadJson, saveJson } from "./utils/storage";
 import { craftSkillupStats } from "./utils/craftingSkillup";
@@ -376,6 +376,8 @@ const defaultUi: CraftingUiState = {
 };
 
 export default function CraftingTab(timerControls: GuildTimerControls) {
+  const resultsRef = useRef<HTMLDivElement | null>(null);
+  const resultsHeight = useTableViewportHeight(resultsRef);
   const restored = peekRestoredTabState<{ ui: CraftingUiState; selectedRowKey: string | null }>("crafting");
   const initialUi = useMemo(() => {
     if (restored) return restored.ui;
@@ -1125,11 +1127,12 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
         </CollapsibleSection>
 
         <div
+          ref={resultsRef}
           style={{
             border: "1px solid rgba(255,255,255,0.10)",
             borderRadius: 12,
             overflow: "auto",
-            maxHeight: "62vh",
+            maxHeight: resultsHeight ?? "62vh",
             background: "rgba(255,255,255,0.015)",
           }}
         >

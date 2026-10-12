@@ -1,6 +1,5 @@
 import { app, BrowserWindow, ipcMain, Notification, powerSaveBlocker, screen, shell } from "electron";
 import path from "node:path";
-import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -14,17 +13,6 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 
 let win: BrowserWindow | null = null;
-
-// One-time migration: app was renamed from "ffxi-timer" to "kupo"; carry over saved data
-try {
-  const oldUserData = path.join(app.getPath("appData"), "ffxi-timer");
-  const newUserData = app.getPath("userData");
-  if (!fs.existsSync(newUserData) && fs.existsSync(oldUserData)) {
-    fs.cpSync(oldUserData, newUserData, { recursive: true });
-  }
-} catch {
-  // ignore — worst case the app starts with fresh settings
-}
 
 // IMPORTANT: these must be set BEFORE app.whenReady()
 app.commandLine.appendSwitch("disable-background-timer-throttling");

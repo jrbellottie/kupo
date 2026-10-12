@@ -1025,6 +1025,28 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   const careHeading = tree => findElement(tree, element => element.type === "h4" && element.props.children === "Care to arrange today");
   const careCheckbox = tree => findElement(findElement(tree, element => element.type === "label"
     && React.Children.toArray(element.props.children).includes("Care schedule checked / arranged")), element => element.type === "input");
+  const textContent = element => React.isValidElement(element)
+    ? React.Children.toArray(element.props.children).map(textContent).join("")
+    : String(element ?? "");
+  const careSteps = tree => findElement(tree, element => element.type === "ol" && element.props["aria-label"] === "Care-plan steps");
+  for (const [age, careId, count] of [[4, 3, 7], [4, 3, 1], [20, 0, 3], [126, 4, 1]]) {
+    states[4] = start + age * day;
+    states[0] = { ...view, daily: { ...schedule, days: schedule.days.map(step => ({
+      ...step, careId: step.day >= age + 2 && step.day < age + 2 + count ? careId : careId === 0 ? 3 : 0,
+    })) } };
+    const instructions = textContent(careSteps(render()));
+    assert.match(instructions, /If those days already have this activity, leave them alone/);
+    assert.ok(instructions.includes(`edit Plan 1 at the stable trainer. Choose ${trainingActionName({ kind: "care", id: careId })} and set the duration to ${count} ${count === 1 ? "day" : "days"}.`));
+    assert.ok(instructions.includes(`This covers days ${age + 2}-${age + 1 + count}.`));
+    assert.match(instructions, /Plan 2 runs after Plan 1 finishes/);
+    assert.match(instructions, /recheck later blocks against the timeline/);
+    const renderedText = textContent(render());
+    assert.ok(renderedText.includes(`Day ${age + 1} is already locked; this change first affects results on day ${age + 2}.`));
+    assert.match(renderedText, /Do not add a Basic Care block for the delay/);
+    assert.match(renderedText, /"Next program" can still show the locked activity/);
+  }
+  states[0] = { ...view, daily: schedule };
+  states[4] = start + 4 * day;
   tree = render();
   assert.ok(careHeading(tree));
   assert.equal(careCheckbox(tree).props.disabled, false);
@@ -1056,12 +1078,10 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     tree = render();
     assert.equal(careHeading(tree), undefined, `no care section at day ${age} when nothing can be arranged`);
     assert.equal(careCheckbox(tree), undefined);
+    assert.equal(careSteps(tree), undefined);
   }
 
   const storySteps = tree => findElement(tree, element => element.type === "ol" && element.props["aria-label"]?.endsWith(" story steps"));
-  const textContent = element => React.isValidElement(element)
-    ? React.Children.toArray(element.props.children).map(textContent).join("")
-    : String(element ?? "");
   const storyView = {
     ...view,
     form: { ...form, knownAbilities: [], feedingReport: { affection: 224, fullness: 31, condition: "healthy", day: 30 } },
@@ -1192,6 +1212,8 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(help, /uses the current device time/);
   assert.match(help, /This works even when an estimate is already displayed/);
   assert.match(help, /Calculating a plan in this app does not queue anything in game/);
+  assert.match(help, /Plan 1 is the first editable block; Plan 2 runs after Plan 1 finishes, not two days from now/);
+  assert.match(help, /Do not add Basic Care days to cover the delay/);
   assert.match(help, /Press Calculate plan for day N below the inputs, just above the divider before Estimated plan/);
   assert.match(help, /The button shows the current raising day/);
   assert.match(help, /Changing an input cancels the old calculation/);

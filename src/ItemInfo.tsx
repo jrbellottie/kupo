@@ -73,10 +73,10 @@ function ItemDetails({ name, onSelect }: { name: string; onSelect: (name: string
       </div>}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 16, alignItems: "flex-start", minWidth: 0 }}>
         {!exchange && reference?.image && failedImage !== reference.image && (
-          <details style={{ maxWidth: "100%" }}>
-            <summary style={{ color: "#aaa", fontSize: 12, cursor: "pointer" }}>Wiki tooltip image (may show later-retail values)</summary>
+          <div style={{ maxWidth: "100%", display: "grid", gap: 4 }}>
+            <div style={{ color: "#aaa", fontSize: 12 }}>Wiki tooltip image (may show later-retail values)</div>
             <img src={`${import.meta.env.BASE_URL}${reference.image}`} alt={`${reference.title} in-game item description`} onError={() => setFailedImage(reference.image ?? null)} style={{ display: "block", maxWidth: "100%", height: "auto" }} />
-          </details>
+          </div>
         )}
         <div style={{ flex: "1 1 280px", minWidth: 0, display: "grid", gap: 7 }}>
           {reference?.description && <div style={{ lineHeight: 1.5 }}><NpcText text={reference.description} /></div>}
@@ -111,8 +111,8 @@ function ItemDetails({ name, onSelect }: { name: string; onSelect: (name: string
         </div>
       </div>
       {reference?.status === "ok" && (
-        <details>
-          <summary style={{ color: "#bcbcbc", fontSize: 12, cursor: "pointer" }}>Wiki statistics and notes (may show later-retail values)</summary>
+        <section style={{ display: "grid", gap: 8 }}>
+          <div style={{ color: "#bcbcbc", fontSize: 12 }}>Wiki statistics and notes (may show later-retail values)</div>
           <p style={{ color: "#aaa", fontSize: 12 }}>Cached wiki text is supplementary, not the reference ruleset. Levels, jobs, effects and timings below may differ; use source statistics above where available. Live configuration may also vary.</p>
           <dl style={{ margin: 0, display: "flex", flexWrap: "wrap", gap: "8px 20px" }}>
             {Object.entries(reference.fields ?? {}).map(([key, value]) => <div key={key} style={{ minWidth: 0, maxWidth: "100%" }}>
@@ -120,7 +120,7 @@ function ItemDetails({ name, onSelect }: { name: string; onSelect: (name: string
             </div>)}
           </dl>
           {reference.notes && <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.5, overflowWrap: "anywhere" }}><NpcText text={reference.notes} /></div>}
-        </details>
+        </section>
       )}
     </div>
   );

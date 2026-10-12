@@ -35,7 +35,7 @@ test("missing WSL gives setup instructions without starting a build", () => {
   assert.throws(() => distLinux({
     platform: "win32",
     run: () => { calls++; return { status: 1, stderr: "WSL not installed" }; },
-  }), /wsl --install -d Ubuntu.*Linux Node.js 22/s);
+  }), /wsl --install -d Ubuntu.*Linux Node.js 22\.13 or later in the 22\.x line, or 24 or later/s);
   assert.equal(calls, 1);
 });
 

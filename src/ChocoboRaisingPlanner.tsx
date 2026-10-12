@@ -298,7 +298,7 @@ export default function ChocoboRaisingPlanner() {
         <li><strong>Hands-on activities:</strong> you choose a short, regular or long walk, tell a story, or perform another action. These use energy for encounters, stories and other effects. The Take a Walk care plan is not the same as taking a hands-on walk.</li>
       </ul>
       <p><strong>Examples:</strong> Take a Walk and Carry Packages train Strength and Endurance; Listen to Music trains Discernment and Receptivity; Exercise in a Group focuses on Endurance. Rest helps recovery instead of building stats. Availability depends on the bird's growth stage.</p>
-      <p>You can queue four care-plan blocks of 1-7 days each. A plan selected on day N first affects results on day N + 2, because the next day's plan is already locked. Use the timeline's queue-by dates to arrange care with the trainer. Empty blocks refill with Basic Care. Good and poor results change the amount of training gained; keep the bird healthy and its affection up.</p>
+      <p>You can queue four care-plan blocks of 1-7 days each. Plan 1 is the first editable block; Plan 2 runs after Plan 1 finishes, not two days from now. A plan selected on day N first affects results on day N + 2, because the next day's plan is already locked. Care to arrange today gives the activity and duration to set in Plan 1 if those future days are not already correct. Do not add Basic Care days to cover the delay. Use the timeline's queue-by dates to arrange later blocks with the trainer, and recheck them if you change an earlier block's duration. Empty blocks refill with Basic Care. Good and poor results change the amount of training gained; keep the bird healthy and its affection up.</p>
       <h4>How often can I feed it?</h4>
       <p>You can feed more than one item in a day. Trade food to your stable trainer: up to four items can be eaten per trade, not per day. More trades are possible, but fullness is the practical limit. Each eaten item applies its own effects; negative stat changes stop at zero, with no hidden deficit.</p>
       <p>Fullness runs from 0 to 255. Eating an item while already at 224 or higher counts as force-feeding. The check happens before each item, including items in the same trade. Force-feeding flags a {RAISING.forcedFeedIllnessChance}% stomachache-onset chance at the next rollover. Feed one item at a time and check the trainer's response rather than forcing more food for faster stat gains.</p>
@@ -389,7 +389,13 @@ export default function ChocoboRaisingPlanner() {
             </div>
             {care && <div>
               <h4>Care to arrange today</h4>
-              <p>Check the trainer's schedule for days <strong>{care.firstDay}-{care.lastDay}</strong>: it should contain <strong>{trainingActionName({ kind: "care", id: care.careId })}</strong> for {care.count} day(s). If already correct, leave it alone; otherwise arrange those future days today. Do not restart the whole schedule.</p>
+              <p>On day <strong>{currentDay}</strong>, arrange <strong>{trainingActionName({ kind: "care", id: care.careId })}</strong> for days <strong>{care.firstDay}-{care.lastDay}</strong>.</p>
+              <ol aria-label="Care-plan steps">
+                <li><strong>Check the trainer's existing schedule first.</strong> If those days already have this activity, leave them alone; do not restart the whole schedule.</li>
+                <li><strong>If they need changing, edit Plan 1</strong> at the stable trainer. Choose <strong>{trainingActionName({ kind: "care", id: care.careId })}</strong> and set the duration to <strong>{care.count} {care.count === 1 ? "day" : "days"}</strong>. This covers days {care.firstDay}-{care.lastDay}. Plan 2 runs after Plan 1 finishes; it is not the slot for the two-day delay.</li>
+                <li><strong>Confirm the schedule, then check the box below.</strong> If you changed Plan 1's duration, recheck later blocks against the timeline because their start days move.</li>
+              </ol>
+              <p className="raising-small">Day {currentDay + 1} is already locked; this change first affects results on day {care.firstDay}. The app assumes tomorrow's locked activity is Basic Care, but cannot read the trainer's schedule. Do not add a Basic Care block for the delay. The trainer's "Next program" can still show the locked activity after you edit Plan 1.</p>
               <label className="raising-exact-toggle"><input type="checkbox" checked={progress.careKey === care.key} disabled={!canComplete}
                 onChange={event => completeToday({ careKey: event.target.checked ? care.key : null })} />Care schedule checked / arranged</label>
             </div>}
