@@ -24,7 +24,8 @@ export default function NotificationSettings() {
     <h3 style={styles.h3}>Timer popups</h3>
     <p style={styles.sub}>Watch running timers soonest first, with flashing due alerts and a soft chime.
       Move or resize the window; its monitor, position, and size are saved.
-      Dismissing alerts keeps the window open and recurring timers enabled.</p>
+      The window stays open until all pending alerts are dismissed, then closes.
+      Recurring timers stay enabled.</p>
     {!bridge
       ? <p style={styles.sub}>Desktop popups are available in the Windows and Linux desktop app.</p>
       : <div style={{ ...styles.buttonRow, alignItems: "center", flexWrap: "wrap" }}>

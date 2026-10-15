@@ -1,4 +1,5 @@
 import phoenix from "../data/phoenix.json";
+import { GUILD_COLORS } from "./guilds";
 import { nextEarthMsForVanaDailySchedule, type Calibration } from "../vanadiel";
 import type { EarthTimer } from "../types";
 
@@ -143,6 +144,8 @@ export function createGuildDecayTimer(
   if (days < 1) {
     throw new Error("A timer can only be set for a future game day.");
   }
+  const guildColor = Object.entries(GUILD_COLORS).find(([guildId]) => guildId === offer.guild.toUpperCase())?.[1];
+  if (!guildColor) throw new Error(`No timer color is configured for ${offer.guild}.`);
 
   const firstDayBoundary = nextEarthMsForVanaDailySchedule({
     nowEarthMs: nowMs,
@@ -157,6 +160,7 @@ export function createGuildDecayTimer(
     label: `${offer.guild} — ${offer.n} at ${offer.npc}: ${price.toLocaleString()} gil after ${days} Vana'diel ${days === 1 ? "day" : "days"}`,
     enabled: true,
     createdAtMs: nowMs,
+    accentColor: guildColor,
     targetEarthMs,
     rawInput: new Date(targetEarthMs).toISOString(),
     repeatDaily: false,

@@ -4,7 +4,7 @@ import { buildSync } from "esbuild";
 
 const bundle = buildSync({
   stdin: {
-    contents: 'export * from "./src/utils/guildDecay"; export { nextEarthMsForVanaDailySchedule } from "./src/vanadiel";',
+    contents: 'export * from "./src/utils/guildDecay"; export * from "./src/utils/guilds"; export { nextEarthMsForVanaDailySchedule } from "./src/vanadiel";',
     resolveDir: process.cwd(),
     loader: "ts",
   },
@@ -97,6 +97,7 @@ test("guild decay validates purchase amounts and schedules a one-time timer at t
   assert.equal(timer.kind, "EARTH_TIME");
   assert.equal(timer.targetEarthMs, firstBoundary + 2 * 86_400 * 40);
   assert.equal(timer.repeatDaily, false);
+  assert.equal(timer.accentColor, data.GUILD_COLORS.WOODWORKING);
   assert.match(timer.label, /2,183 gil after 3 Vana'diel days/);
 
   const unchangedPriceTimer = data.createGuildDecayTimer(elmLumber, fromItemsBought, 6, nowMs, cal, offsetHours);

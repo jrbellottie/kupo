@@ -15,7 +15,7 @@ Vana'diel time is global, so Kupo works in any time zone.
 
 ### Notification setup
 
-Use **Clock & Timers → Timer popups → Open timer window** to watch live countdowns, soonest first, with flashing due alerts at the top and an adjustable soft chime. Drag the header to move it or its edges to resize; Kupo remembers the monitor, position, and size. Dismissing alerts keeps the window open and recurring timers enabled; the close button dismisses alerts and hides the window until reopened or another alert fires. Keep Kupo running; native system-notification permissions are not needed.
+Use **Clock & Timers → Timer popups → Open timer window** to watch live countdowns, soonest first, with flashing due alerts at the top and an adjustable soft chime. Drag the header to move it or its edges to resize; Kupo remembers the monitor, position, and size. Dismissing an alert leaves the window open while other alerts are pending; dismissing the last alert closes it, even if future countdowns remain. **Dismiss all alerts** or the close button clears all alerts and closes the window. Recurring timers stay enabled. Keep Kupo running; native system-notification permissions are not needed.
 
 Linux uses X11 (or XWayland on Wayland desktops) to support saved window positions. XWayland must be installed when using a Wayland session. Window managers and exclusive-fullscreen games can still hide other windows; use borderless/windowed mode if needed. **Reset to primary monitor** recovers an inconvenient popup position.
 
@@ -24,7 +24,7 @@ Linux uses X11 (or XWayland on Wayland desktops) to support saved window positio
 ## The tabs
 
 ### 🕐 Clock & Timers
-View the current Vana'diel time and moon phase, and manage your saved timers and upcoming alerts. Timer cards pulse until their pending alerts are dismissed, or show a steady highlight when reduced motion is enabled.
+View the current Vana'diel time and moon phase, and manage your saved timers and upcoming alerts.
 
 ### ⏱️ Time Tools
 Create Vana'diel, real-world, countdown, and moon-phase timers, use color-coded ports and countdowns on every transport route, or use a stopwatch to track elapsed time.
@@ -33,7 +33,7 @@ Create Vana'diel, real-world, countdown, and moon-phase timers, use color-coded 
 Track notorious monster spawn windows and lottery placeholders, with reminders to help you follow each camp.
 
 ### ⭐ Presets
-Quickly add reminders for guild openings, Tenshodo hours, the next Vana'diel day, and scheduled boat or airship journeys. Transport times are timetable estimates, not live tracking.
+Quickly add reminders for guild openings, Tenshodo hours, the next Vana'diel day, and scheduled boat or airship journeys, with each timer button showing its offset and local alert time. Transport times are timetable estimates, not live tracking.
 
 ### 🔢 Counters
 Keep manual tallies of session results, including success rates and synthesis outcomes.

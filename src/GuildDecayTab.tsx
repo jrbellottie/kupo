@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { styles } from "./styles";
+import PresetTimerDetails from "./PresetTimerDetails";
 import {
   createGuildDecayTimer,
   GUILD_DECAY_MAX_TIMER_DAYS,
@@ -105,6 +106,12 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
     if (!selectedOffer) throw new Error("Choose a guild item and shop before setting a timer.");
     onAddTimer(createGuildDecayTimer(selectedOffer, selection, days, nowMs, cal, offsetHours));
   };
+  const timerFireAt = (days: number) => {
+    if (!selectedOffer || error || !Number.isSafeInteger(days) || days < 1 || days > GUILD_DECAY_MAX_TIMER_DAYS) {
+      return null;
+    }
+    return createGuildDecayTimer(selectedOffer, selection, days, nowMs, cal, offsetHours).targetEarthMs;
+  };
   const setQuantityBought = (value: number) => setSelection(previous => ({ ...previous, quantityBought: value }));
   const setCurrentPrice = (value: number) => setSelection(previous => ({ ...previous, currentPrice: value }));
   const setInputMode = (inputMode: GuildDecayInputMode) => setSelection(previous => ({ ...previous, inputMode }));
@@ -200,12 +207,15 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
               <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>—</td>
             </tr>
             {preview?.days.map(({ day, stock, price }) => {
+              const fireAtMs = timerFireAt(day);
               return <tr key={day}>
                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>After {day} {day === 1 ? "day" : "days"}</td>
                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>{stock}</td>
                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>{price.toLocaleString()} gil</td>
                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>
                   <button type="button" style={styles.buttonCompact} onClick={() => addTimer(day)}>Set timer</button>
+                  {fireAtMs !== null && <PresetTimerDetails offsetText={offsetDescription} offsetValue={offsetHours}
+                    reference="the selected guild day boundary" fireAtMs={fireAtMs} nowMs={nowMs} />}
                 </td>
               </tr>;
             })}
@@ -230,9 +240,13 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
         <div style={styles.sub} aria-live="polite">
           Calculated price: {targetPrice === null ? "—" : `${targetPrice.toLocaleString()} gil`}
         </div>
-        <button type="button" style={styles.buttonPrimary} disabled={!canSetTargetTimer} onClick={() => addTimer(targetDay)}>
-          Set timer for this day
-        </button>
+        <div>
+          <button type="button" style={styles.buttonPrimary} disabled={!canSetTargetTimer} onClick={() => addTimer(targetDay)}>
+            Set timer for this day
+          </button>
+          {canSetTargetTimer && <PresetTimerDetails offsetText={offsetDescription} offsetValue={offsetHours}
+            reference="the selected guild day boundary" fireAtMs={timerFireAt(targetDay)!} nowMs={nowMs} />}
+        </div>
       </div>
       {targetDayError && <p role="alert" style={styles.errorText}>{targetDayError}</p>}
 

@@ -16,11 +16,11 @@ export type BaseTimer = {
   kind: TimerKind;
   enabled: boolean;
   createdAtMs: number;
+  accentColor?: string;
 };
 
 export type WeekdayTimer = BaseTimer & {
   kind: "VANA_WEEKDAY_TIME";
-  accentColor?: string;
   targetWeekday: VanaWeekday;
   targetHour: number;
   targetMinute: number;

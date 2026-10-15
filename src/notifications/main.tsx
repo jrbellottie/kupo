@@ -27,14 +27,14 @@ export default function NotificationPopup() {
     const update = (next: NotificationState) => {
       setState(next);
       audio.volume = next.volume;
-      if (next.alerts.length === 0 || next.volume === 0) {
+      if (!next.windowOpen || next.alerts.length === 0 || next.volume === 0) {
         audio.pause();
         audio.currentTime = 0;
       }
       if (next.soundSequence > lastSoundSequence) {
         lastSoundSequence = next.soundSequence;
         // Coalesce simultaneous timers into one chime, not overlapping sounds.
-        if (next.alerts.length && next.volume > 0 && Date.now() - lastSoundAt >= 1000) {
+        if (next.windowOpen && next.alerts.length && next.volume > 0 && Date.now() - lastSoundAt >= 1000) {
           lastSoundAt = Date.now();
           audio.currentTime = 0;
           void audio.play().catch(reason => {

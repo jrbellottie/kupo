@@ -6,7 +6,7 @@ import { buildSync } from "esbuild";
 
 const bundle = buildSync({
   stdin: {
-    contents: 'export * from "./electron/notificationState"; export * from "./src/utils/timerSchedule";',
+    contents: 'export * from "./electron/notificationState"; export * from "./src/utils/timerSchedule"; export { presetTimerDetails } from "./src/utils/presetTimerDetails";',
     resolveDir: fileURLToPath(new URL("../", import.meta.url)),
     loader: "ts",
   },
@@ -15,6 +15,7 @@ const bundle = buildSync({
 const {
   NotificationQueue, popupBounds, parseNotificationSettings, isTimerNotification, isRunningTimer,
   runningTimerPreviews, nextTimerAt,
+  presetTimerDetails,
   REPEAT_INTERVAL_MS, MAX_SOUND_REPEATS,
 } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 const primary = { id: 1, workArea: { x: 0, y: 0, width: 1920, height: 1040 } };
@@ -100,6 +101,21 @@ test("running previews use shared transport, weekday, moon, NM and gardening sch
   }
 });
 
+test("preset button details identify the selected lead time and local fire time", () => {
+  const nowMs = new Date(2026, 9, 15, 12, 0, 0).getTime();
+  const fireAtMs = nowMs + 5 * 60_000;
+  assert.deepEqual(presetTimerDetails("5 real-time minutes", 5, "departure", fireAtMs, nowMs), {
+    offset: "5 real-time minutes before departure",
+    localFireTime: new Date(fireAtMs).toLocaleString(),
+    timeUntil: "00:05:00",
+  });
+  assert.deepEqual(presetTimerDetails("0 Vana'diel hours", 0, "the next Vana'diel day boundary", fireAtMs, nowMs), {
+    offset: "No lead time (at the next Vana'diel day boundary)",
+    localFireTime: new Date(fireAtMs).toLocaleString(),
+    timeUntil: "00:05:00",
+  });
+});
+
 test("invalid saved settings and malformed timer messages fail validation", () => {
   for (const value of [null, {}, { volume: NaN, position: null }, { volume: 2, position: null },
     { volume: 0.5 }, { volume: 0.5, position: { displayId: 2, x: "1", y: 0 } }]) {
@@ -137,6 +153,19 @@ test("sound repeats are coalesced, capped, and stop immediately on dismissal", (
   queue.dismissAll();
   assert.equal(queue.alerts.length, 0);
   assert.equal(queue.repeatDue(1_000_000), false);
+});
+
+test("dismissing one alert retains other alerts for their next scheduled repeat", () => {
+  const queue = new NotificationQueue();
+  queue.add(alert("dismissed", "first-timer"), 0);
+  queue.add(alert("pending", "second-timer"), 1000);
+  queue.dismiss("dismissed");
+  assert.deepEqual(queue.alerts.map(entry => entry.key), ["pending"]);
+  assert.equal(queue.repeatDue(REPEAT_INTERVAL_MS), false);
+  assert.equal(queue.repeatDue(REPEAT_INTERVAL_MS + 1000), true);
+  assert.deepEqual(queue.alerts.map(entry => entry.key), ["pending"]);
+  queue.dismissAll();
+  assert.equal(queue.repeatDue(2 * REPEAT_INTERVAL_MS + 1000), false);
 });
 
 test("one-shot NM/gardening alerts do not repeat; deleting/disabling clears all occurrences of that timer", () => {

@@ -24,6 +24,7 @@ import { AnyTimer, MoonDirection, type GardeningTimer, type EarthTimer } from ".
 import { advanceGardeningTimer, nextGardeningEvent, recordGardeningFeed } from "./utils/gardeningTimers";
 import GardeningTimerDetails from "./GardeningTimerDetails";
 import GuildDecayTab from "./GuildDecayTab";
+import PresetTimerDetails from "./PresetTimerDetails";
 import NotificationSettings from "./NotificationSettings";
 import type { NotificationState } from "./notifications/types";
 import { nextTimerAt, runningTimerPreviews } from "./utils/timerSchedule";
@@ -2155,7 +2156,7 @@ export default function AppShell() {
                 <div style={styles.titleRow}>
                   <div style={{ fontWeight: 800 }}>Next Day</div>
                   <div style={styles.sub}>
-                    Targets 00:00 → fires {pad2(nextDayPreview.targetHour)}:{pad2(nextDayPreview.targetMinute)} ({presetOffsetText} before)
+                    Targets the next Vana&apos;diel day boundary
                   </div>
                 </div>
 
@@ -2163,24 +2164,23 @@ export default function AppShell() {
                   Will set:{" "}
                   <span style={weekdayStyle(nextDayPreview.targetWeekday)}>{nextDayPreview.targetWeekday}</span>{" "}
                   {pad2(nextDayPreview.targetHour)}:{pad2(nextDayPreview.targetMinute)}
-                  <br />
-                  Next: {new Date(nextDayPreview.nextAt).toLocaleString()} — In:{" "}
-                  {formatCountdown(nextDayPreview.nextAt - nowMs)}
                 </div>
 
                 <div style={{ marginTop: 10, ...styles.buttonRow }}>
                   <button style={styles.buttonPrimary} onClick={addNextDayTimer}>
                     Add Next Day timer
                   </button>
+                  <PresetTimerDetails offsetText={presetOffsetText} offsetValue={presetOffsetValue}
+                    reference="the next Vana'diel day boundary" fireAtMs={nextDayPreview.nextAt} nowMs={nowMs} />
                 </div>
               </div>
 
               {guildPreviews.map((guild) => (
                 <div key={guild.id} style={{ ...styles.subCard, borderColor: `${GUILD_COLORS[guild.id]}66` }}>
-                  <div style={styles.titleRow}>
+                  <div>
                     <div style={{ fontWeight: 800, color: GUILD_COLORS[guild.id] }}>{guild.label}</div>
-                    <div style={styles.sub}>
-                      Opens {formatVanaTime(guild.openHour, guild.openMinute)}–{formatVanaTime(guild.closeHour, guild.closeMinute)} → fires {pad2(guild.targetHour)}:{pad2(guild.targetMinute)} ({presetOffsetText} before), closed{" "}
+                    <div style={{ ...styles.sub, marginTop: 8 }}>
+                      Opens {formatVanaTime(guild.openHour, guild.openMinute)}–{formatVanaTime(guild.closeHour, guild.closeMinute)}, closed{" "}
                       {guild.closedOn ? <span style={weekdayStyle(guild.closedOn)}>{guild.closedOn}</span> : "Never"}
                     </div>
                   </div>
@@ -2189,14 +2189,14 @@ export default function AppShell() {
                     Will set:{" "}
                     <span style={weekdayStyle(guild.targetWeekday)}>{guild.targetWeekday}</span>{" "}
                     {pad2(guild.targetHour)}:{pad2(guild.targetMinute)}
-                    <br />
-                    Next: {new Date(guild.nextAt).toLocaleString()} — In: {formatCountdown(guild.nextAt - nowMs)}
                   </div>
 
                   <div style={{ marginTop: 10, ...styles.buttonRow }}>
                     <button style={{ ...styles.buttonPrimary, color: GUILD_COLORS[guild.id], borderColor: `${GUILD_COLORS[guild.id]}99` }} onClick={() => addGuildTimer(guild)}>
                       Add {guild.label} timer
                     </button>
+                    <PresetTimerDetails offsetText={presetOffsetText} offsetValue={presetOffsetValue}
+                      reference={`${guild.label} opening`} fireAtMs={guild.nextAt} nowMs={nowMs} />
                   </div>
                 </div>
               ))}
@@ -2215,8 +2215,6 @@ export default function AppShell() {
                       Will set:{" "}
                       <span style={weekdayStyle(t.targetWeekday)}>{t.targetWeekday}</span> {pad2(t.targetHour)}:
                       {pad2(t.targetMinute)}
-                      <br />
-                      Next: {new Date(t.nextAt).toLocaleString()} — In: {formatCountdown(t.nextAt - nowMs)}
                     </div>
                   ))}
                 </div>
@@ -2225,6 +2223,9 @@ export default function AppShell() {
                   <button style={{ ...styles.buttonPrimary, color: GUILD_COLORS.TENSHODO, borderColor: `${GUILD_COLORS.TENSHODO}99` }} onClick={addTenshodoTimers}>
                     Add Tenshodo timers
                   </button>
+                  {tenshodoPreviews.map(target => <PresetTimerDetails key={target.label}
+                    offsetText={presetOffsetText} offsetValue={presetOffsetValue}
+                    reference={`${target.label} opening`} fireAtMs={target.nextAt} nowMs={nowMs} />)}
                 </div>
 
                 <div style={{ marginTop: 8, ...styles.sub }}>
@@ -2259,16 +2260,14 @@ export default function AppShell() {
                         Arrives (Earth): {new Date(route.nextArrivalAt).toLocaleString()}
                       </div>
                       <div style={{ marginTop: 8, ...styles.sub }}>
-                        Alert lead time (Earth): {formatCountdown(presetOffsetEarthMs)}
-                        <br />
-                        Next alert (Earth): {new Date(route.nextAt).toLocaleString()} — In: {formatCountdown(route.nextAt - nowMs)}
-                        <br />
                         <span style={{ color: getTransportPortColor(route.departurePort) }}>For departure from {route.departurePort} (Earth): {new Date(route.departureAt).toLocaleString()} — In: {formatCountdown(route.departureAt - nowMs)}</span>
                       </div>
                       <div style={{ marginTop: 10, ...styles.buttonRow }}>
                         <button style={styles.buttonPrimary} onClick={() => addTransportTimer(route)}>
                           Set timer
                         </button>
+                        <PresetTimerDetails offsetText={presetOffsetText} offsetValue={presetOffsetValue}
+                          reference="departure" fireAtMs={route.nextAt} nowMs={nowMs} />
                       </div>
                     </div>
                   ))}
@@ -2388,9 +2387,9 @@ export default function AppShell() {
 
                 return (
                   <div key={t.id} className={alertingTimerIds.has(t.id) ? "timer-alert-pending" : undefined}
-                    style={{ ...styles.timerItem, ...(t.kind === "VANA_WEEKDAY_TIME" && t.accentColor ? { borderColor: `${t.accentColor}99` } : {}) }}>
+                    style={{ ...styles.timerItem, ...(t.accentColor ? { borderColor: `${t.accentColor}99` } : {}) }}>
                     <div style={styles.timerTop}>
-                      <div style={{ ...styles.timerLabel, ...(t.kind === "VANA_WEEKDAY_TIME" && t.accentColor ? { color: t.accentColor } : {}) }}>{t.kind === "TRANSPORT" ? <TransportLabel label={t.label} ports={ports} /> : t.label}</div>
+                      <div style={{ ...styles.timerLabel, ...(t.accentColor ? { color: t.accentColor } : {}) }}>{t.kind === "TRANSPORT" ? <TransportLabel label={t.label} ports={ports} /> : t.label}</div>
                       <div style={styles.muted}>
                         {pausedMs !== null ? "Paused" : t.enabled ? "Enabled" : "Disabled"}
                       </div>

@@ -21,6 +21,7 @@ export type NotificationState = NotificationSettings & {
   alerts: TimerNotification[];
   timers: RunningTimer[];
   soundSequence: number;
+  windowOpen: boolean;
 };
 
 export type NotificationBridge = {

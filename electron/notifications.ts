@@ -38,7 +38,10 @@ export class DesktopNotifications {
       }
     }
     this.repeatInterval = setInterval(() => {
-      if (this.queue.repeatDue(Date.now())) this.publish(true);
+      if (this.queue.repeatDue(Date.now())) {
+        this.windowOpen = true;
+        this.publish(true);
+      }
     }, 1000);
     screen.on("display-removed", this.reposition);
     screen.on("display-added", this.reposition);
@@ -69,7 +72,8 @@ export class DesktopNotifications {
   }
 
   private getState(): NotificationState {
-    return { ...this.getSettings(), alerts: this.queue.alerts, timers: this.timers, soundSequence: this.soundSequence };
+    return { ...this.getSettings(), alerts: this.queue.alerts, timers: this.timers,
+      soundSequence: this.soundSequence, windowOpen: this.windowOpen };
   }
 
   private fromMain(event: IpcMainEvent | IpcMainInvokeEvent) {
@@ -156,12 +160,12 @@ export class DesktopNotifications {
     ipcMain.on("kupo:notification-dismiss", (event, key: unknown) => {
       if (!this.fromPopup(event) || typeof key !== "string") return;
       this.queue.dismiss(key);
+      this.windowOpen = this.queue.alerts.length > 0;
       this.publish();
     });
     ipcMain.on("kupo:notification-dismiss-all", event => {
       if (!this.fromPopup(event)) return;
-      this.queue.dismissAll();
-      this.publish();
+      this.hide();
     });
     ipcMain.on("kupo:notification-audio-error", (event, message: unknown) => {
       if (!this.fromPopup(event) || typeof message !== "string") return;
