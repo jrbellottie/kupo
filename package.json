@@ -27,6 +27,7 @@
     "weather:generate": "node scripts/generate-weather.mjs",
     "test:weather": "node --test scripts/weather.test.mjs",
     "test:transport": "node --test scripts/transport.test.mjs",
+    "test:notifications": "node --test scripts/notifications.test.mjs",
     "test:phoenix": "node --test scripts/phoenix.test.mjs scripts/digging.test.mjs scripts/weather.test.mjs scripts/clamming.test.mjs scripts/helm.test.mjs",
     "test:source": "node --test scripts/phoenix.test.mjs scripts/digging.test.mjs scripts/weather.test.mjs scripts/clamming.test.mjs scripts/helm.test.mjs",
     "test:prices": "node --test scripts/prices.test.mjs",

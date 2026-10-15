@@ -9,24 +9,22 @@ Kupo is an independent desktop companion for **Final Fantasy XI**, with timers, 
 1. Install using the setup file from the latest [release](https://github.com/jrbellottie/kupo/releases).
 2. Launch **Kupo**.
 3. Confirm the **Vana'diel Clock** on the first tab matches the in-game `/clock`.
-4. Enable Windows notifications for Kupo so timers can alert you.
+4. In **Clock & Timers → Timer popups**, use **Test / position popup**, drag its header to your preferred location, and adjust the alert volume.
 
 Vana'diel time is global, so Kupo works in any time zone.
 
 ### Notification setup
 
-Timers use Windows system notifications. Some alerts repeat until dismissed; clicking a notification stops its repeats and disables that timer. Windows may delay background notifications, and Kupo catches up when it regains focus.
+Use **Clock & Timers → Timer popups → Open timer window** to watch live countdowns, soonest first, with flashing due alerts at the top and an adjustable soft chime. Drag the header to move it or its edges to resize; Kupo remembers the monitor, position, and size. Dismissing alerts keeps the window open and recurring timers enabled; the close button dismisses alerts and hides the window until reopened or another alert fires. Keep Kupo running; native system-notification permissions are not needed.
 
-- Open **Windows Settings → System → Notifications** and enable notifications for Kupo once it has fired at least once.
-- Turn **Do Not Disturb / Focus Assist** off.
-- If alerts are suppressed while gaming, try turning **Game Mode** off.
+Linux uses X11 (or XWayland on Wayland desktops) to support saved window positions. XWayland must be installed when using a Wayland session. Window managers and exclusive-fullscreen games can still hide other windows; use borderless/windowed mode if needed. **Reset to primary monitor** recovers an inconvenient popup position.
 
 ---
 
 ## The tabs
 
 ### 🕐 Clock & Timers
-View the current Vana'diel time and moon phase, and manage your saved timers and upcoming alerts.
+View the current Vana'diel time and moon phase, and manage your saved timers and upcoming alerts. Timer cards pulse until their pending alerts are dismissed, or show a steady highlight when reduced motion is enabled.
 
 ### ⏱️ Time Tools
 Create Vana'diel, real-world, countdown, and moon-phase timers, use color-coded ports and countdowns on every transport route, or use a stopwatch to track elapsed time.
@@ -107,8 +105,10 @@ Kupo uses bundled source snapshots and cached wiki references, not live game dat
 
 ## Troubleshooting
 
-- **No notifications:** check Windows notification permissions, Do Not Disturb / Focus Assist, and Game Mode.
-- **Alerts only appear when Kupo regains focus:** Windows can throttle background apps; Kupo catches up when it becomes active.
+- **No popup or sound:** keep Kupo running, use **Clock & Timers → Timer popups → Test / position popup**, check its volume and your system audio output, and try **Reset to primary monitor**.
+- **Popup hidden while gaming:** try borderless/windowed mode; exclusive fullscreen and desktop window-manager rules can hide always-on-top windows.
+- **Linux window positioning:** use an X11 session or install/enable XWayland in your Wayland desktop.
+- **Alerts only appear when Kupo regains focus:** the OS can suspend background apps; Kupo catches up when it becomes active.
 - **Moon percentage differs slightly from the game:** the in-game display is rounded, while Kupo uses the calculated moon phase.
 
 ---
@@ -124,6 +124,9 @@ npm run build        # type-check + build renderer/main
 npm run dist:win     # build the Windows installer
 npm run dist:linux   # build the Linux AppImage (uses WSL on Windows)
 ```
+
+The bundled alert sound is an original synthesized chime. Regenerate it with
+`node scripts/generate-timer-chime.mjs`; no external sound downloads are needed.
 
 The Windows installer is produced at `release\Kupo Setup <version>.exe`.
 

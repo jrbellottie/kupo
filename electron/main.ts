@@ -1,6 +1,7 @@
-import { app, BrowserWindow, ipcMain, Notification, powerSaveBlocker, screen, shell } from "electron";
+import { app, BrowserWindow, ipcMain, powerSaveBlocker, screen, shell } from "electron";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { DesktopNotifications } from "./notifications";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -13,11 +14,14 @@ export const RENDERER_DIST = path.join(process.env.APP_ROOT, "dist");
 process.env.VITE_PUBLIC = VITE_DEV_SERVER_URL ? path.join(process.env.APP_ROOT, "public") : RENDERER_DIST;
 
 let win: BrowserWindow | null = null;
+let notifications: DesktopNotifications | null = null;
 
 // IMPORTANT: these must be set BEFORE app.whenReady()
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
+// Native Wayland does not allow restoring arbitrary top-level window positions.
+if (process.platform === "linux") app.commandLine.appendSwitch("ozone-platform", "x11");
 
 // Keep the OS from suspending the app ONLY while timers are enabled (renderer-controlled)
 let keepAwakeId: number | null = null;
@@ -33,15 +37,6 @@ function ensureKeepAwakeOff() {
   keepAwakeId = null;
 }
 
-// Track repeating alarms by id
-const repeaters = new Map<string, NodeJS.Timeout>();
-
-function stopRepeater(id: string) {
-  const t = repeaters.get(id);
-  if (t) clearInterval(t);
-  repeaters.delete(id);
-}
-
 function createWindow() {
   // Near-fullscreen on a 1080p display, clamped to smaller screens
   const { workArea } = screen.getPrimaryDisplay();
@@ -54,19 +49,23 @@ function createWindow() {
       // Renderer timers won't be throttled when minimized/hidden
       backgroundThrottling: false,
 
-      // IMPORTANT: this must point to the BUILT preload (vite-electron builds to preload.mjs)
-      preload: path.join(__dirname, "preload.mjs"),
+      preload: path.join(__dirname, "preload.cjs"),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
     },
-  });
-
-  win.webContents.on("did-finish-load", () => {
-    win?.webContents.send("main-process-message", new Date().toLocaleString());
   });
 
   // External links (e.g. wiki pages) open in the user's default browser
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/i.test(url)) shell.openExternal(url);
     return { action: "deny" };
+  });
+  win.on("closed", () => {
+    notifications?.dispose();
+    notifications = null;
+    win = null;
+    ensureKeepAwakeOff();
   });
 
   if (VITE_DEV_SERVER_URL) {
@@ -85,76 +84,34 @@ app.on("window-all-closed", () => {
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();
+  if (!win) {
+    createWindow();
+    createNotifications();
+  }
 });
+
+function createNotifications() {
+  notifications = new DesktopNotifications({
+    mainWindow: () => win,
+    userData: app.getPath("userData"),
+    preload: path.join(__dirname, "preload.cjs"),
+    rendererDirectory: RENDERER_DIST,
+    devServerUrl: VITE_DEV_SERVER_URL,
+  });
+}
 
 app.whenReady().then(() => {
   app.setAppUserModelId("kupo");
 
   createWindow();
+  createNotifications();
 });
+
+app.on("before-quit", () => notifications?.dispose());
 
 // Renderer -> Main: control keep-awake while timers are enabled
-ipcMain.on("ffxi:keepAwake", (_event, payload: { enabled: boolean }) => {
+ipcMain.on("ffxi:keepAwake", (event, payload: { enabled: boolean }) => {
+  if (event.sender !== win?.webContents) return;
   if (payload.enabled) ensureKeepAwakeOn();
   else ensureKeepAwakeOff();
-});
-
-// Renderer -> Main: show a notification.
-// - Default behavior repeats every 20s until clicked, capped at 10 repeats.
-// - For one-shot notifications (e.g. NM intervals), pass repeat: false.
-ipcMain.on(
-  "ffxi:notify",
-  (
-    _event,
-    payload: { id: string; title: string; body: string; repeat?: boolean; repeatEveryMs?: number }
-  ) => {
-    const { id, title, body } = payload;
-    const repeat = payload.repeat ?? true;
-    const repeatEveryMs = Math.max(1_000, Math.floor(payload.repeatEveryMs ?? 20_000));
-
-    const showToast = (wireDismiss: boolean) => {
-      try {
-        const n = new Notification({ title, body });
-
-        if (wireDismiss) {
-          // Clicking the toast stops the spam
-          n.on("click", () => {
-            stopRepeater(id);
-            BrowserWindow.getAllWindows()[0]?.webContents.send("ffxi:timerDismissed", { id });
-          });
-        }
-
-        n.show();
-      } catch {
-        // ignore
-      }
-    };
-
-    // One-shot: show once and do not register a repeater.
-    if (!repeat) {
-      showToast(false);
-      return;
-    }
-
-    // already repeating? ignore
-    if (repeaters.has(id)) return;
-
-    // Show once immediately
-    showToast(true);
-
-    // Repeat until dismissed, capped so it never repeats forever
-    const MAX_REPEATS = 10;
-    let repeatCount = 0;
-    const interval = setInterval(() => {
-      showToast(true);
-      if (++repeatCount >= MAX_REPEATS) stopRepeater(id);
-    }, repeatEveryMs);
-    repeaters.set(id, interval);
-  }
-);
-
-// optional manual stop
-ipcMain.on("ffxi:notifyStop", (_event, payload: { id: string }) => {
-  stopRepeater(payload.id);
 });

@@ -24,6 +24,9 @@ import { AnyTimer, MoonDirection, type GardeningTimer, type EarthTimer } from ".
 import { advanceGardeningTimer, nextGardeningEvent, recordGardeningFeed } from "./utils/gardeningTimers";
 import GardeningTimerDetails from "./GardeningTimerDetails";
 import GuildDecayTab from "./GuildDecayTab";
+import NotificationSettings from "./NotificationSettings";
+import type { NotificationState } from "./notifications/types";
+import { nextTimerAt, runningTimerPreviews } from "./utils/timerSchedule";
 import { WEEKDAYS, WEEKDAY_COLORS, weekdayStyle } from "./utils/weekday";
 import { moonDirGlyph, moonGlyphStyle, moonPhaseStyle } from "./utils/moon";
 import { buildTenshodoPresets, GUILD_COLORS, GUILD_PRESETS, nextGuildAlertTarget, type GuildPreset } from "./utils/guilds";
@@ -335,6 +338,40 @@ export default function AppShell() {
   });
   const [timers, setTimers] = useState<AnyTimer[]>(() => loadJson<AnyTimer[]>("ffxi_timers_v2", []));
   const activeTimerIds = useMemo(() => new Set(timers.filter(timer => timer.enabled).map(timer => timer.id)), [timers]);
+  useEffect(() => {
+    const bridge = window.kupoNotifications;
+    if (!bridge) return;
+    const sync = () => bridge.syncTimers(runningTimerPreviews(timers, Date.now(), cal));
+    sync();
+    const interval = setInterval(sync, 1000);
+    return () => clearInterval(interval);
+  }, [timers, cal]);
+  const [alertingTimerIds, setAlertingTimerIds] = useState<Set<string>>(() => new Set());
+  const [notificationStateError, setNotificationStateError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const bridge = window.kupoNotifications;
+    if (!bridge) return;
+    let active = true;
+    let receivedUpdate = false;
+    const update = (state: NotificationState) => {
+      setAlertingTimerIds(new Set(state.alerts.map(alert => alert.id)));
+      setNotificationStateError(null);
+    };
+    const unsubscribe = bridge.onState(state => {
+      receivedUpdate = true;
+      update(state);
+    });
+    void bridge.getState().then(state => {
+      if (active && !receivedUpdate) update(state);
+    }).catch(reason => {
+      if (active) setNotificationStateError(`Could not load active timer alerts: ${String(reason)}`);
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   const [showCalibration, setShowCalibration] = useState<boolean>(() => loadJson<boolean>("ffxi_show_cal_v1", false));
 
@@ -586,17 +623,6 @@ export default function AppShell() {
     }),
   })), [nowMs, cal, presetOffsetEarthMs, presetOffsetHours]);
 
-  useEffect(() => {
-    if (!window.electron?.ipcRenderer?.on) return;
-
-    const handler = (payload: { id: string }) => {
-      setTimers((prev) => prev.map((t) => (t.id === payload.id ? { ...t, enabled: false } : t)));
-    };
-
-    window.electron.ipcRenderer.on("ffxi:timerDismissed", handler);
-    return () => window.electron?.ipcRenderer?.off?.("ffxi:timerDismissed", handler);
-  }, []);
-
   const lastFireRef = useRef<Record<string, number>>({});
   const lastTickRef = useRef<number>(Date.now());
 
@@ -702,8 +728,8 @@ export default function AppShell() {
             atMs: dueAt,
             title: "Kupo",
             body: t.kind === "TRANSPORT"
-              ? `${t.label} ${t.offsetHours === 0 ? "departs now" : `departs in ${formatCountdown(Math.round(t.offsetHours * 144_000))}`}! (click to stop)`
-              : `${t.label} is due now! (click to stop)`,
+              ? `${t.label} ${t.offsetHours === 0 ? "departs now" : `departs in ${formatCountdown(Math.round(t.offsetHours * 144_000))}`}!`
+              : `${t.label} is due now!`,
             fireKey: "due",
             repeat: true,
           };
@@ -715,7 +741,8 @@ export default function AppShell() {
           if (nowMs2 - last > 10_000) {
             lastFireRef.current[fireKey] = nowMs2;
 
-            window.electron?.ipcRenderer?.send("ffxi:notify", {
+            window.kupoNotifications?.notify({
+              key: `${fireKey}|${event.atMs}`,
               id: t.id,
               title: event.title,
               body: event.body,
@@ -898,6 +925,7 @@ export default function AppShell() {
 
   /** Restart a countdown timer (EARTH_TIME whose rawInput is a duration) from now. */
   function resetCountdownTimer(id: string) {
+    window.kupoNotifications?.stopTimer(id);
     const nowT = Date.now();
     setTimers((prev) =>
       prev.map((x) => {
@@ -910,6 +938,7 @@ export default function AppShell() {
   }
 
   function pauseCountdownTimer(id: string) {
+    window.kupoNotifications?.stopTimer(id);
     const nowT = Date.now();
     setTimers((prev) =>
       prev.map((x) => {
@@ -1130,10 +1159,12 @@ export default function AppShell() {
   }
 
   function toggleTimer(id: string) {
+    window.kupoNotifications?.stopTimer(id);
     setTimers((prev) => prev.map((t) => (t.id === id ? { ...t, enabled: !t.enabled } : t)));
   }
 
   function deleteTimer(id: string) {
+    window.kupoNotifications?.stopTimer(id);
     setTimers((prev) => prev.filter((t) => t.id !== id));
   }
 
@@ -2254,52 +2285,13 @@ export default function AppShell() {
             <div style={styles.sub}>{timers.length} total</div>
           </div>
 
+          {notificationStateError && <p role="alert" style={styles.errorText}>{notificationStateError}</p>}
           {timers.length === 0 ? (
             <div style={{ marginTop: 10, ...styles.muted }}>No timers yet.</div>
           ) : (
             <div style={styles.timerGrid}>
               {timers.map((t) => {
-                let nextAt: number | null = null;
-
-                if (t.kind === "GARDENING") {
-                  nextAt = nextGardeningEvent(t)?.atMs ?? null;
-                } else if (t.kind === "NM_TIMED_WINDOW") {
-                  const ev = getNextNmTimedWindowEvent(t, nowMs);
-                  nextAt = ev?.atMs ?? null;
-                } else if (t.kind === "NM_LOTTERY") {
-                  const ev = getNextNmLotteryEvent(t, nowMs);
-                  nextAt = ev?.atMs ?? null;
-                } else {
-                  nextAt =
-                    t.kind === "VANA_WEEKDAY_TIME"
-                      ? nextEarthMsForVanaWeekdayTime({
-                          nowEarthMs: nowMs,
-                          cal: cal ?? undefined,
-                          targetWeekday: t.targetWeekday,
-                          targetHour: t.targetHour,
-                          targetMinute: t.targetMinute,
-                        })
-                      : t.kind === "TRANSPORT"
-                        ? nextEarthMsForVanaDailySchedule({
-                            nowEarthMs: nowMs,
-                            cal,
-                            departureMinutes: t.departureMinutes,
-                            offsetHours: t.offsetHours,
-                          })
-                      : t.kind === "MOON_STEP"
-                        ? nextEarthMsForMoonStep({
-                            nowEarthMs: nowMs,
-                            cal: cal ?? undefined,
-                            targetMoonStep: t.targetMoonStep,
-                          })
-                        : t.kind === "MOON_PERCENT"
-                          ? nextEarthMsForMoonPercent({
-                              nowEarthMs: nowMs,
-                              cal: cal ?? undefined,
-                              targetPercent: t.targetPercent,
-                            })
-                          : t.targetEarthMs;
-                }
+                let nextAt = nextTimerAt(t, nowMs, cal);
 
                 const pausedMs =
                   t.kind === "EARTH_TIME" && t.pausedRemainingMs != null ? t.pausedRemainingMs : null;
@@ -2395,7 +2387,8 @@ export default function AppShell() {
                 }
 
                 return (
-                  <div key={t.id} style={{ ...styles.timerItem, ...(t.kind === "VANA_WEEKDAY_TIME" && t.accentColor ? { borderColor: `${t.accentColor}99` } : {}) }}>
+                  <div key={t.id} className={alertingTimerIds.has(t.id) ? "timer-alert-pending" : undefined}
+                    style={{ ...styles.timerItem, ...(t.kind === "VANA_WEEKDAY_TIME" && t.accentColor ? { borderColor: `${t.accentColor}99` } : {}) }}>
                     <div style={styles.timerTop}>
                       <div style={{ ...styles.timerLabel, ...(t.kind === "VANA_WEEKDAY_TIME" && t.accentColor ? { color: t.accentColor } : {}) }}>{t.kind === "TRANSPORT" ? <TransportLabel label={t.label} ports={ports} /> : t.label}</div>
                       <div style={styles.muted}>
@@ -2403,6 +2396,7 @@ export default function AppShell() {
                       </div>
                     </div>
 
+                    {alertingTimerIds.has(t.id) && <div style={{ color: "#fbbf24", marginTop: 6 }} role="status">Alert awaiting dismissal</div>}
                     {detailLine}
 
                     {nextDepartureAt !== null && (
@@ -2684,6 +2678,7 @@ export default function AppShell() {
       {activeTab === "home" && (
         <div style={{ ...styles.tabContent, gap: 16 }}>
           <div style={{ ...styles.tabGrid, alignItems: "start", gridAutoRows: "max-content" }}>{clockCard}</div>
+          <NotificationSettings />
           {timersListContent}
         </div>
       )}
