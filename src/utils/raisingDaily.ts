@@ -1,10 +1,10 @@
 import { RAISING, STAT_KEYS, PROJECTION_FOODS, type RaisingStats } from "./chocoboRaising";
-import { LAST_RAISING_DAY, RAISING_ABILITIES, type RaisingGoalInput, type TrainingDay } from "./chocoboRaisingPlanner";
-import { BIRD_CONDITIONS, PLANNER_FEEDING_FOODS, validateFeedingReport, type FeedingReport } from "./chocoboFeeding";
+import { LAST_RAISING_DAY, RAISING_ABILITIES, careAvailableDay, type RaisingGoalInput, type TrainingDay } from "./chocoboRaisingPlanner";
+import { BIRD_CONDITIONS, PLANNER_FEEDING_FOODS, validateFeedingReport, validHealthDetails, type FeedingReport } from "./chocoboFeeding";
 import { PARASITE_WORM_ID, type ColorGoal } from "./chocoboColor";
 
 export const RAISING_DAILY_KEY = "kupo.raising.daily.v1";
-export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "currentDay" | "today" | "colorGoal"> & {
+export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "currentDay" | "today" | "colorGoal" | "tomorrowCareId"> & {
   current: Record<keyof RaisingStats, string>;
   target: Record<keyof RaisingStats, string>;
   useExactStats?: boolean;
@@ -29,6 +29,7 @@ export type SavedRaisingDaily = {
   defaultsVersion?: number;
   daily?: DailySchedule;
   progress?: DailyProgress;
+  arrangedCare?: { startedAt: number | null; days: { day: number; careId: number }[] };
 };
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -41,6 +42,7 @@ export function feedingInputKey(form: PlannerForm, report: FeedingReport): strin
     STAT_KEYS.map(key => form.current[key]), STAT_KEYS.map(key => form.target[key]), form.useExactStats === true,
     form.desiredAbilities, form.knownAbilities, form.priority, report.affection, report.fullness, report.condition, report.day,
     form.avoidYellow === true, form.eggId ?? "", form.wormsFed ?? "0",
+    report.ailments ?? [], report.treatmentGiven === true, report.medicineId ?? null, report.events ?? [],
   ]);
 }
 export function plannerColorGoal(form: PlannerForm): ColorGoal | undefined {
@@ -79,7 +81,7 @@ function isSavedDaily(value: unknown): value is SavedRaisingDaily {
     || (value.defaultsVersion !== undefined && typeof value.defaultsVersion !== "number")) return false;
   if (form.feedingReport !== undefined) {
     const report = form.feedingReport;
-    if (!record(report) || !wholeRange(report.affection, -1, 255) || !wholeRange(report.fullness, -1, 255)
+    if (!record(report) || !validHealthDetails(report) || !wholeRange(report.affection, -1, 255) || !wholeRange(report.fullness, -1, 255)
       || !wholeRange(report.day, -1, LAST_RAISING_DAY)
       || (report.condition !== "unknown" && !BIRD_CONDITIONS.some(entry => entry.id === report.condition))) return false;
   }
@@ -97,7 +99,7 @@ function isSavedDaily(value: unknown): value is SavedRaisingDaily {
         && (step.feeding === undefined || (step.foodId === null && step.foodCount === 0 && validFeeding(step.feeding, step.day))))) return false;
     if (daily.feedingReport !== undefined) {
       const report = daily.feedingReport;
-      if (!record(report)) return false;
+      if (!record(report) || !validHealthDetails(report)) return false;
       const condition = BIRD_CONDITIONS.find(entry => entry.id === report.condition);
       if (!condition || typeof report.affection !== "number" || typeof report.fullness !== "number" || report.day !== daily.plannedDay
         || validateFeedingReport({
@@ -111,6 +113,15 @@ function isSavedDaily(value: unknown): value is SavedRaisingDaily {
     if (!record(progress) || !startTime(progress.startedAt) || !dayNumber(progress.day)
       || typeof progress.feedingDone !== "boolean" || typeof progress.storyDone !== "boolean"
       || (progress.careKey !== null && typeof progress.careKey !== "string")) return false;
+  }
+  if (value.arrangedCare !== undefined) {
+    const care = value.arrangedCare;
+    if (!record(care) || !startTime(care.startedAt) || !Array.isArray(care.days)
+      || care.days.length > LAST_RAISING_DAY + 1
+      || !care.days.every(step => record(step) && dayNumber(step.day)
+        && RAISING.plans.some(plan => plan.id !== 1 && plan.id === step.careId
+          && (plan.id === 0 || Number(step.day) >= careAvailableDay(plan.id) + 2)))) return false;
+    if (new Set(care.days.map(step => step.day)).size !== care.days.length) return false;
   }
   return true;
 }
@@ -133,4 +144,29 @@ export function todayCare(schedule: DailySchedule, day: number) {
   let count = 1;
   while (count < 7 && schedule.days.some(step => step.day === first.day + count && step.careId === first.careId)) count++;
   return { careId: first.careId, firstDay: first.day, lastDay: first.day + count - 1, count, key: `${first.day}:${first.careId}:${count}` };
+}
+
+export function recordArrangedCare(
+  saved: SavedRaisingDaily["arrangedCare"], startedAt: number | null,
+  firstDay: number, lastDay: number, careId: number | null,
+): NonNullable<SavedRaisingDaily["arrangedCare"]> {
+  const days = saved?.startedAt === startedAt
+    ? saved.days.filter(step => step.day < firstDay || step.day > lastDay) : [];
+  if (careId !== null) {
+    for (let day = firstDay; day <= lastDay; day++) days.push({ day, careId });
+  }
+  return { startedAt, days: days.sort((a, b) => a.day - b.day) };
+}
+
+export function tomorrowCare(saved: SavedRaisingDaily, startedAt: number | null, day: number): {
+  careId: number | undefined; source: "confirmed" | "estimated" | "basic" | "unknown";
+} {
+  const confirmed = saved.arrangedCare?.startedAt === startedAt
+    ? saved.arrangedCare.days.find(step => step.day === day + 1) : undefined;
+  if (confirmed) return { careId: confirmed.careId, source: "confirmed" };
+  const previous = saved.daily?.startedAt === startedAt && saved.daily.plannedDay <= day
+    ? saved.daily.days.find(step => step.day === day + 1) : undefined;
+  if (previous) return { careId: previous.careId, source: "estimated" };
+  if (day + 1 < RAISING.settings.daysToChick + 2 || day >= LAST_RAISING_DAY) return { careId: 0, source: "basic" };
+  return { careId: undefined, source: "unknown" };
 }

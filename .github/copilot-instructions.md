@@ -46,6 +46,12 @@ The maintainer can edit this file to set ongoing Copilot project rules.
 - Keep necessary installation, development, source provenance, licensing, and
   attribution information separate from app overviews.
 
+## Validation cadence
+
+- Batch related edits and run the smallest relevant validation once the change
+  is complete; tests and builds do not need to be run after every intermediate
+  edit. Do not repeat a passing check unless later changes could affect it.
+
 ## Maintainer additions
 
 Add further project rules here as needed.

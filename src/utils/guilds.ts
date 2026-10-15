@@ -143,8 +143,7 @@ export function nextGuildAlertTarget(now: VanaNowLite, schedule: GuildSchedule, 
   const openMinute = schedule.openMinute ?? 0;
   const closedOn = schedule.closedOn ?? null;
 
-  const offset = Math.max(0, Math.min(23, Math.floor(Number.isFinite(offsetHours) ? offsetHours : 0)));
-  const offsetMinutes = offset * 60;
+  const offsetMinutes = Math.max(0, Math.min(23 * 60, Math.round(Number.isFinite(offsetHours) ? offsetHours * 60 : 0)));
 
   const weekMinutes = WEEKDAYS.length * 24 * 60; // 8 * 1440
   const nowDayIndex = WEEKDAYS.indexOf(now.weekday);

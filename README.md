@@ -83,7 +83,7 @@ Find two- and three-step skillchain combinations for your chosen weapons and wea
 Browse era-appropriate recipes and guild-point items, plan a crafting skill-up path, or compare selling prices, locations, stock capacity, and opening countdowns with reminders across all nine guilds.
 
 ### Profits
-Compare crafting costs and estimated returns from NPC or auction-house sales, using a local price book shared with Chocobo Digging.
+Compare crafting costs and estimated returns from NPC or auction-house sales with a nested recipe breakdown, alternative recipes, and ingredient or finished-item cost overrides, alongside a local price book shared with Chocobo Digging.
 
 ### 📜 Quests
 Browse era-focused quests and missions with requirements, rewards, and available walkthroughs, supported by linked maps.

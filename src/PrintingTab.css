@@ -83,12 +83,17 @@
 .print-stage-meta { display: block; margin-top: 4px; color: #aaa; font-size: 12px; font-weight: 400; }
 .print-ingredient-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 15px; margin-bottom: 12px; }
 .print-ingredient-heading > strong { margin-left: auto; color: var(--print-green); font-variant-numeric: tabular-nums; }
-.print-source-controls { display: grid; grid-template-columns: minmax(0, 1fr) 140px; gap: 14px; align-items: end; margin-bottom: 12px; }
+.print-source-controls { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; align-items: end; margin-bottom: 12px; }
+.print-cost-controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 10px; }
+.print-recipe-options { margin: 12px 0; }
+.print-recipe-options > summary, .print-stage-analysis > summary { padding: 8px 0; }
+.print-recipe-options td { overflow-wrap: anywhere; }
+.print-ingredient button:disabled { opacity: .5; cursor: default; }
 .print-stage { padding: 8px 0 0; }
 .print-stage-yield { color: #cbd9d0; font-size: 12px; }
 .print-stage-tiers { margin: 12px 0; }
 .print-stage-tiers table { margin-top: 12px; }
-.print-ingredient-children { border-left: 2px solid #38493e; padding-left: 14px; margin-top: 15px; }
+.print-ingredient-children { border-left: 3px solid #62776a; padding-left: 14px; margin-top: 15px; }
 .print-ingredient-children .print-ingredient-children { padding-left: 8px; }
 .print-ingredient select { text-overflow: ellipsis; }
 @media (max-width: 1100px) { .print-workspace { grid-template-columns: minmax(210px, 260px) minmax(0, 1fr); gap: 16px; } }

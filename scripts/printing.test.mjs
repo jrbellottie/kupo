@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { buildSync } from "esbuild";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 const { outputFiles } = buildSync({ entryPoints: [fileURLToPath(new URL("../src/utils/printing.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "esm" });
 const { printingChances, printingEstimate, restorePrintSettings, DEFAULT_PRINT_SETTINGS } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString("base64")}`);
@@ -85,6 +86,40 @@ test("planner retains estimates across remounts while refreshing changed prices 
     assert.notStrictEqual(updated.chain, baseline.chain);
     assert.strictEqual(planner(JSON.parse(JSON.stringify({ ...state, ...patch }))), updated);
     assert.equal(updated.available.length, patch.wotg || patch.keyItems ? 3 : 2);
+  }
+});
+
+test("cost overrides replace branches, preserve source choices and reprice without double counting", () => {
+  const planner = createPrintingPlanner([lumber, pole], key, (name, book) => book[key(name)] ?? null, () => 2000);
+  const state = { settings, buy: { log: 100, "wind crystal": 10 }, sell: {}, sources: { lumber: 20 },
+    costOverrides: {}, vendors: false, modernGuilds: false, wotg: false, keyItems: false };
+  const crafted = planner(state).chain.estimate(pole);
+  assert.equal(crafted.sources[0].node.recipe.id, 20);
+  for (const price of [350, 125.5, 0]) {
+    const saved = JSON.parse(JSON.stringify({ ...state, costOverrides: { lumber: price } }));
+    const result = planner(saved).chain.estimate(pole);
+    assert.equal(result.sources[0].node.recipe, undefined);
+    assert.deepEqual(result.sources[0].node.children, []);
+    assert.equal(result.sources[0].node.price, price);
+    close(result.cost, 2 * price + 10);
+    assert.equal(result.totalAttempts, 1);
+    assert.deepEqual(result.leaves.map((leaf) => leaf.name), ["Lumber", "Wind Crystal"]);
+    const changedUnusedInput = planner({ ...saved, buy: { ...saved.buy, log: 9999 } }).chain.estimate(pole);
+    assert.strictEqual(changedUnusedInput, result, "overridden branch ingredients must not affect cost or time");
+    const fresh = createPrintingPlanner([lumber, pole], key, (name, book) => book[key(name)] ?? null, () => 2000);
+    assert.deepEqual(fresh(saved).chain.estimate(pole), result, "overrides survive reopening");
+  }
+  assert.deepEqual(planner(state).chain.estimate(pole), crafted, "clearing restores original recipe, prices and crafting time");
+  assert.deepEqual(state.sources, { lumber: 20 });
+  const missing = planner({ ...state, buy: { "wind crystal": 10 } }).chain.estimate(pole);
+  assert.equal(missing.cost, null);
+  const covered = planner({ ...state, buy: { "wind crystal": 10 }, costOverrides: { lumber: 50 } }).chain.estimate(pole);
+  close(covered.cost, 110);
+  const raw = planner({ ...state, costOverrides: { log: 0 } }).chain.estimate(pole);
+  assert.equal(raw.sources[0].node.recipe.id, 20);
+  close(raw.sources[0].node.price, 10 / raw.sources[0].node.yield);
+  for (const price of [-1, NaN, Infinity, "100"]) {
+    assert.throws(() => planner({ ...state, costOverrides: { lumber: price } }), /Invalid cost override/);
   }
 });
 
@@ -403,6 +438,83 @@ test("all named print examples are discoverable and material aliases share overr
   assert.equal(terminal.resolve("Flask of Distilled Water").issue, undefined);
   assert.equal(createPrintingChain(available, skilled, () => 17, payout, data.printItemKey).resolve("Distilled Water").price, 17);
   console.log(`Breakdown audit: ${data.PRINT_RECIPES.length} recipes (all eras/key items), ${expanded} expanded stages across both scopes, zero unexplained craftable stops in ${Math.round(performance.now() - started)}ms`);
+});
+
+test("Shihei exposes all nine Black Ink recipes and honors raw or intermediate cost overrides", async () => {
+  const bundle = buildSync({ entryPoints: [fileURLToPath(new URL("../src/utils/printingData.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "esm" });
+  const data = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+  const inkKey = data.printItemKey("Jar of Black Ink");
+  const inkRecipes = data.PRINT_RECIPES.filter((entry) => data.printItemKey(entry.res.n) === inkKey);
+  assert.deepEqual(inkRecipes.map((entry) => entry.id), [60007, 60008, 60009, 60010, 60011, 60012, 60013, 60014, 60037]);
+  const shihei = data.PRINT_RECIPES.find((entry) => entry.res.n === "Shihei");
+  const recipes = [shihei, ...inkRecipes];
+  const planner = createPrintingPlanner(recipes, data.printItemKey, data.printBuyPrice, data.printSellPrice);
+  const state = { settings: restorePrintSettings(), buy: {}, sell: {}, sources: {}, vendors: false, modernGuilds: false, wotg: false, keyItems: false };
+  for (const entry of recipes) for (const input of [...entry.ing, { n: `${entry.crystal} Crystal` }]) state.buy[data.printItemKey(input.n)] = 10;
+  const ink = (result) => result.sources.find((source) => source.node.key === inkKey).node;
+  for (const entry of inkRecipes) {
+    const plan = planner({ ...state, sources: { [inkKey]: entry.id } });
+    assert.equal(plan.chain.options("Jar of Black Ink").length, 9);
+    const result = plan.chain.estimate(shihei);
+    assert.equal(ink(result).recipe.id, entry.id);
+    assert.deepEqual(ink(result).children.map((child) => [child.node.key, child.recipeQuantity]),
+      [...entry.ing, { n: `${entry.crystal} Crystal`, q: 1 }].map((input) => [data.printItemKey(input.n), input.q]));
+    close(result.cost, result.leaves.reduce((total, leaf) => total + leaf.quantity * leaf.price, 0));
+  }
+  const chosen = { ...state, sources: { [inkKey]: 60037 }, costOverrides: { [data.printItemKey("Gigant Squid")]: 1800 } };
+  const squid = planner(chosen).chain.estimate(shihei);
+  const inkNode = ink(squid);
+  close(inkNode.price, ((1800 + 2 * 10 + 10) * 0.975 + 10) / inkNode.yield);
+  const override = planner({ ...chosen, costOverrides: { ...chosen.costOverrides, [inkKey]: 100 } }).chain.estimate(shihei);
+  close(ink(override).price, 100);
+  assert.equal(ink(override).recipe, undefined);
+  assert.ok(!override.leaves.some((leaf) => leaf.key === data.printItemKey("Gigant Squid")));
+  assert.ok(override.totalAttempts < squid.totalAttempts);
+  assert.deepEqual(planner(chosen).chain.estimate(shihei), squid);
+});
+
+test("Profits renders recipe alternatives, nested groups and unit/total cost fields from saved state", () => {
+  const require = createRequire(import.meta.url);
+  const React = require("react");
+  const storage = new Map();
+  const localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
+  const bundle = buildSync({
+    stdin: { contents: 'import React from "react"; import { renderToStaticMarkup } from "react-dom/server"; import Printing from "./src/PrintingTab"; export { printItemKey } from "./src/utils/printingData"; export const render = () => renderToStaticMarkup(<Printing />);', resolveDir: process.cwd(), loader: "tsx" },
+    bundle: true, write: false, platform: "node", format: "cjs", external: ["react", "react-dom/server"],
+    loader: { ".css": "empty" }, define: { "import.meta.env.BASE_URL": '"/"' }, logOverride: { "empty-import-meta": "silent" },
+  });
+  const module = { exports: {} };
+  new Function("require", "module", "exports", "localStorage", bundle.outputFiles[0].text)(
+    (name) => name === "react" ? { ...React, useLayoutEffect: () => {} } : require(name),
+    module, module.exports, localStorage);
+  const { render, printItemKey } = module.exports;
+  const inkKey = printItemKey("Black Ink");
+  const parchmentKey = printItemKey("Bast Parchment");
+  const state = { query: "Shihei", selected: 1033, sources: { [inkKey]: 60037 }, costOverrides: {} };
+  storage.set("kupo.printing.v1", JSON.stringify(state));
+  const html = render();
+  assert.match(html, /Recipe cost tree/);
+  assert.ok(html.indexOf("Recipe cost tree") < html.indexOf("Combined shopping list"));
+  assert.match(html, /role="group" aria-label="Ingredients to make Shihei"/);
+  assert.match(html, /role="group" aria-label="Ingredients to make Jar of Black Ink"/);
+  assert.match(html, /role="group" aria-label="Ingredients to make Sheet of Bast Parchment"/);
+  assert.match(html, /All 9 recipes for Jar of Black Ink/);
+  for (const id of [60007, 60008, 60009, 60010, 60011, 60012, 60013, 60014, 60037]) {
+    assert.ok(html.includes(`aria-label="Use recipe ${id} for Jar of Black Ink"`));
+  }
+  for (const name of ["Nebimonite", "Cone Calamary", "Kalamar", "Grimmonite", "Ahtapot", "Gigant Squid"]) assert.ok(html.includes(name));
+  assert.match(html, /aria-label="Cost per item for Gigant Squid"/);
+  assert.match(html, /aria-label="Total cost for 2 x Sheet of Bast Parchment"/);
+  storage.set("kupo.printing.v1", JSON.stringify({ ...state, costOverrides: { [inkKey]: 100, [parchmentKey]: 123.5 } }));
+  const overridden = render();
+  assert.match(overridden, /Cost override active: ingredients and crafting time below this item are excluded/);
+  assert.doesNotMatch(overridden, /aria-label="Cost per item for Gigant Squid"/);
+  assert.doesNotMatch(overridden, /aria-label="Ingredients to make Jar of Black Ink"/);
+  assert.match(overridden, /aria-label="Cost per item for Sheet of Bast Parchment"[^>]*value="123.5"/);
+  assert.match(overridden, /aria-label="Total cost for 2 x Sheet of Bast Parchment"[^>]*value="247"/);
+  assert.match(overridden, /All 9 recipes for Jar of Black Ink/);
+  storage.set("kupo.printing.v1", JSON.stringify(state));
+  assert.equal(render(), html, "clearing overrides restores the original hierarchy and saved recipe");
 });
 
 test("distinct HQ sale prices, nerfs, and overhead are applied without changing yields", () => {

@@ -183,7 +183,13 @@ for (const [npc, guild] of Object.entries(guilds)) {
   const stock = guilds[guild.sharedStock ?? npc]?.stock;
   if (!stock) throw new Error(`Unresolved guild stock ${npc}`);
   if (!npcZones.has(npc)) throw new Error(`Missing guild NPC zone ${npc}`);
-  for (const row of Object.values(stock)) guildOffers.push({ n: names.get(row.id), npc: npc.replaceAll("_", " "), zone: npcZones.get(npc), price: guildPrice(row), initial: row.initial, restockRate: row.restockRate, stocked: row.initial > 0 || row.restockRate > 0 });
+  for (const row of Object.values(stock)) guildOffers.push({
+    n: names.get(row.id), itemId: row.id, npc: npc.replaceAll("_", " "), zone: npcZones.get(npc),
+    price: guildPrice(row), initial: row.initial, maxStock: row.maxStock,
+    targetStock: row.targetStock ?? row.maxStock, buyMax: row.buyMax,
+    priceFloor: row.priceFloor ?? null, restockRate: row.restockRate,
+    stocked: row.initial > 0 || row.restockRate > 0,
+  });
 }
 guildOffers.sort((first, second) => first.npc.localeCompare(second.npc) || first.n.localeCompare(second.n));
 source("scripts/globals/guild_shops.lua");
@@ -227,6 +233,13 @@ const guildSelling = Object.entries(guildShopGroups).flatMap(([guild, pools]) =>
   return { pool, guild, merchants, hours: Object.values(shop.hours), holiday: shop.holiday ?? null,
     ferry: merchants.some(npc => npc.zones.some(zone => /^(Ship bound|Open sea route|Silver Sea route)/.test(zone))), stock };
 })).sort((a, b) => a.guild.localeCompare(b.guild) || a.pool.localeCompare(b.pool));
+const guildByNpc = new Map();
+for (const shop of guildSelling) for (const merchant of shop.merchants) {
+  const previousGuild = guildByNpc.get(merchant.name);
+  if (previousGuild && previousGuild !== shop.guild) throw new Error(`Guild merchant belongs to multiple guilds: ${merchant.name}`);
+  guildByNpc.set(merchant.name, shop.guild);
+}
+for (const offer of guildOffers) offer.guild = guildByNpc.get(offer.npc) ?? null;
 const guildNames = new Map(Object.entries(enumValues("scripts/enum/guild.lua")).map(([name, id]) => [id, name[0] + name.slice(1).toLowerCase()]));
 const basicNames = new Map(basic.map(row => [row.itemid, row.name]));
 source("src/map/guild.cpp");

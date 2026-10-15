@@ -15,7 +15,7 @@ const actions = [
   { id: 43, name: "Regular Walk", stage: "Adolescent", effect: "Trainer/rival encounters and items. The first regular walk meets the rivals, unlocking Compete with Others." },
   { id: 44, name: "Long Walk", stage: "Adult", effect: "More trainer encounters, including Brutus. Dietmund can appear after Save My Son; this alone does not verify a story reward." },
   { id: 50, name: "Tell a Story", stage: "Adolescent", effect: "A selected ability story adds +1 DSC before its threshold check. A successful learning/inspiration roll consumes the story and restores 10-100 energy." },
-  { id: 51, name: "Scold", stage: "Chick", effect: "Lowers affection by 10 and clears spoiled behavior. Chocotonic is the explicit immediate waking food." },
+  { id: 51, name: "Scold", stage: "Chick", effect: "Lowers affection by 10, clears spoiled behavior and wakes a sleeping bird if it has enough energy. Chocotonic is the immediate waking food alternative." },
   { id: 52, name: "Compete with Others", stage: "Adolescent + rivals met", effect: "50% win chance in this model; +1 affection and a pending boredom cure. Three wins earn the Happy Chocobo story." },
 ] as const;
 
@@ -132,6 +132,7 @@ export default function ChocoboRaisingTab() {
       <p>To confirm current conditions, check in the relevant zone in game or ask someone who is there. The weather icon shows elemental weather in your current zone; the city's icon does not tell you the walk destination's weather. Also check sky and fog conditions: no elemental icon alone does not prove Clear, because Clouds and Fog still cost more here. If a stable/city zone is not listed in the forecast, check it in game rather than substituting a nearby outdoor zone. Conditions can change before you start the action, so budget for the higher energy cost.</p>
       <p className="raising-small"><ReferenceLink file="scripts/globals/hobbies/chocobo_raising/constants.lua">Walk destinations and energy costs</ReferenceLink> / <ReferenceLink file="scripts/globals/hobbies/chocobo_raising/event_vm.lua">Weather selection and energy checks</ReferenceLink></p>
       <p>Gausebit Wildgrass treats injury, Tokopekko treats minor/serious illness, and Garidav treats stomachache. Chick Herb Paste treats all four. Celerity/Tornado Salad queues cures for injury, illness, stomachache, loneliness, boredom, spoiled behavior and lovesickness. Chocotonic wakes immediately but lowers affection.</p>
+      <p>For non-food treatment, Scold clears spoiled behavior and can wake a sleeping bird; Compete with Others queues a boredom cure even on a loss in the pinned model. Both cost energy. Most food cures wait until the next raising-day update; do not repeat a dose just because the report has not changed.</p>
       <p>Chicks lose fullness according to energy spent; older birds reset to starving at rollover. A newly hatched chick starts full. Low affection can lead to loneliness or running away; forcing food can cause stomachache. Visit the home stable for reports, food and care instead of assuming a daily fixed ration is always safe.</p>
     </details>
 
@@ -153,6 +154,7 @@ export default function ChocoboRaisingTab() {
       <p className="raising-notice">The optional accelerated-growth module (2/7/14-day early stages and faster mounts) is not enabled in the public module list. Live configuration can differ. Retail guides name Dabih Jajalioh as an egg seller, but the egg stock is commented out in this snapshot; do not rely on that purchase route.</p>
       <p>Breeding uses male/female chococards and a VCS Honeymoon Ticket at Finbarr in Upper Jeuno. Documentation costs 300 gil; the ticket costs 3,500 gil. The egg is ready after the next JST midnight. Gourmet seeds STR, Sports END, Hiking DSC, and the Jeuno Tour RCP. Genes, parental stats and abilities affect the offspring; food is not the only influence.</p>
       <p>Retiring preserves the registered riding bird; obtain the registration card and re-register if you need its latest stats. Do not give up a bird expecting the same rewards as retirement.</p>
+      <p>The planner's report-event choices cover nighttime crying and the White Handkerchief, positive moods, returning from running away, whistle progress and walk discoveries. Selected events get next steps in today's row; growth and handkerchief deadlines get age-based reminders. These are reported conditions and reminders, not predictions of random events.</p>
       <p className="raising-small"><ReferenceLink file="scripts/globals/hobbies/chocobo_raising/settings.lua">Pinned settings</ReferenceLink> / <ReferenceLink file="modules/init.txt">Module configuration</ReferenceLink> / <ReferenceLink file="scripts/globals/hobbies/chocobo_raising/breeding.lua">Breeding</ReferenceLink> / <ReferenceLink file="scripts/zones/RuLude_Gardens/npcs/Dabih_Jajalioh.lua">Vendor stock</ReferenceLink></p>
     </details>
 

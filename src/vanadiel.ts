@@ -215,10 +215,12 @@ export function nextEarthMsForVanaDailySchedule(args: {
   offsetHours: number;
 }): number {
   const { nowEarthMs, cal, departureMinutes, offsetHours } = args;
+  const offsetVanaMinutes = Math.round(offsetHours * 60);
   if (
     !Number.isFinite(nowEarthMs) ||
     !Number.isFinite(cal?.timeOffsetMs ?? 0) ||
-    !Number.isInteger(offsetHours) || offsetHours < 0 || offsetHours > 23 ||
+    !Number.isFinite(offsetHours) || offsetHours < 0 || offsetHours > 23 ||
+    Math.abs(offsetHours * 60 - offsetVanaMinutes) > 1e-8 ||
     departureMinutes.length === 0 ||
     departureMinutes.some((minute) => !Number.isInteger(minute) || minute < 0 || minute >= 1440)
   ) {
@@ -229,7 +231,7 @@ export function nextEarthMsForVanaDailySchedule(args: {
   const dayMs = VANA_SECONDS_PER_DAY * VANA_MS_PER_VANA_SECOND;
   const nowInDayMs = mod(applyCalibrationToEarthMs(nowEarthMs, cal), dayMs);
   const deltas = departureMinutes.map((minute) => {
-    const delta = mod((minute - offsetHours * 60) * minuteMs - nowInDayMs, dayMs);
+    const delta = mod((minute - offsetVanaMinutes) * minuteMs - nowInDayMs, dayMs);
     return delta === 0 ? dayMs : delta;
   });
   return nowEarthMs + Math.min(...deltas);

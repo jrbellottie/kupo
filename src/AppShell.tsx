@@ -23,6 +23,7 @@ import { createWeatherWindowTimer, type WeatherRow } from "./utils/weather";
 import { AnyTimer, MoonDirection, type GardeningTimer, type EarthTimer } from "./types";
 import { advanceGardeningTimer, nextGardeningEvent, recordGardeningFeed } from "./utils/gardeningTimers";
 import GardeningTimerDetails from "./GardeningTimerDetails";
+import GuildDecayTab from "./GuildDecayTab";
 import { WEEKDAYS, WEEKDAY_COLORS, weekdayStyle } from "./utils/weekday";
 import { moonDirGlyph, moonGlyphStyle, moonPhaseStyle } from "./utils/moon";
 import { buildTenshodoPresets, GUILD_COLORS, GUILD_PRESETS, nextGuildAlertTarget, type GuildPreset } from "./utils/guilds";
@@ -121,6 +122,8 @@ function colorWeekdays(text: string): React.ReactNode {
 
 const PRESET_OFFSET_MIN = 0;
 const PRESET_OFFSET_MAX = 23;
+const PRESET_OFFSET_REAL_MINUTES_MAX = Math.floor(PRESET_OFFSET_MAX * 144_000 / 60_000);
+type PresetOffsetUnit = "VANA_HOURS" | "REAL_MINUTES";
 
 function formatVanaTime(hour: number, minute: number): string {
   return `${pad2(hour)}:${pad2(minute)}`;
@@ -335,9 +338,21 @@ export default function AppShell() {
 
   const [showCalibration, setShowCalibration] = useState<boolean>(() => loadJson<boolean>("ffxi_show_cal_v1", false));
 
-  const [presetOffsetHours, setPresetOffsetHours] = useState<number>(() =>
-    clampInt(loadJson<number>("ffxi_preset_offset_hours_v1", 2), PRESET_OFFSET_MIN, PRESET_OFFSET_MAX)
+  const [presetOffsetUnit, setPresetOffsetUnit] = useState<PresetOffsetUnit>(() =>
+    loadJson<string>("ffxi_preset_offset_unit_v1", "VANA_HOURS") === "REAL_MINUTES" ? "REAL_MINUTES" : "VANA_HOURS"
   );
+  const [presetOffsetValue, setPresetOffsetValue] = useState<number>(() => {
+    const max = presetOffsetUnit === "REAL_MINUTES" ? PRESET_OFFSET_REAL_MINUTES_MAX : PRESET_OFFSET_MAX;
+    const stored = loadJson<number>("ffxi_preset_offset_value_v1", loadJson<number>("ffxi_preset_offset_hours_v1", 2));
+    return clampInt(stored, PRESET_OFFSET_MIN, max);
+  });
+  const presetOffsetVanaMinutes = presetOffsetUnit === "REAL_MINUTES" ? presetOffsetValue * 25 : presetOffsetValue * 60;
+  const presetOffsetHours = presetOffsetVanaMinutes / 60;
+  const presetOffsetEarthMs = presetOffsetVanaMinutes * 2_400;
+  const presetOffsetText = presetOffsetUnit === "REAL_MINUTES"
+    ? `${presetOffsetValue} real-time ${presetOffsetValue === 1 ? "minute" : "minutes"}`
+    : `${presetOffsetValue} Vana'diel ${presetOffsetValue === 1 ? "hour" : "hours"}`;
+  const [presetView, setPresetView] = useState<"schedule" | "guildDecay">("schedule");
 
   const [counters, setCounters] = useState<CounterWidgetState>(() =>
     normalizeCounterWidgetState(loadJson<unknown>("ffxi_counters_v1", DEFAULT_COUNTERS))
@@ -425,7 +440,8 @@ export default function AppShell() {
   useEffect(() => saveJson("ffxi_cal_v1", cal), [cal]);
   useEffect(() => saveJson("ffxi_timers_v2", timers), [timers]);
   useEffect(() => saveJson("ffxi_show_cal_v1", showCalibration), [showCalibration]);
-  useEffect(() => saveJson("ffxi_preset_offset_hours_v1", presetOffsetHours), [presetOffsetHours]);
+  useEffect(() => saveJson("ffxi_preset_offset_value_v1", presetOffsetValue), [presetOffsetValue]);
+  useEffect(() => saveJson("ffxi_preset_offset_unit_v1", presetOffsetUnit), [presetOffsetUnit]);
   useEffect(() => saveJson("ffxi_counters_v1", counters), [counters]);
   useEffect(() => saveJson("ffxi_lu_shang_v1", luShang), [luShang]);
   useEffect(() => saveJson("ffxi_active_tab_v1", activeTab), [activeTab]);
@@ -551,7 +567,7 @@ export default function AppShell() {
         departureMinutes: route.departureMinutes,
         offsetHours: presetOffsetHours,
       });
-      const departureAt = nextAt + presetOffsetHours * 144_000;
+      const departureAt = nextAt + presetOffsetEarthMs;
       const nextDepartureAt = nextEarthMsForVanaDailySchedule({
         nowEarthMs: nowMs,
         cal,
@@ -568,7 +584,7 @@ export default function AppShell() {
         ...route, nextAt, departureAt, nextDepartureAt, nextArrivalAt,
       };
     }),
-  })), [nowMs, cal, presetOffsetHours]);
+  })), [nowMs, cal, presetOffsetEarthMs, presetOffsetHours]);
 
   useEffect(() => {
     if (!window.electron?.ipcRenderer?.on) return;
@@ -686,7 +702,7 @@ export default function AppShell() {
             atMs: dueAt,
             title: "Kupo",
             body: t.kind === "TRANSPORT"
-              ? `${t.label} ${t.offsetHours === 0 ? "departs now" : `departs in ${t.offsetHours} Vana hours`}! (click to stop)`
+              ? `${t.label} ${t.offsetHours === 0 ? "departs now" : `departs in ${formatCountdown(Math.round(t.offsetHours * 144_000))}`}! (click to stop)`
               : `${t.label} is due now! (click to stop)`,
             fireKey: "due",
             repeat: true,
@@ -821,6 +837,14 @@ export default function AppShell() {
     setTimers(prev => [timer, ...prev.filter(existing => existing.id !== timer.id)]);
   }
 
+  function addGuildDecayTimer(timer: EarthTimer) {
+    if (!Number.isFinite(timer.targetEarthMs) || timer.targetEarthMs <= Date.now()) {
+      alert("This decay timer has already passed. Set a reminder for a later game day.");
+      return;
+    }
+    setTimers(prev => [timer, ...prev]);
+  }
+
   function recordGardenFeed(id: string, index: number, atMs: number | null) {
     const timer = timers.find(timer => timer.id === id);
     if (!timer || timer.kind !== "GARDENING") throw new Error("This gardening timer is no longer available.");
@@ -910,7 +934,7 @@ export default function AppShell() {
       {
         id: uid(),
         kind: "VANA_WEEKDAY_TIME",
-        label: `${guild.label} (offset ${presetOffsetHours}h) — ${guild.targetWeekday} ${pad2(guild.targetHour)}:${pad2(
+        label: `${guild.label} (offset ${presetOffsetText}) — ${guild.targetWeekday} ${pad2(guild.targetHour)}:${pad2(
           guild.targetMinute
         )}`,
         enabled: true,
@@ -942,7 +966,7 @@ export default function AppShell() {
       ...mergedTargets.map((t) => ({
         id: uid(),
         kind: "VANA_WEEKDAY_TIME" as const,
-        label: `${t.label} (offset ${presetOffsetHours}h) — ${t.targetWeekday} ${pad2(t.targetHour)}:${pad2(
+        label: `${t.label} (offset ${presetOffsetText}) — ${t.targetWeekday} ${pad2(t.targetHour)}:${pad2(
           t.targetMinute
         )}`,
         enabled: true,
@@ -962,7 +986,7 @@ export default function AppShell() {
       {
         id: uid(),
         kind: "VANA_WEEKDAY_TIME",
-        label: `Next Day (offset ${presetOffsetHours}h) - ${target.targetWeekday} ${pad2(target.targetHour)}:${pad2(target.targetMinute)}`,
+        label: `Next Day (offset ${presetOffsetText}) - ${target.targetWeekday} ${pad2(target.targetHour)}:${pad2(target.targetMinute)}`,
         enabled: true,
         createdAtMs: Date.now(),
         targetWeekday: target.targetWeekday,
@@ -2027,24 +2051,59 @@ export default function AppShell() {
         </section>
   );
 
+  const presetViewTabs = (
+    <div role="tablist" aria-label="Preset timer categories" style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+      <button type="button" role="tab" aria-selected={presetView === "schedule"} style={presetView === "schedule" ? styles.buttonPrimaryCompact : styles.buttonCompact} onClick={() => setPresetView("schedule")}>
+        Scheduled presets
+      </button>
+      <button type="button" role="tab" aria-selected={presetView === "guildDecay"} style={presetView === "guildDecay" ? styles.buttonPrimaryCompact : styles.buttonCompact} onClick={() => setPresetView("guildDecay")}>
+        Guild decay
+      </button>
+    </div>
+  );
+
   const presetControls = (
         <section aria-label="Preset timer settings" style={{ ...styles.card, background: "#0c0c0c", padding: "8px 14px" }}>
           <div style={styles.titleRow}>
             <h3 style={styles.h3}>Preset timers</h3>
             <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
-              <label htmlFor="preset-offset-hours" style={styles.sub}>Offset (Vana hours):</label>
+              <label htmlFor="preset-offset-value" style={styles.sub}>Offset:</label>
               <input
-                id="preset-offset-hours"
+                id="preset-offset-value"
                 style={{ ...styles.input, width: 72 }}
                 type="number"
                 min={PRESET_OFFSET_MIN}
-                max={PRESET_OFFSET_MAX}
+                max={presetOffsetUnit === "REAL_MINUTES" ? PRESET_OFFSET_REAL_MINUTES_MAX : PRESET_OFFSET_MAX}
                 step={1}
-                value={presetOffsetHours}
-                onChange={(e) => setPresetOffsetHours(clampInt(Number(e.target.value) || 0, PRESET_OFFSET_MIN, PRESET_OFFSET_MAX))}
-                title="Hours before the target/open time (Vana hours)"
+                value={presetOffsetValue}
+                onChange={(e) => setPresetOffsetValue(clampInt(
+                  Number(e.target.value) || 0,
+                  PRESET_OFFSET_MIN,
+                  presetOffsetUnit === "REAL_MINUTES" ? PRESET_OFFSET_REAL_MINUTES_MAX : PRESET_OFFSET_MAX
+                ))}
+                title={`${presetOffsetText} before the target/open time`}
               />
-              <div style={styles.sub}>hours before target/open</div>
+              <select
+                aria-label="Preset offset unit"
+                style={{ ...styles.input, width: "auto" }}
+                value={presetOffsetUnit}
+                onChange={(event) => {
+                  const unit = event.target.value === "REAL_MINUTES" ? "REAL_MINUTES" : "VANA_HOURS";
+                  const convertedValue = unit === "REAL_MINUTES"
+                    ? Math.round(presetOffsetVanaMinutes / 25)
+                    : Math.round(presetOffsetVanaMinutes / 60);
+                  setPresetOffsetUnit(unit);
+                  setPresetOffsetValue(clampInt(
+                    convertedValue,
+                    PRESET_OFFSET_MIN,
+                    unit === "REAL_MINUTES" ? PRESET_OFFSET_REAL_MINUTES_MAX : PRESET_OFFSET_MAX
+                  ));
+                }}
+              >
+                <option value="VANA_HOURS">Vana&apos;diel hours</option>
+                <option value="REAL_MINUTES">Real-time minutes</option>
+              </select>
+              <div style={styles.sub}>before target/open</div>
             </div>
           </div>
         </section>
@@ -2065,7 +2124,7 @@ export default function AppShell() {
                 <div style={styles.titleRow}>
                   <div style={{ fontWeight: 800 }}>Next Day</div>
                   <div style={styles.sub}>
-                    Targets 00:00 → fires {pad2(nextDayPreview.targetHour)}:{pad2(nextDayPreview.targetMinute)} (offset {presetOffsetHours}h)
+                    Targets 00:00 → fires {pad2(nextDayPreview.targetHour)}:{pad2(nextDayPreview.targetMinute)} ({presetOffsetText} before)
                   </div>
                 </div>
 
@@ -2090,7 +2149,7 @@ export default function AppShell() {
                   <div style={styles.titleRow}>
                     <div style={{ fontWeight: 800, color: GUILD_COLORS[guild.id] }}>{guild.label}</div>
                     <div style={styles.sub}>
-                      Opens {formatVanaTime(guild.openHour, guild.openMinute)}–{formatVanaTime(guild.closeHour, guild.closeMinute)} → fires {pad2(guild.targetHour)}:{pad2(guild.targetMinute)} (offset {presetOffsetHours}h), closed{" "}
+                      Opens {formatVanaTime(guild.openHour, guild.openMinute)}–{formatVanaTime(guild.closeHour, guild.closeMinute)} → fires {pad2(guild.targetHour)}:{pad2(guild.targetMinute)} ({presetOffsetText} before), closed{" "}
                       {guild.closedOn ? <span style={weekdayStyle(guild.closedOn)}>{guild.closedOn}</span> : "Never"}
                     </div>
                   </div>
@@ -2138,8 +2197,7 @@ export default function AppShell() {
                 </div>
 
                 <div style={{ marginTop: 8, ...styles.sub }}>
-                  {colorWeekdays(`Notes: Lower Jeuno closed Earthsday; Port Bastok closed Iceday; Norg closed Darksday. Offset is ${presetOffsetHours}h`)}
-                  before open.
+                  {colorWeekdays(`Notes: Lower Jeuno closed Earthsday; Port Bastok closed Iceday; Norg closed Darksday. Offset is ${presetOffsetText} before open.`)}
                 </div>
               </div>
 
@@ -2170,7 +2228,7 @@ export default function AppShell() {
                         Arrives (Earth): {new Date(route.nextArrivalAt).toLocaleString()}
                       </div>
                       <div style={{ marginTop: 8, ...styles.sub }}>
-                        Alert lead time (Earth): {formatCountdown(presetOffsetHours * 144_000)}
+                        Alert lead time (Earth): {formatCountdown(presetOffsetEarthMs)}
                         <br />
                         Next alert (Earth): {new Date(route.nextAt).toLocaleString()} — In: {formatCountdown(route.nextAt - nowMs)}
                         <br />
@@ -2251,7 +2309,7 @@ export default function AppShell() {
 
                 const vanaAt = nextAt === null ? now : getVanaNow(nextAt, cal ?? undefined);
                 const departureAt = t.kind === "TRANSPORT" && nextAt !== null
-                  ? nextAt + t.offsetHours * 144_000
+                  ? nextAt + Math.round(t.offsetHours * 144_000)
                   : null;
                 const ports = t.kind === "TRANSPORT" ? getTransportPorts(t) : undefined;
                 const nextDepartureAt = t.kind === "TRANSPORT"
@@ -2285,7 +2343,7 @@ export default function AppShell() {
                 } else if (t.kind === "TRANSPORT") {
                   detailLine = (
                     <div style={{ marginTop: 6, opacity: 0.9 }}>
-                      Alerts {formatCountdown(t.offsetHours * 144_000)} before every departure (Earth time).
+                      Alerts {formatCountdown(Math.round(t.offsetHours * 144_000))} before every departure (Earth time).
                       {!ports && <div>Port details unavailable. Recreate this timer from a transport preset.</div>}
                     </div>
                   );
@@ -2615,9 +2673,10 @@ export default function AppShell() {
   return (
     <ScreenControlsProvider scope={activeTab}>
     <div style={{ ...styles.page, paddingTop: headerCollapsed ? 8 : 16, gap: headerCollapsed ? 8 : 12 }}>
-      <div data-main-toolbar style={{ position: "sticky", top: 8, zIndex: 10, display: "flex", flexDirection: "column", gap: headerCollapsed ? 8 : 12 }}>
+      <div data-main-toolbar style={{ position: "sticky", top: 8, zIndex: 10, display: "flex", flexDirection: "column", gap: headerCollapsed ? 8 : 12, background: "#050505" }}>
         {tabBar}
         <ScreenControlToggles>{headerCollapsed ? headerToggle : null}</ScreenControlToggles>
+        {activeTab === "presets" && presetViewTabs}
         {activeTab === "presets" && presetControls}
       </div>
 
@@ -2648,7 +2707,9 @@ export default function AppShell() {
 
       {activeTab === "presets" && (
         <div style={styles.tabContent}>
-          {presetContent}
+          {presetView === "guildDecay"
+            ? <GuildDecayTab cal={cal} nowMs={nowMs} offsetHours={presetOffsetHours} offsetDescription={presetOffsetText} onAddTimer={addGuildDecayTimer} />
+            : presetContent}
         </div>
       )}
 

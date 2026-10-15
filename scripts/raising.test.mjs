@@ -7,13 +7,15 @@ import { buildSync } from "esbuild";
 const bundle = buildSync({ entryPoints: ["src/utils/chocoboRaising.ts"], bundle: true, write: false, platform: "node", format: "esm" });
 const { RAISING, STAT_KEYS, STAT_BANDS, PROJECTION_FOODS, foodStatText, foodEffects, projectFoodOnly, validateFoodProjection, ridingEstimate, statRank, carePlanRange, applyRaisingStatChanges } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 const plannerBundle = buildSync({ entryPoints: ["src/utils/chocoboRaisingPlanner.ts"], bundle: true, write: false, platform: "node", format: "esm" });
-const { RAISING_ABILITIES, RAISING_PRESETS, STORY_ATTEMPTS_95, LAST_RAISING_DAY, RAISING_START_KEY, validateRaisingGoal, planRaisingGoal, applyTrainingAction, trainingActionName, storyLearningProbability, careAvailableDay, trainingFoodLimit, trainingFoodTotals, groupTrainingDays, raisingDayAt, parseRaisingStart, localRaisingStart } = await import(`data:text/javascript;base64,${Buffer.from(plannerBundle.outputFiles[0].text).toString("base64")}`);
+const { RAISING_ABILITIES, RAISING_PRESETS, STORY_ATTEMPTS_95, LAST_RAISING_DAY, RAISING_START_KEY, RAISING_SAVED_STARTS_KEY, parseSavedRaisingStarts, validateRaisingGoal, planRaisingGoal, applyTrainingAction, trainingActionName, storyLearningProbability, careAvailableDay, trainingFoodLimit, trainingFoodTotals, groupTrainingDays, raisingDayAt, parseRaisingStart, localRaisingStart } = await import(`data:text/javascript;base64,${Buffer.from(plannerBundle.outputFiles[0].text).toString("base64")}`);
 const dailyBundle = buildSync({ entryPoints: ["src/utils/raisingDaily.ts"], bundle: true, write: false, platform: "node", format: "esm" });
-const { RAISING_DAILY_KEY, parseSavedRaisingDaily, dailyProgress, todayCare, feedingInputKey, plannerColorGoal } = await import(`data:text/javascript;base64,${Buffer.from(dailyBundle.outputFiles[0].text).toString("base64")}`);
+const { RAISING_DAILY_KEY, parseSavedRaisingDaily, dailyProgress, todayCare, tomorrowCare, recordArrangedCare, feedingInputKey, plannerColorGoal } = await import(`data:text/javascript;base64,${Buffer.from(dailyBundle.outputFiles[0].text).toString("base64")}`);
 const colorBundle = buildSync({ entryPoints: ["src/utils/chocoboColor.ts"], bundle: true, write: false, platform: "node", format: "esm" });
 const { CHOCOBO_COLORS, PARASITE_WORM_ID, geneColor, eggGeneDistribution, chocoboColorOdds, colorStrategy } = await import(`data:text/javascript;base64,${Buffer.from(colorBundle.outputFiles[0].text).toString("base64")}`);
 const feedingBundle = buildSync({ entryPoints: ["src/utils/chocoboFeeding.ts"], bundle: true, write: false, platform: "node", format: "esm" });
-const { AFFECTION_TARGET, AFFECTION_REPORTS, HUNGER_REPORTS, FEEDING_FOODS, feedingOptions, feedingFood, feedingSummary, careSuccessChance } = await import(`data:text/javascript;base64,${Buffer.from(feedingBundle.outputFiles[0].text).toString("base64")}`);
+const { AFFECTION_TARGET, AFFECTION_REPORTS, HUNGER_REPORTS, FEEDING_FOODS, BIRD_AILMENTS, healthGuidance, needsHealthAttention, treatmentFoods, recordMedicineEaten, validateFeedingReport, feedingOptions, feedingFood, feedingSummary, careSuccessChance } = await import(`data:text/javascript;base64,${Buffer.from(feedingBundle.outputFiles[0].text).toString("base64")}`);
+const eventsBundle = buildSync({ entryPoints: ["src/utils/raisingEvents.ts"], bundle: true, write: false, platform: "node", format: "esm" });
+const { RAISING_EVENTS, raisingEventGuidance, raisingMilestoneGuidance, validRaisingEvents } = await import(`data:text/javascript;base64,${Buffer.from(eventsBundle.outputFiles[0].text).toString("base64")}`);
 const food = name => {
   const found = RAISING.foods.find(entry => entry.name === name);
   assert.ok(found, `Missing ${name}`);
@@ -486,6 +488,286 @@ test("feeding menus respect stage, report uncertainty, source effects and the fo
   assert.throws(() => feedingFood(-1), /Unsupported/);
 });
 
+test("locked care survives rollover, recalculation and storage with explicit estimate fallback", () => {
+  const startedAt = 1700000000000;
+  const form = {
+    current: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+    target: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+    desiredAbilities: [], knownAbilities: [], priority: "endurance",
+  };
+  const daily = { startedAt, plannedDay: 6, days: Array.from({ length: 123 }, (_, index) => ({
+    day: 6 + index, foodId: null, foodCount: 0, story: null, careId: index < 2 ? 0 : 3,
+  })) };
+  const saved = { form, daily };
+  assert.deepEqual(tomorrowCare(saved, startedAt, 7), { careId: 3, source: "estimated" });
+  const care = todayCare(daily, 6);
+  saved.arrangedCare = recordArrangedCare(undefined, startedAt, care.firstDay, care.lastDay, care.careId);
+  let restored = parseSavedRaisingDaily(JSON.stringify(saved));
+  for (const day of [7, 8, 13]) assert.deepEqual(tomorrowCare(restored, startedAt, day), { careId: 3, source: "confirmed" });
+  restored.daily = { ...daily, days: daily.days.map(step => ({ ...step, careId: 0 })) };
+  assert.deepEqual(tomorrowCare(restored, startedAt, 8), { careId: 3, source: "confirmed" },
+    "recalculating a recommendation does not erase arranged care");
+  restored.arrangedCare = recordArrangedCare(restored.arrangedCare, startedAt, 9, 9, 2);
+  assert.deepEqual(tomorrowCare(restored, startedAt, 8), { careId: 2, source: "confirmed" });
+  assert.deepEqual(tomorrowCare(restored, startedAt, 9), { careId: 3, source: "confirmed" });
+  assert.deepEqual(tomorrowCare(restored, startedAt + 1, 8), { careId: undefined, source: "unknown" });
+  assert.deepEqual(tomorrowCare({ form }, startedAt, 6), { careId: undefined, source: "unknown" });
+  assert.deepEqual(tomorrowCare({ form }, startedAt, 3), { careId: 0, source: "basic" });
+  for (const days of [[{ day: 9, careId: 999 }], [{ day: 2, careId: 3 }], [{ day: 9, careId: 3 }, { day: 9, careId: 2 }]]) {
+    assert.throws(() => parseSavedRaisingDaily(JSON.stringify({ ...saved, arrangedCare: { startedAt, days } })), /invalid/);
+  }
+});
+
+test("health guidance matches pinned remedies, stages and safe treatment boundaries", () => {
+  const report = { day: 6, affection: 224, fullness: 223, condition: "unwell", ailments: ["sick"] };
+  let guide = healthGuidance(report, 6);
+  assert.equal(guide.canTreat, true);
+  assert.match(guide.treatmentAction, /^Give 1 Clump of Tokopekko Wildgrass/);
+  assert.equal(guide.remedies[0].foods[0].name, "Clump of Tokopekko Wildgrass");
+  assert.ok(guide.remedies[0].foods.some(food => food.name === "Ball of Herb Paste"));
+  for (const [ailment, name] of [["very ill", "Clump of Tokopekko Wildgrass"], ["injured", "Clump of Gausebit Wildgrass"], ["stomachache", "Garidav Wildgrass"]]) {
+    assert.equal(healthGuidance({ ...report, ailments: [ailment] }, 6).remedies[0].foods[0].name, name);
+  }
+  for (const { id } of BIRD_AILMENTS) for (const day of [6, 19, 29]) {
+    guide = healthGuidance({ ...report, day, ailments: [id] }, day);
+    assert.ok(guide.remedies[0].foods.length);
+    assert.ok(guide.treatmentAction.includes(`Give 1 ${guide.remedies[0].foods[0].name}`));
+    assert.ok(guide.treatmentAction.includes(BIRD_AILMENTS.find(ailment => ailment.id === id).label));
+    for (const food of guide.remedies[0].foods) assert.ok((day < 19 ? food.chick : food).cures.includes(id));
+    if (day >= 19) assert.ok(!guide.remedies[0].foods.some(food => food.name === "Ball of Herb Paste"));
+    const fullGuide = healthGuidance({ ...report, day, fullness: 255, ailments: [id] }, day);
+    assert.match(fullGuide.treatmentAction, /Completely full: do not feed medicine/);
+    assert.ok(fullGuide.treatmentAction.includes(`Remedy for ${guide.remedies[0].label}: ${guide.remedies[0].foods[0].name}`));
+    assert.match(fullGuide.treatmentAction, /Wait until the bird is present, awake and has feeding room/);
+    assert.doesNotMatch(fullGuide.treatmentAction, /^Give 1/);
+  }
+  guide = healthGuidance({ ...report, ailments: ["sick", "lovesick"] }, 6);
+  assert.match(guide.treatmentAction, /Give 1 Celerity Salad, alone, for Sick \/ minor illness, Lovesick/);
+  for (const patch of [{ fullness: -1 }, { condition: "unknown" }, { condition: "sleeping" }, { condition: "away" }]) {
+    const blocked = healthGuidance({ ...report, ...patch, ailments: ["lovesick"] }, 6);
+    assert.equal(blocked.canTreat, false);
+    assert.match(blocked.treatmentAction, /Remedy for Lovesick: Celerity Salad/);
+    assert.doesNotMatch(blocked.treatmentAction, /^Give 1/);
+  }
+  for (const fullness of [224, 255]) {
+    guide = healthGuidance({ ...report, fullness }, 6);
+    assert.equal(guide.canTreat, false);
+    assert.match(guide.messages.join(" "), /do not feed medicine/);
+    assert.doesNotMatch(guide.treatmentAction, /^Give 1/);
+    assert.match(guide.messages.join(" "), /10% stomachache/);
+  }
+  guide = healthGuidance({ ...report, fullness: 255, treatmentGiven: true }, 6);
+  assert.equal(guide.canTreat, false);
+  assert.match(guide.treatmentAction, /Treatment already given/);
+  assert.match(guide.messages.join(" "), /Treatment already given/);
+  assert.match(guide.messages.join(" "), /do not feed another remedy to undo/);
+  assert.equal(healthGuidance({ ...report, treatmentGiven: true }, 6).canTreat, false);
+  assert.equal(healthGuidance({ ...report, fullness: -1 }, 6).canTreat, false);
+  assert.equal(healthGuidance({ ...report, condition: "unknown" }, 6).canTreat, false);
+  for (const condition of ["away", "sleeping"]) assert.equal(healthGuidance({ ...report, condition }, 6).canTreat, false);
+  assert.match(healthGuidance({ ...report, condition: "sleeping" }, 6).messages.join(" "), /Chocotonic.*32.*-48/);
+  assert.match(healthGuidance({ ...report, condition: "away" }, 6).messages.join(" "), /cannot feed or treat/);
+  assert.equal(healthGuidance(report, 3).canTreat, false);
+  assert.match(healthGuidance({ ...report, ailments: [] }, 6).messages.join(" "), /not specific enough/);
+  assert.match(healthGuidance({ ...report, ailments: [], condition: "tired" }, 6).messages.join(" "), /not an illness diagnosis/);
+  assert.equal(needsHealthAttention({ ...report, condition: "healthy" }), true, "selected ailments override healthy readiness");
+  assert.equal(needsHealthAttention({ ...report, condition: "healthy", ailments: [] }), false);
+});
+
+test("non-food ailment recovery respects stage, energy costs and pinned action effects", () => {
+  const report = { day: 30, affection: 224, fullness: 255, condition: "healthy", ailments: [] };
+  const spoiled = healthGuidance({ ...report, ailments: ["spoiled"] }, 30);
+  assert.match(spoiled.careActions.join(" "), /Scold.*20\+ energy.*10 affection/);
+  assert.match(spoiled.treatmentAction, /Completely full: do not feed medicine/);
+  const bored = healthGuidance({ ...report, ailments: ["bored"] }, 30);
+  assert.match(bored.careActions.join(" "), /Compete with Others.*rivals.*34\+ energy.*healthy and awake/);
+  assert.match(bored.careActions.join(" "), /next report even on a loss/);
+  assert.match(healthGuidance({ ...report, day: 6, ailments: ["bored"] }, 6).careActions.join(" "), /not available until day 19/);
+  assert.match(healthGuidance({ ...report, ailments: ["lonely"] }, 30).careActions.join(" "), /rebuild affection.*Watch Over is not an affection boost/);
+  assert.match(healthGuidance({ ...report, condition: "sleeping" }, 30).careActions.join(" "), /Scold.*20 energy.*wakes.*10 affection/);
+  assert.match(healthGuidance({ ...report, condition: "away" }, 30).careActions.join(" "), /No food or hands-on care.*without training/);
+  assert.deepEqual(healthGuidance({ ...report, day: 3, ailments: ["spoiled"] }, 3).careActions, []);
+});
+
+test("reported raising events give source-specific next steps without inventing ailments or bonuses", () => {
+  const report = { day: 30, affection: 224, fullness: 191, condition: "healthy" };
+  for (const event of RAISING_EVENTS) {
+    const reported = { ...report, events: [event.id] };
+    assert.equal(validRaisingEvents(reported.events), true);
+    assert.ok(raisingEventGuidance(reported, 30).length > 0, event.id);
+    assert.equal(needsHealthAttention(reported), false, "reported events alone are not ailments");
+    assert.equal(validateFeedingReport(reported, 30), null);
+  }
+  assert.deepEqual(raisingEventGuidance(report, 30), []);
+  for (const invalid of [["unknown"], ["high-spirits", "high-spirits"], "high-spirits", null, [1]]) {
+    assert.equal(validRaisingEvents(invalid), false);
+    assert.throws(() => raisingEventGuidance({ ...report, events: invalid }, 30), /valid raising report events/);
+  }
+  for (const day of [7, 8, 14]) {
+    const messages = raisingEventGuidance({ ...report, day, events: ["white-handkerchief"] }, day);
+    assert.equal(messages.length, 1, "reported handkerchief replaces its generic age reminder");
+    assert.match(messages[0], /raising-report day.*next report.*zone out and back.*before day 15/);
+    assert.match(messages[0], /not a food trade/);
+  }
+  assert.match(raisingEventGuidance({ ...report, events: ["white-handkerchief"] }, 15).join(" "), /expires on day 15.*whistle quest is not blocked/);
+  for (const id of ["high-spirits", "full-of-energy", "bright-and-focused"]) {
+    assert.match(raisingEventGuidance({ ...report, events: [id] }, 30).join(" "), /No medicine|no remedy/i);
+  }
+  const found = raisingEventGuidance({ ...report, events: ["whistle-search", "whistle-found"] }, 30);
+  assert.equal(found.length, 1, "finding the item takes priority over searching");
+  assert.match(found[0], /Hantileon.*receive the Chocobo Whistle.*not the chick's White Handkerchief/);
+  assert.match(raisingEventGuidance({ ...report, events: ["whistle-search"] }, 19).join(" "), /begins at adulthood, day 29/);
+  for (const condition of ["away", "sleeping", "unwell", "tired", "unknown"]) {
+    const advice = raisingEventGuidance({ ...report, condition, events: ["whistle-search", "held-item"] }, 30).join(" ");
+    assert.match(advice, /Wait until healthy, awake, present and energetic enough/);
+    assert.match(advice, /Watch Over.*4\+ energy/);
+  }
+  assert.match(raisingEventGuidance({ ...report, events: ["recovered"] }, 30).join(" "), /clear only the ailments.*Do not repeat medicine/);
+  const input = goal({ currentDay: 128, desiredAbilities: [], today: { feedingDone: false, storyDone: false },
+    feedingReport: { ...report, day: 128 } });
+  assert.deepEqual(planRaisingGoal({ ...input, feedingReport: { ...input.feedingReport, events: ["high-spirits"] } }),
+    planRaisingGoal(input), "positive event reports do not silently change the numeric model");
+});
+
+test("age reminders stay on exact timeline days and event selections persist with validated reports", () => {
+  const milestoneDays = [4, 7, 14, 15, 19, 29, 43, 64, 128, 129];
+  for (const day of milestoneDays) assert.equal(raisingMilestoneGuidance(day).length, 1, `day ${day}`);
+  for (const day of [0, 3, 6, 8, 13, 16, 18, 20, 28, 30, 42, 44, 63, 65, 127]) assert.deepEqual(raisingMilestoneGuidance(day), []);
+  assert.match(raisingMilestoneGuidance(7)[0], /if the trainer offers.*key item.*not food.*Whistle holders/);
+  assert.match(raisingMilestoneGuidance(14)[0], /today.*expires on day 15/);
+  assert.match(raisingMilestoneGuidance(29)[0], /outside San d'Oria.*Hantileon.*outcome does not block/);
+  assert.match(raisingMilestoneGuidance(129)[0], /Raising has ended/);
+  const days = Array.from({ length: 129 }, (_, day) => ({
+    day, careId: 0, carePoints: 2, foodId: null, foodCount: 0, story: null, attempt: 0,
+    before: stats(), after: stats(), assumedLearned: false,
+  }));
+  const groups = groupTrainingDays(days, milestoneDays);
+  for (const day of milestoneDays.filter(day => day <= 128)) {
+    const group = groups.find(group => day >= group.day && day <= group.endDay);
+    assert.equal(group.day, day);
+    assert.equal(group.endDay, day, "reminders do not label multi-day blocks");
+  }
+  assert.equal(groups.reduce((sum, group) => sum + group.days, 0), 129);
+  const form = { current: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+    target: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])), desiredAbilities: [], knownAbilities: [], priority: "endurance",
+    feedingReport: { day: 7, affection: 224, fullness: 191, condition: "healthy", events: ["white-handkerchief"] },
+  };
+  assert.deepEqual(parseSavedRaisingDaily(JSON.stringify({ form })).form.feedingReport.events, ["white-handkerchief"]);
+  for (const events of [["unknown"], ["high-spirits", "high-spirits"], "high-spirits"]) {
+    assert.throws(() => parseSavedRaisingDaily(JSON.stringify({ form: { ...form,
+      feedingReport: { ...form.feedingReport, events },
+    } })), /invalid/);
+  }
+  assert.notEqual(feedingInputKey(form, form.feedingReport),
+    feedingInputKey(form, { ...form.feedingReport, events: [] }));
+});
+
+test("recorded medicine updates pre-dose reports once and keeps recovery hypothetical", () => {
+  const before = { day: 6, affection: 224, fullness: 191, condition: "unwell", ailments: ["sick"] };
+  const after = recordMedicineEaten(before, 2201, 6);
+  assert.equal(before.fullness, 191, "does not mutate pre-dose reports");
+  assert.equal(after.fullness, 255, "one Tokopekko adds 64 fullness");
+  assert.equal(after.affection, 248);
+  assert.equal(after.condition, "unwell");
+  assert.deepEqual(after.ailments, ["sick"]);
+  assert.equal(after.treatmentGiven, true);
+  assert.equal(after.medicineId, 2201);
+  assert.throws(() => recordMedicineEaten(after, 2201, 6), /already recorded/);
+  assert.throws(() => recordMedicineEaten({ ...after, treatmentGiven: false }, 2201, 6), /already recorded/);
+  assert.throws(() => recordMedicineEaten({ ...before, treatmentGiven: true }, 2201, 6), /already recorded/);
+  assert.throws(() => recordMedicineEaten(before, 2201, 7), /current hunger/);
+  assert.throws(() => recordMedicineEaten({ ...before, day: 3 }, 2201, 3), /growth stage/);
+  assert.throws(() => recordMedicineEaten(before, PARASITE_WORM_ID, 6), /medicine/);
+  assert.throws(() => recordMedicineEaten({ ...before, condition: "sleeping" }, 2201, 6), /cannot be eaten/);
+  assert.throws(() => recordMedicineEaten({ ...before, condition: "away" }, 2201, 6), /cannot be eaten/);
+  assert.equal(recordMedicineEaten({ ...before, affection: 250, fullness: 255 }, 2201, 6).affection, 255,
+    "already eaten force-fed medicine may be recorded without recommending it");
+  assert.equal(recordMedicineEaten({ ...before, affection: 0, condition: "sleeping" }, 2197, 6).affection, 0);
+  assert.ok(treatmentFoods(6).some(food => food.id === 2208));
+  assert.ok(!treatmentFoods(19).some(food => food.id === 2208), "Herb Paste loses its chick cures");
+  const form = {
+    current: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+    target: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+    desiredAbilities: [], knownAbilities: [], priority: "endurance", feedingReport: after,
+  };
+  assert.deepEqual(parseSavedRaisingDaily(JSON.stringify({ form })).form.feedingReport, after);
+  const input = goal({
+    currentDay: 6, today: { feedingDone: false, storyDone: false }, tomorrowCareId: 3,
+    feedingReport: after, colorGoal: { eggId: 2312, wormsFed: 0 },
+  });
+  const plan = planRaisingGoal(input);
+  assert.deepEqual(plan.days[0].feeding.items, []);
+  assert.equal(plan.days[1].feeding.fullnessBefore, 255, "tomorrow starts from medicine-adjusted fullness, not 191");
+  assert.deepEqual(plan.days[1].feeding.items, [], "no hypothetical worm on day 7 after the recorded dose");
+  assert.ok(plan.days.flatMap(day => day.feeding.items).every(id => id !== 2201),
+    "medicine already eaten is not included again in remaining meals");
+});
+
+test("ailments and treatment persist, invalidate food estimates and stop today's training meals and stories", () => {
+  const report = { day: 128, affection: 224, fullness: 31, condition: "healthy", ailments: ["sick", "injured"], treatmentGiven: true };
+  const form = {
+    current: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+    target: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
+    desiredAbilities: [], knownAbilities: [], priority: "endurance", feedingReport: report,
+  };
+  assert.deepEqual(parseSavedRaisingDaily(JSON.stringify({ form })).form.feedingReport, report);
+  for (const patch of [{ ailments: ["fake"] }, { ailments: ["sick", "sick"] }, { ailments: "sick" }, { treatmentGiven: "yes" }]) {
+    assert.throws(() => parseSavedRaisingDaily(JSON.stringify({ form: { ...form, feedingReport: { ...report, ...patch } } })), /invalid/);
+    assert.match(validateFeedingReport({ ...report, ...patch }, 128), /ailments/);
+  }
+  for (const patch of [{ ailments: [] }, { treatmentGiven: false }]) {
+    assert.notEqual(feedingInputKey(form, report), feedingInputKey(form, { ...report, ...patch }));
+  }
+  for (const patch of [{ ailments: ["sick"], treatmentGiven: false }, { ailments: [], treatmentGiven: true }]) {
+    const plan = planRaisingGoal(goal({
+      currentDay: 128, current: stats(0, 0, 160, 0), target: stats(), desiredAbilities: ["Bore"],
+      today: { feedingDone: false, storyDone: false }, feedingReport: { ...report, ...patch },
+    }));
+    assert.deepEqual(plan.days[0].feeding.items, []);
+    assert.equal(plan.days[0].story, null);
+  }
+});
+
+test("tomorrow's locked care trains stats and is not optimized away after reaching a goal", () => {
+  const input = goal({
+    currentDay: 120, current: stats(0, 0, 64, 64), target: stats(), desiredAbilities: [],
+    today: { feedingDone: false, storyDone: false }, tomorrowCareId: 3,
+    feedingReport: { day: 120, affection: 224, fullness: 255, condition: "healthy" },
+  });
+  const plan = planRaisingGoal(input);
+  assert.equal(plan.days[0].careId, 0, "today's reported care is not applied twice");
+  assert.equal(plan.days[1].careId, 3, "locked care stays scheduled even with met targets");
+  const locked = plan.days[1];
+  let replay = applyTrainingAction(locked.before, { kind: "care", id: 3 }, locked.day, locked.carePoints);
+  assert.ok(replay.discernment > locked.before.discernment);
+  for (const id of locked.feeding.items) replay = applyRaisingStatChanges(replay, feedingFood(id).stats);
+  assert.deepEqual(locked.after, replay, "locked training and subsequent meals are both included");
+  assert.equal(plan.days[1].feeding.affectionBefore, plan.days[0].feeding.affectionAfter - 4);
+  for (const tomorrowCareId of [-1, 1, 99, NaN]) {
+    assert.match(validateRaisingGoal({ ...input, tomorrowCareId }), /locked care/);
+  }
+  assert.match(validateRaisingGoal({ ...input, currentDay: 3, tomorrowCareId: 3 }), /locked care/);
+});
+
+test("day-six digging color goal trains Discernment without giving up non-yellow odds", () => {
+  for (const tomorrowCareId of [0, 3]) {
+    const plan = planRaisingGoal(goal({
+      currentDay: 6, today: { feedingDone: false, storyDone: false }, tomorrowCareId,
+      feedingReport: { affection: 224, fullness: 255, condition: "unwell", day: 6 },
+      colorGoal: { eggId: 2312, wormsFed: 0 },
+    }));
+    assert.equal(plan.days[0].feeding.items.length, 0, "no food today for an unwell, full chick");
+    assert.equal(plan.days[1].careId, tomorrowCareId);
+    assert.equal(plan.days[2].careId, 3, "arrange Listen to Music rather than an affection-only Basic Care route");
+    assert.ok(plan.days[2].after.discernment > 0);
+    const energy = RAISING.plans.find(care => care.id === tomorrowCareId).energy;
+    assert.equal(plan.days[2].feeding.fullnessBefore, plan.days[1].feeding.fullnessAfter - Math.floor(2.25 * energy),
+      "locked care energy affects the following day's hunger");
+    assert.ok(plan.color.plannedWorms >= 1, "preserve or improve the reported one-worm color strategy");
+    assert.equal(plan.complete, true);
+  }
+});
+
 test("color probabilities match an exhaustive gene transition, including repeated rolls and source egg patterns", () => {
   assert.deepEqual(RAISING.eggColorOdds.map(egg => egg.genePatterns), [
     [25, 50, 25], [17.5, 60, 22.5], [16, 65, 19], [15, 70, 15], [10, 75, 15],
@@ -592,8 +874,9 @@ test("color planner uses safe capacity before day 19 and respects completed feed
   }
   const low = run({ feedingReport: { affection: 0, fullness: 0, condition: "healthy", day: 18 } });
   const bestAffection = Math.min(224, Math.max(...feedingOptions(stats(), 0, 0, 18, true, true).map(meal => meal.affection)));
-  assert.equal(Math.min(224, low.days[0].feeding.affectionAfter), bestAffection);
-  assert.ok(low.color.plannedWorms < 4, "recovery food takes priority over gene rolls");
+  assert.equal(low.color.plannedWorms, 4, "the best non-yellow odds take priority over affection");
+  assert.ok(Math.min(224, low.days[0].feeding.affectionAfter) < bestAffection,
+    "the color goal may accept lower affection when that improves the odds");
   const normal = run({ colorGoal: undefined });
   assert.equal(normal.color, undefined);
   assert.ok(normal.days.every(day => !day.feeding.items.includes(PARASITE_WORM_ID)));
@@ -606,17 +889,15 @@ test("color planner uses safe capacity before day 19 and respects completed feed
     feedingReport: { affection: 255, fullness: 255, condition: "healthy", day: 0 } })), /Eggs cannot be fed/);
 });
 
-test("color lifetime route keeps affection before worms and still meets the digging build", () => {
+test("color lifetime route prioritizes odds over affection and still meets the digging build", () => {
   const plan = planRaisingGoal(goal({
     today: { feedingDone: false, storyDone: false },
     feedingReport: { affection: 255, fullness: 255, condition: "healthy", day: 0 },
     colorGoal: { eggId: 2312, wormsFed: 0 },
   }));
   assert.equal(plan.complete, true);
-  assert.equal(plan.color.plannedWorms, 1, "care-only chick hunger permits one worm after prioritizing affection recovery");
+  assert.equal(plan.color.plannedWorms, 2, "care-only chick hunger permits two worms when color odds come first");
   assert.ok(plan.color.after.yellow < plan.color.before.yellow);
-  assert.ok(plan.days.filter(day => day.day < 19).every(day => day.feeding.affectionAfter >= 224),
-    "do not greedily feed an early worm at the expense of later chick affection");
   let count = 0;
   for (const day of plan.days) {
     let fullness = day.feeding.fullnessBefore;
@@ -671,7 +952,7 @@ test("color form and worm meals persist without treating planned or skipped food
   assert.throws(() => parseSavedRaisingDaily(JSON.stringify(invalid)), /invalid/, "no post-lock worm meal in saved plans");
 });
 
-test("color preference and actual worm history reach the live planner worker request", () => {
+test("start-of-day worker request ignores completion and treatment history but preserves reports and locked care", () => {
   const { outputFiles } = buildSync({
     stdin: { contents: 'export { default as Planner } from "./src/ChocoboRaisingPlanner";', resolveDir: process.cwd() },
     bundle: true, write: false, platform: "node", format: "cjs", external: ["react"],
@@ -700,16 +981,26 @@ test("color preference and actual worm history reach the live planner worker req
         current: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
         target: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])),
         desiredAbilities: [], knownAbilities: [], priority: "endurance",
-        feedingReport: { affection: 224, fullness: 31, condition: "healthy", day: 18 },
+        feedingReport: { affection: 224, fullness: 31, condition: "unwell", day: 18, ailments: ["sick"], events: ["high-spirits"], treatmentGiven: true, medicineId: 2201 },
         avoidYellow, eggId: "2312", wormsFed: "2",
       },
       defaultsVersion: 1, calculatedDay: 18, calculatedStart: 0, todayMode: true, feedingMode: true,
+      arrangedCare: { startedAt: 0, days: [{ day: 19, careId: 3 }] },
+      progress: { startedAt: 0, day: 18, feedingDone: true, storyDone: true, careKey: null },
     }, { startedAt: 0, error: null }, "", null, 18 * 86400000, null];
     stateIndex = 0;
     effects.length = 0;
     module.exports.Planner();
     const cleanup = effects.at(-1)();
     assert.equal(request.currentDay, 18);
+    assert.equal(request.tomorrowCareId, 3);
+    assert.deepEqual(request.feedingReport.ailments, ["sick"]);
+    assert.deepEqual(request.feedingReport.events, ["high-spirits"]);
+    assert.deepEqual(request.today, { feedingDone: false, storyDone: false });
+    assert.equal(request.feedingReport.treatmentGiven, undefined);
+    assert.equal(request.feedingReport.medicineId, undefined);
+    assert.equal(request.feedingReport.affection, 224);
+    assert.equal(request.feedingReport.fullness, 31);
     assert.deepEqual(request.colorGoal, avoidYellow ? { eggId: 2312, wormsFed: 2 } : undefined);
     cleanup();
   }
@@ -866,6 +1157,19 @@ test("raising clock uses exact elapsed 24-hour periods, including DST changes", 
   const start = Date.parse("2026-11-01T00:30:00-05:00");
   const day = 86400000;
   assert.equal(RAISING_START_KEY, "kupo.raising.startedAt.v1");
+  assert.equal(RAISING_SAVED_STARTS_KEY, "kupo.raising.savedStarts.v1");
+  assert.deepEqual(parseSavedRaisingStarts(JSON.stringify([
+    { name: "First egg", startedAt: start },
+    { name: "Second egg", startedAt: start + 1000 },
+  ])), [
+    { name: "First egg", startedAt: start },
+    { name: "Second egg", startedAt: start + 1000 },
+  ]);
+  for (const saved of [
+    "not json", "{}", JSON.stringify([{ name: " ", startedAt: start }]),
+    JSON.stringify([{ name: "Egg", startedAt: NaN }]),
+    JSON.stringify([{ name: "Egg", startedAt: start }, { name: "egg", startedAt: start + 1 }]),
+  ]) assert.throws(() => parseSavedRaisingStarts(saved));
   assert.equal(LAST_RAISING_DAY, 128);
   assert.equal(raisingDayAt(start, start), 0);
   assert.equal(raisingDayAt(start, start + day - 1), 0);
@@ -924,6 +1228,65 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     if (predicate(element)) return element;
     return React.Children.toArray(element.props.children).map(child => findElement(child, predicate)).find(Boolean);
   };
+  const storageValues = new Map();
+  const originalLocalStorage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, value: {
+    getItem: key => storageValues.get(key) ?? null,
+    setItem: (key, value) => storageValues.set(key, String(value)),
+  } });
+  t.after(() => {
+    if (originalLocalStorage) Object.defineProperty(globalThis, "localStorage", originalLocalStorage);
+    else delete globalThis.localStorage;
+  });
+  const savedView = { ...view, calculatedDay: null, calculatedStart: undefined };
+  states = [savedView, { startedAt: null, error: null }, localRaisingStart(start), null, start, null, { entries: [], error: null }, "", null, "", null];
+  stateIndex = 0;
+  clickTime = start + 4 * day;
+  const savedTimeSelect = tree => findElement(findElement(tree, element => element.type === "label"
+    && React.Children.toArray(element.props.children).includes("Saved egg times")), element => element.type === "select");
+  const saveButton = tree => findElement(tree, element => element.type === "button" && element.props.children === "Save start time");
+  const deleteButton = tree => findElement(tree, element => element.type === "button" && element.props.children === "Delete saved time");
+  const nameInput = tree => findElement(findElement(tree, element => element.type === "label"
+    && React.Children.toArray(element.props.children).includes("Name for saved egg time")), element => element.type === "input");
+  const saveNamedButton = tree => findElement(tree, element => element.type === "button" && element.props.children === "Save named time");
+  const confirmDeleteButton = tree => findElement(tree, element => element.type === "button" && element.props.children === "Confirm delete");
+  const cancelDeleteButton = tree => findElement(tree, element => element.type === "button" && element.props.children === "Cancel delete");
+  const saveWithName = name => {
+    stateIndex = 0;
+    saveButton(module.exports.Planner()).props.onClick();
+    stateIndex = 0;
+    nameInput(module.exports.Planner()).props.onChange({ target: { value: name } });
+    stateIndex = 0;
+    saveNamedButton(module.exports.Planner()).props.onClick();
+  };
+  saveWithName("First egg");
+  assert.equal(states[1].startedAt, start);
+  assert.equal(storageValues.get(RAISING_START_KEY), JSON.stringify(start));
+  assert.deepEqual(JSON.parse(storageValues.get(RAISING_SAVED_STARTS_KEY)), [{ name: "First egg", startedAt: start }]);
+  states[2] = localRaisingStart(start + day);
+  saveWithName("Backup egg");
+  assert.deepEqual(JSON.parse(storageValues.get(RAISING_SAVED_STARTS_KEY)), [
+    { name: "First egg", startedAt: start }, { name: "Backup egg", startedAt: start + day },
+  ]);
+  stateIndex = 0;
+  savedTimeSelect(module.exports.Planner()).props.onChange({ target: { value: "First egg" } });
+  assert.equal(states[1].startedAt, start, "selecting a named time restores its clock");
+  stateIndex = 0;
+  let savedTree = module.exports.Planner();
+  deleteButton(savedTree).props.onClick();
+  stateIndex = 0;
+  savedTree = module.exports.Planner();
+  cancelDeleteButton(savedTree).props.onClick();
+  assert.equal(JSON.parse(storageValues.get(RAISING_SAVED_STARTS_KEY)).length, 2, "cancelled confirmation preserves the saved time");
+  stateIndex = 0;
+  deleteButton(module.exports.Planner()).props.onClick();
+  stateIndex = 0;
+  confirmDeleteButton(module.exports.Planner()).props.onClick();
+  assert.deepEqual(JSON.parse(storageValues.get(RAISING_SAVED_STARTS_KEY)), [{ name: "Backup egg", startedAt: start + day }]);
+  assert.equal(storageValues.get(RAISING_START_KEY), "null", "deleting the active saved time clears its active clock");
+  assert.equal(states[1].startedAt, null);
+  assert.equal(states[7], "");
+
   for (const [elapsed, expectedDay] of [[4 * day - 1, 3], [4 * day, null], [6 * day, null], [128 * day, null], [129 * day, null], [-1, null]]) {
     // Keep the rendered clock on day 3 to model a suspended app that has not ticked yet.
     states = [view, { startedAt: start, error: null }, localRaisingStart(start), null, start + 3 * day];
@@ -981,8 +1344,9 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   assert.equal(completionLabel("Care schedule checked / arranged"), undefined);
   assert.equal(findElement(hatched, element => element.type === "h4" && element.props.children === "Care to arrange today"), undefined,
     "no care section is shown without saved instructions");
-  assert.ok(completionLabel("Feeding finished for today"));
-  assert.ok(completionLabel("Story activities finished for today"));
+  assert.equal(completionLabel("Feeding finished for today"), undefined);
+  assert.equal(completionLabel("Story activities finished for today"), undefined);
+  assert.equal(findElement(hatched, element => element.type === "legend" && element.props.children === "Completed today"), undefined);
   assert.equal(findElement(hatched, element => element.type === "label"
     && React.Children.toArray(element.props.children).some(child => typeof child === "string" && child.startsWith("These reports are from"))), undefined);
   const render = () => { stateIndex = 0; return module.exports.Planner(); };
@@ -1022,104 +1386,242 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   const schedule = { startedAt: start, plannedDay: 3, days: result.days };
   states = [{ ...view, daily: schedule }, { startedAt: start, error: null }, localRaisingStart(start), null, start + 4 * day];
   clickTime = states[4];
-  const careHeading = tree => findElement(tree, element => element.type === "h4" && element.props.children === "Care to arrange today");
-  const careCheckbox = tree => findElement(findElement(tree, element => element.type === "label"
-    && React.Children.toArray(element.props.children).includes("Care schedule checked / arranged")), element => element.type === "input");
+  const careButton = tree => findElement(tree, element => element.type === "button"
+    && element.props["aria-label"] === "Confirm recommended care schedule");
   const textContent = element => React.isValidElement(element)
     ? React.Children.toArray(element.props.children).map(textContent).join("")
     : String(element ?? "");
-  const careSteps = tree => findElement(tree, element => element.type === "ol" && element.props["aria-label"] === "Care-plan steps");
+  const todayRow = tree => findElement(tree, element => element.type === "tr" && element.props["aria-label"] === "Today's remaining actions");
   for (const [age, careId, count] of [[4, 3, 7], [4, 3, 1], [20, 0, 3], [126, 4, 1]]) {
     states[4] = start + age * day;
-    states[0] = { ...view, daily: { ...schedule, days: schedule.days.map(step => ({
+    const days = schedule.days.map(step => ({
       ...step, careId: step.day >= age + 2 && step.day < age + 2 + count ? careId : careId === 0 ? 3 : 0,
-    })) } };
-    const instructions = textContent(careSteps(render()));
-    assert.match(instructions, /If those days already have this activity, leave them alone/);
-    assert.ok(instructions.includes(`edit Plan 1 at the stable trainer. Choose ${trainingActionName({ kind: "care", id: careId })} and set the duration to ${count} ${count === 1 ? "day" : "days"}.`));
-    assert.ok(instructions.includes(`This covers days ${age + 2}-${age + 1 + count}.`));
-    assert.match(instructions, /Plan 2 runs after Plan 1 finishes/);
-    assert.match(instructions, /recheck later blocks against the timeline/);
-    const renderedText = textContent(render());
-    assert.ok(renderedText.includes(`Day ${age + 1} is already locked; this change first affects results on day ${age + 2}.`));
-    assert.match(renderedText, /Do not add a Basic Care block for the delay/);
-    assert.match(renderedText, /"Next program" can still show the locked activity/);
+    }));
+    states[0] = { ...view, calculatedDay: age, todayMode: true, feedingMode: true,
+      form: { ...form, feedingReport: { day: age, affection: 224, fullness: 31, condition: "healthy" } },
+      calculation: { status: "success", plan: { ...result, days } }, daily: { ...schedule, days },
+    };
+    const instructions = textContent(todayRow(render()));
+    assert.ok(instructions.includes(`Plan 1: ${trainingActionName({ kind: "care", id: careId })}, ${count} days (${age + 2}-${age + 1 + count})`));
+    assert.match(instructions, /Leave it unchanged if already correct/);
+    const help = textContent(findElement(render(), element => element.type === "details"
+      && textContent(element).startsWith("How to use the calculator and care plans")));
+    assert.match(help, /Plan 2 runs after Plan 1 finishes/);
+    assert.match(help, /Do not add Basic Care days to cover the delay/);
   }
   states[0] = { ...view, daily: schedule };
   states[4] = start + 4 * day;
   tree = render();
-  assert.ok(careHeading(tree));
-  assert.equal(careCheckbox(tree).props.disabled, false);
-  assert.equal(careCheckbox(tree).props.checked, false);
-  careCheckbox(tree).props.onChange({ target: { checked: true } });
+  assert.doesNotMatch(textContent(tree), /What to do today/);
+  assert.equal(careButton(tree).props.disabled, false);
+  assert.equal(careButton(tree).props.children, "Confirm care schedule");
+  careButton(tree).props.onClick();
   const careKey = todayCare(schedule, 4).key;
   assert.equal(states[0].progress.careKey, careKey);
+  assert.equal(states[0].arrangedCare.days[0].day, 6, "checking care records its future execution days");
+  assert.equal(states[0].arrangedCare.days[0].careId, todayCare(schedule, 4).careId);
   assert.equal(states[0].calculation, view.calculation, "checking care does not discard the calculated plan");
-  assert.equal(careCheckbox(render()).props.checked, true);
+  assert.equal(careButton(render()).props.children, "Clear care confirmation");
   states[0] = { ...parseSavedRaisingDaily(JSON.stringify(states[0])), calculatedDay: null };
-  assert.equal(careCheckbox(render()).props.checked, true, "saved care completion survives restoration");
-  careCheckbox(render()).props.onChange({ target: { checked: false } });
+  assert.equal(careButton(render()).props.children, "Clear care confirmation", "saved care confirmation survives restoration");
+  careButton(render()).props.onClick();
   assert.equal(states[0].progress.careKey, null);
-  assert.equal(careCheckbox(render()).props.checked, false);
-  careCheckbox(render()).props.onChange({ target: { checked: true } });
+  assert.deepEqual(states[0].arrangedCare.days, [], "unchecking removes that block's confirmation");
+  assert.equal(careButton(render()).props.children, "Confirm care schedule");
+  careButton(render()).props.onClick();
   states[0] = { ...states[0], daily: { ...schedule, days: schedule.days.map(step =>
     step.day === 6 ? { ...step, careId: step.careId === 0 ? 3 : 0 } : step) } };
-  assert.equal(careCheckbox(render()).props.checked, false, "a changed care block needs checking again");
+  assert.equal(careButton(render()).props.children, "Confirm care schedule", "a changed care block needs checking again");
   states[0] = { ...states[0], daily: schedule };
   states[4] = start + 5 * day;
-  assert.equal(careCheckbox(render()).props.checked, false, "care completion resets on a new raising day");
+  assert.equal(careButton(render()).props.children, "Confirm care schedule", "care confirmation resets on a new raising day");
   const previousProgress = states[0].progress;
   clickTime = start + 6 * day;
-  careCheckbox(render()).props.onChange({ target: { checked: true } });
+  careButton(render()).props.onClick();
   assert.equal(states[0].progress, previousProgress, "a click after rollover cannot mark yesterday's care complete");
   assert.match(states[5], /raising day changed/);
   for (const age of [3, 127, 128, 129]) {
     states[4] = start + age * day;
     tree = render();
-    assert.equal(careHeading(tree), undefined, `no care section at day ${age} when nothing can be arranged`);
-    assert.equal(careCheckbox(tree), undefined);
-    assert.equal(careSteps(tree), undefined);
+    assert.equal(careButton(tree), undefined);
   }
 
-  const storySteps = tree => findElement(tree, element => element.type === "ol" && element.props["aria-label"]?.endsWith(" story steps"));
+  states = [{ ...view, calculatedDay: null }, { startedAt: start, error: null }, localRaisingStart(start), null, start + 6 * day];
+  clickTime = states[4];
+  assert.equal(reportSelect(render(), "Already-scheduled activity").props.value, "", "unknown care is not silently Basic Care");
+  assert.equal(calculateButton(render()).props.disabled, true);
+  reportSelect(render(), "Already-scheduled activity").props.onChange({ target: { value: "3" } });
+  assert.equal(reportSelect(render(), "Already-scheduled activity").props.value, 3, "can correct care before entering feeding reports");
+  assert.deepEqual(tomorrowCare(states[0], start, 6), { careId: 3, source: "confirmed" });
+  assert.match(textContent(render()), /Recorded as arranged or corrected by you/);
+  states[0] = { ...states[0], daily: { ...schedule, feedingInputs: "old feeding inputs" } };
+  reportSelect(render(), "Already-scheduled activity").props.onChange({ target: { value: "2" } });
+  assert.equal(states[0].daily.feedingInputs, undefined, "correcting care requires refreshed food recommendations");
+  states[0] = { ...view, calculatedDay: null, daily: schedule };
+  assert.match(textContent(render()), /Unconfirmed estimate from your last calculated plan/);
+
+  states = [{ ...view, calculatedDay: null, form: { ...form,
+    feedingReport: { day: 6, affection: 224, fullness: 255, condition: "unwell" },
+  } }, { startedAt: start, error: null }, localRaisingStart(start), null, start + 6 * day];
+  clickTime = states[4];
+  const healthSection = tree => findElement(tree, element => element.props["aria-label"] === "Health and treatment");
+  const healthCheckbox = (tree, label) => findElement(findElement(tree, element => element.type === "label"
+    && React.Children.toArray(element.props.children).includes(label)), element => element.type === "input");
+  assert.match(textContent(healthSection(render())), /not specific enough/);
+  healthCheckbox(render(), "Sick / minor illness").props.onChange({ target: { checked: true } });
+  assert.deepEqual(states[0].form.feedingReport.ailments, ["sick"]);
+  let healthText = textContent(healthSection(render()));
+  assert.match(healthText, /Clump of Tokopekko Wildgrass/);
+  assert.match(healthText, /Completely full: do not feed medicine/);
+  assert.match(healthText, /Reference only; do not feed these items now/);
+  assert.equal(healthSection(render()).type, "details", "treatment references stay available without duplicating the visible guide");
+  assert.notEqual(healthSection(render()).props.open, true);
+  assert.match(healthText, /Listen to Music is stat training, not treatment/);
+  assert.equal(states[0].calculatedDay, null, "health advice does not require a plan calculation");
+  const ailmentGuidance = tree => findElement(tree, element => element.props["aria-label"] === "Ailment guidance");
+  healthCheckbox(render(), "Sick / minor illness").props.onChange({ target: { checked: false } });
+  healthCheckbox(render(), "Lovesick").props.onChange({ target: { checked: true } });
+  assert.match(textContent(ailmentGuidance(render())), /Remedy for Lovesick: Celerity Salad/);
+  assert.match(textContent(ailmentGuidance(render())), /Completely full: do not feed medicine/);
+  reportSelect(render(), "Hunger report").props.onChange({ target: { value: "191" } });
+  assert.match(textContent(ailmentGuidance(render())), /Give 1 Celerity Salad, alone, for Lovesick/);
+  healthCheckbox(render(), "Lovesick").props.onChange({ target: { checked: false } });
+  assert.match(textContent(ailmentGuidance(render())), /not specific enough/, "unwell readiness still requires an exact ailment");
+  healthCheckbox(render(), "Sick / minor illness").props.onChange({ target: { checked: true } });
+  const eventGuidance = tree => findElement(tree, element => element.props["aria-label"] === "Report events and reminders");
+  healthCheckbox(render(), "Crying at night / holding White Handkerchief").props.onChange({ target: { checked: true } });
+  assert.deepEqual(states[0].form.feedingReport.events, ["white-handkerchief"]);
+  assert.match(textContent(eventGuidance(render())), /key item.*raising-report day.*zone out and back/);
+  assert.equal(healthCheckbox(render(), "Treatment already given today - do not recommend another dose"), undefined);
+  assert.equal(findElement(render(), element => element.type === "button" && element.props.children === "Record one eaten medicine"), undefined);
+  states[0] = { ...parseSavedRaisingDaily(JSON.stringify(states[0])), calculatedDay: null };
+  assert.equal(healthCheckbox(render(), "Sick / minor illness").props.checked, true);
+  assert.equal(healthCheckbox(render(), "Crying at night / holding White Handkerchief").props.checked, true);
+  states[4] = start + 7 * day;
+  assert.equal(healthCheckbox(render(), "Sick / minor illness").props.checked, false, "new day requires fresh health reports");
+  assert.equal(healthCheckbox(render(), "Crying at night / holding White Handkerchief").props.checked, false, "event selections reset on a new raising day");
+  assert.match(textContent(eventGuidance(render())), /White Handkerchief window/, "age reminders do not require a completed calculation");
+
+  states[4] = start + 6 * day;
+  clickTime = states[4];
+  states[0] = { ...view, calculatedDay: 6, calculatedStart: start, todayMode: true, feedingMode: true,
+    arrangedCare: { startedAt: start, days: [{ day: 7, careId: 3 }] },
+    calculation: { status: "success", plan: result },
+    form: { ...form, feedingReport: { day: 6, affection: 224, fullness: 191, condition: "unwell", ailments: ["sick"] } },
+  };
+  tree = render();
+  assert.match(textContent(tree), /Hypothetical recovery forecast, not feeding instructions/);
+  assert.match(textContent(todayRow(tree)), /Today - day 6/);
+  assert.match(textContent(todayRow(tree)), /Give 1 Clump of Tokopekko Wildgrass/);
+  assert.match(textContent(todayRow(tree)), /cure normally waits for the next raising-day update/);
+  assert.match(textContent(todayRow(tree)), /Skip stories until healthy/);
+  assert.match(textContent(todayRow(tree)), /Today's care is already in your reports/);
+  assert.equal(findElement(tree, element => element.props["aria-label"] === "Today's chocobo checklist"), undefined);
+  const timeline = findElement(tree, element => element.type === "table" && element.props["aria-label"] === "Goal training steps");
+  const rows = React.Children.toArray(findElement(timeline, element => element.type === "tbody").props.children);
+  assert.equal(rows[0].props["aria-label"], "Today's remaining actions", "today precedes tomorrow's forecast");
+  for (const row of rows) {
+    const cells = React.Children.toArray(row.props.children);
+    if (/items total/.test(textContent(cells[2]))) {
+      assert.match(textContent(cells[2]), /Only after confirmed recovery and a fresh hunger check/);
+    }
+  }
+  const healthTimelineView = states[0];
+  states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
+    feedingReport: { ...healthTimelineView.form.feedingReport, events: ["white-handkerchief"] },
+  } };
+  assert.match(textContent(todayRow(render())), /White Handkerchief \/ nighttime crying.*not a food trade/);
+  for (const [ailment, expected] of [["spoiled", /Scold.*20\+ energy/], ["bored", /not available until day 19/], ["lonely", /rebuild affection/]]) {
+    states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
+      feedingReport: { ...healthTimelineView.form.feedingReport, ailments: [ailment] },
+    } };
+    assert.match(textContent(todayRow(render())), expected);
+  }
+  for (const { id, label } of BIRD_AILMENTS) for (const fullness of [191, 255]) {
+    states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
+      feedingReport: { ...healthTimelineView.form.feedingReport, condition: "healthy", fullness, ailments: [id] },
+    } };
+    const expectedRemedy = healthGuidance(states[0].form.feedingReport, 6).remedies[0].foods[0].name;
+    const rendered = render();
+    const text = textContent(todayRow(rendered));
+    assert.ok(text.includes(label), `${id} is named in today's report`);
+    assert.ok(text.includes(expectedRemedy), `${id} has a remedy even when full`);
+    assert.match(text, fullness === 255 ? /Completely full: do not feed medicine/ : /Give 1/);
+    assert.equal(ailmentGuidance(rendered), undefined, "calculated report does not duplicate the ailment summary");
+  }
+  for (const [patch, expected] of [
+    [{ fullness: 255 }, /Completely full: do not feed medicine/],
+    [{ condition: "sleeping" }, /Sleeping birds refuse other foods/],
+    [{ condition: "away" }, /cannot feed or treat/],
+  ]) {
+    states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
+      feedingReport: { ...healthTimelineView.form.feedingReport, ...patch },
+    } };
+    const text = textContent(todayRow(render()));
+    assert.match(text, expected);
+    assert.doesNotMatch(text, /Give 1 Clump of Tokopekko/);
+  }
+  states[0] = { ...healthTimelineView, progress: { startedAt: start, day: 6, feedingDone: true, storyDone: true, careKey: null } };
+  assert.match(textContent(todayRow(render())), /Give 1 Clump of Tokopekko Wildgrass/, "legacy completion does not suppress today's treatment");
+  assert.match(textContent(todayRow(render())), /Skip stories until healthy/);
+  states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
+    feedingReport: { ...healthTimelineView.form.feedingReport, condition: "healthy", ailments: [] },
+  }, calculation: { status: "success", plan: { ...result, days: result.days.map(step => step.day === 6
+    ? { ...step, feeding: { items: [5608] }, story: null } : step) } } };
+  assert.match(textContent(todayRow(render())), /Feed 1 Zegham Carrot/);
+  states[0] = { ...healthTimelineView,
+    progress: { startedAt: start, day: 6, feedingDone: true, storyDone: true, careKey: null },
+    form: { ...healthTimelineView.form, feedingReport: {
+      ...healthTimelineView.form.feedingReport, treatmentGiven: true, medicineId: 2201,
+    } },
+  };
+  assert.match(textContent(todayRow(render())), /Give 1 Clump of Tokopekko Wildgrass/, "legacy treatment marks do not suppress a start-of-day simulation");
+  findElement(render(), element => element.type === "form").props.onSubmit({ preventDefault() {} });
+  assert.deepEqual(states[0].progress, { startedAt: start, day: 6, feedingDone: false, storyDone: false, careKey: null });
+  assert.equal(states[0].form.feedingReport.treatmentGiven, undefined);
+  assert.equal(states[0].form.feedingReport.medicineId, undefined);
+  assert.equal(states[0].form.feedingReport.fullness, 191, "resetting completion does not change entered hunger");
+  assert.deepEqual(states[0].arrangedCare, healthTimelineView.arrangedCare, "recalculating retains tomorrow's confirmed care");
+
+  const storyInstruction = tree => findElement(todayRow(tree), element => element.props["aria-label"] === "Today's story instruction");
   const storyView = {
-    ...view,
+    ...view, calculatedDay: 30, todayMode: true, feedingMode: true,
     form: { ...form, knownAbilities: [], feedingReport: { affection: 224, fullness: 31, condition: "healthy", day: 30 } },
     daily: { ...schedule, days: schedule.days.map(step => step.day === 30 ? { ...step, story: "Bore" } : step) },
+    calculation: { status: "success", plan: { ...result, days: result.days.map(step =>
+      step.day === 30 ? { ...step, story: "Bore" } : step) } },
   };
   states = [storyView, { startedAt: start, error: null }, localRaisingStart(start), null, start + 30 * day];
   clickTime = states[4];
   for (const ability of RAISING_ABILITIES) {
-    states[0] = { ...storyView, daily: { ...schedule, days: schedule.days.map(step =>
-      step.day === 30 ? { ...step, story: ability.name } : step) } };
+    states[0] = { ...storyView, calculation: { status: "success", plan: { ...result, pending: [ability],
+      days: result.days.map(step => step.day === 30 ? { ...step, story: ability.name } : step) } } };
     tree = render();
-    const steps = storySteps(tree);
-    assert.ok(steps, `${ability.name} gets today's step-by-step instructions`);
-    assert.equal(React.Children.toArray(steps.props.children).length, 4);
-    const text = textContent(steps);
-    assert.ok(text.includes(ability.obtain), "acquisition instructions use the shared ability reference");
-    assert.ok(text.includes(`Tell a Story, then ${ability.story}`));
-    assert.ok(text.includes(`Discernment at ${ability.discernment} or higher`));
-    assert.match(text, /14 energy even in clear weather/);
-    assert.match(text, /Long walks unlock on day 29/);
-    assert.match(text, /If it fails, keep the story for another day/);
-    assert.match(text, /Story activities finished for today/);
-    assert.match(textContent(tree), /separate hands-on action, not the Take a Walk or Act in a Play care plan/);
+    const instruction = storyInstruction(tree);
+    assert.ok(instruction, `${ability.name} gets a concise table instruction`);
+    const text = textContent(instruction);
+    assert.ok(text.includes(`Tell a Story: ${ability.story}, once (${ability.name})`));
+    assert.ok(text.includes(`Requires ${ability.discernment} DSC`));
+    assert.match(text, /14\+ energy and a free ability slot/);
+    const reference = findElement(tree, element => element.type === "details"
+      && textContent(element).startsWith("Ability preparation and learning checkpoint"));
+    assert.ok(textContent(reference).includes(ability.obtain), "acquisition remains in collapsed reference");
+    assert.notEqual(reference.props.open, true);
   }
   for (const condition of ["tired", "unwell", "sleeping", "away", "unknown"]) {
     states[0] = { ...storyView, form: { ...storyView.form, feedingReport: { ...storyView.form.feedingReport, condition } } };
-    assert.equal(storySteps(render()), undefined, `no attempt instructions for ${condition} birds`);
+    assert.equal(storyInstruction(render()), undefined, `no attempt instructions for ${condition} birds`);
   }
   states[0] = { ...storyView, form: { ...storyView.form, knownAbilities: ["Bore"] } };
-  assert.equal(storySteps(render()), undefined, "already-learned abilities are not attempted again");
-  states[0] = { ...storyView, daily: { ...schedule, days: schedule.days.map(step => ({ ...step, story: null })) } };
-  assert.equal(storySteps(render()), undefined, "steps appear only when a story attempt is scheduled");
-  states[0] = storyView;
-  tree = render();
-  const storyCompletion = findElement(findElement(tree, element => element.type === "label"
-    && React.Children.toArray(element.props.children).includes("Story activities finished for today")), element => element.type === "input");
-  storyCompletion.props.onChange({ target: { checked: true } });
-  assert.equal(storySteps(render()), undefined, "completed story attempts no longer show action steps");
+  assert.equal(storyInstruction(render()), undefined, "already-learned abilities are not attempted again");
+  states[0] = { ...storyView, calculation: { status: "success", plan: { ...result,
+    days: result.days.map(step => ({ ...step, story: null })) } } };
+  assert.equal(storyInstruction(render()), undefined, "instruction appears only when a story attempt is scheduled");
+  states[0] = { ...storyView, progress: { startedAt: start, day: 30, feedingDone: true, storyDone: true, careKey: null } };
+  assert.ok(storyInstruction(render()), "legacy story completion is ignored by start-of-day instructions");
+  states[0] = { ...storyView, form: { ...storyView.form, feedingReport: { ...storyView.form.feedingReport, events: ["high-spirits"] } } };
+  findElement(render(), element => element.type === "button" && element.props.children === "Clear start time").props.onClick();
+  assert.equal(states[0].form.feedingReport.events, undefined, "switching away from an egg clears its reported events");
 });
 
 test("story odds are per eligible attempt and acquisition references are shared", () => {
@@ -1215,8 +1717,8 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(help, /Plan 1 is the first editable block; Plan 2 runs after Plan 1 finishes, not two days from now/);
   assert.match(help, /Do not add Basic Care days to cover the delay/);
   assert.match(help, /Press Calculate plan for day N below the inputs, just above the divider before Estimated plan/);
-  assert.match(help, /The button shows the current raising day/);
-  assert.match(help, /Changing an input cancels the old calculation/);
+  assert.match(help, /Each calculation simulates the start of the current day/);
+  assert.match(help, /Recalculating does not remember actions or medicine already given/);
   assert.match(help, /How often should I check in\?/);
   assert.match(help, /check this guide once per raising day/);
   assert.match(help, /one 24-hour period from egg hand-in/);
@@ -1226,7 +1728,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(help, /read the device clock immediately and replace the plan/);
   assert.match(help, /Within the same 24-hour period, the raising day stays the same/);
   assert.match(help, /do not enter the forecast&#x27;s numbers as measured stats/);
-  assert.match(help, /there is nothing to write down/);
+  assert.match(help, /start-of-day simulation, not a completion log/);
   assert.match(help, /on day 20 you can arrange care for day 22 onward; day 21 is already decided/);
   assert.match(help, /Check what is already scheduled in game and only change future activities if needed/);
   assert.match(help, /The app cannot see or change the trainer&#x27;s schedule, and it does not feed your bird/);
@@ -1269,17 +1771,20 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(html, /type="datetime-local"/);
   assert.match(html, /Use current time/);
   assert.match(html, /Save start time/);
+  assert.match(html, /<label>Saved egg times<select/);
+  assert.match(html, /Choose a saved egg time/);
+  assert.match(html, /Delete saved time/);
+  assert.match(html, /Save names appear in the saved egg times menu/);
   assert.match(html, /No start time saved: planning a new egg at day 0/);
   assert.doesNotMatch(html, /Refresh day and recalculate/);
   assert.match(help, /saved timestamp survives app restarts/);
-  assert.match(help, /The planner includes today&#x27;s unfinished feeding and story actions/);
+  assert.match(help, /no feeding, stories or treatment done yet/);
   assert.doesNotMatch(help, /Write down or screenshot|schedule begins tomorrow|previously noted/);
-  assert.match(html, /aria-label="Today&#x27;s chocobo checklist"/);
-  assert.match(html, /What to do today - raising day 0/);
-  assert.match(html, /Enter the stat descriptions the trainer gives you now/);
+  assert.doesNotMatch(html, /aria-label="Today&#x27;s chocobo checklist"|What to do today/);
+  assert.match(help, /Read today&#x27;s stable care report, then select each stat description/);
   assert.doesNotMatch(html, /The trainer has already completed the care described in that report/);
   assert.doesNotMatch(html, /do not perform or add that training again/);
-  assert.match(html, /No saved instructions for today yet/);
+  assert.match(html, /Follow the table&#x27;s Today row/);
   assert.match(help, /One timeline through day 128/);
   assert.match(help, /you cannot choose that roll in game/);
   assert.match(html, /It does not change your targets/);
@@ -1329,7 +1834,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(buildHelp, /20% chance to save greens/);
   assert.match(buildHelp, /35% increase, not a flat 35%/);
   assert.match(buildHelp, /broader pools do not guarantee higher profit/);
-  assert.match(html, /Current reports, exact-stat mode, already-learned abilities and egg time stay unchanged/);
+  assert.match(help, /Applying another preset keeps/);
   assert.match(help, /Vomp Carrots still lower Discernment and Receptivity/);
   assert.match(html, /5-minute reuse cooldown/);
   assert.match(html, /30-second wait after equipping/);
@@ -1500,10 +2005,12 @@ test("restored planner state requires an explicit opt-in for exact current stats
     defaultsVersion: 1, calculatedDay: null,
   };
   const colorHtml = module.exports.render();
+  assert.ok(colorHtml.indexOf('aria-label="Chocobo color goal"') < colorHtml.indexOf("<label>Build preset<select"),
+    "color preference appears in its own section before the build preset");
   assert.match(colorHtml, /<input type="checkbox" checked=""\/>Avoid a yellow bird/);
   assert.match(colorHtml, /value="2312" selected="">Faintly warm/);
   assert.match(colorHtml, /Parasite Worms already eaten before day 19/);
-  assert.match(colorHtml, /checking Feeding finished for today does not record worms/);
+  assert.match(colorHtml, /never increase that count automatically/);
   assert.doesNotMatch(colorHtml, /role="alert"/);
   for (const patch of [{ eggId: "" }, { wormsFed: "" }, { wormsFed: "1" }]) {
     restored = { ...restored, form: { ...restored.form, eggId: "2312", wormsFed: "0", ...patch } };

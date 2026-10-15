@@ -5,16 +5,19 @@ import { saveJson } from "./utils/storage";
 import { RAISING, STAT_KEYS, STAT_LABELS, STAT_GRADES, STAT_BANDS, statRank, ridingEstimate, type RaisingStats } from "./utils/chocoboRaising";
 import {
   RAISING_ABILITIES, RAISING_PRESETS, STORY_ATTEMPTS_95, validateRaisingGoal,
-  storyLearningProbability, trainingActionName, LAST_RAISING_DAY, RAISING_START_KEY,
+  storyLearningProbability, trainingActionName, LAST_RAISING_DAY, RAISING_START_KEY, RAISING_SAVED_STARTS_KEY,
+  parseSavedRaisingStarts, type SavedRaisingStart,
   raisingDayAt, localRaisingStart, parseRaisingStart, type RaisingGoalInput,
-  groupTrainingDays, trainingFoodTotals,
+  groupTrainingDays, trainingFoodTotals, careAvailableDay,
 } from "./utils/chocoboRaisingPlanner";
-import { RAISING_DAILY_KEY, parseSavedRaisingDaily, dailyProgress, todayCare, feedingInputKey, plannerColorGoal, type PlannerForm, type SavedRaisingDaily } from "./utils/raisingDaily";
+import { RAISING_DAILY_KEY, parseSavedRaisingDaily, dailyProgress, todayCare, tomorrowCare, recordArrangedCare, feedingInputKey, plannerColorGoal, type PlannerForm, type SavedRaisingDaily } from "./utils/raisingDaily";
 import { CHOCOBO_COLORS } from "./utils/chocoboColor";
 import {
-  AFFECTION_REPORTS, HUNGER_REPORTS, BIRD_CONDITIONS, AFFECTION_TARGET, feedingSummary, validateFeedingReport, type FeedingReport,
+  AFFECTION_REPORTS, HUNGER_REPORTS, BIRD_CONDITIONS, BIRD_AILMENTS, AFFECTION_TARGET,
+  feedingSummary, healthGuidance, needsHealthAttention, type FeedingReport,
 } from "./utils/chocoboFeeding";
 import type { RaisingPlannerResponse } from "./workers/chocoboRaisingPlanner.worker";
+import { RAISING_EVENTS, raisingEventGuidance, raisingMilestoneGuidance } from "./utils/raisingEvents";
 
 type StatInputs = Record<keyof RaisingStats, string>;
 type PlannerView = SavedRaisingDaily & {
@@ -45,7 +48,7 @@ function restorePlannerView(restored?: PlannerView): PlannerView {
         ...restored.form, target: { ...defaultForm.target }, desiredAbilities: [...defaultForm.desiredAbilities],
         priority: defaultForm.priority, useExactStats: false,
       },
-      defaultsVersion: DEFAULTS_VERSION, calculatedDay: null, progress: restored.progress,
+      defaultsVersion: DEFAULTS_VERSION, calculatedDay: null, progress: restored.progress, arrangedCare: restored.arrangedCare,
     };
   }
   return restored;
@@ -72,7 +75,10 @@ function feedingReport(form: PlannerForm, day: number): FeedingReport {
     affection: RAISING.feeding.initialAffection + day * RAISING.plans[0].affection,
     fullness: 255, condition: "healthy", day,
   };
-  return form.feedingReport?.day === day ? form.feedingReport
+  const report = form.feedingReport;
+  return report?.day === day ? {
+    affection: report.affection, fullness: report.fullness, condition: report.condition, day, ailments: report.ailments, events: report.events,
+  }
     : { affection: -1, fullness: -1, condition: "unknown", day };
 }
 
@@ -91,6 +97,17 @@ function loadStart(): { startedAt: number | null; error: string | null } {
   }
 }
 
+function loadSavedStarts(): { entries: SavedRaisingStart[]; error: string | null } {
+  if (typeof window === "undefined") return { entries: [], error: null };
+  try {
+    const raw = localStorage.getItem(RAISING_SAVED_STARTS_KEY);
+    return { entries: raw === null ? [] : parseSavedRaisingStarts(raw), error: null };
+  } catch (error) {
+    console.error("Unable to load saved raising start times.", error);
+    return { entries: [], error: "Unable to load saved egg times. Check this device's browser storage before saving or deleting times." };
+  }
+}
+
 export default function ChocoboRaisingPlanner() {
   const formId = useId();
   const [view, setView] = useState<PlannerView>(() => {
@@ -101,7 +118,7 @@ export default function ChocoboRaisingPlanner() {
       return restorePlannerView(raw ? { ...parseSavedRaisingDaily(raw), calculatedDay: null } : undefined);
     } catch (error) {
       console.error("Unable to load the raising checklist.", error);
-      return { ...restorePlannerView(), persistenceError: "Unable to load the saved raising checklist. Verify your reports and completed actions before calculating again." };
+      return { ...restorePlannerView(), persistenceError: "Unable to load the saved raising data. Verify your reports and care schedule before calculating again." };
     }
   });
   const [clock, setClock] = useState(loadStart);
@@ -109,6 +126,14 @@ export default function ChocoboRaisingPlanner() {
   const [startError, setStartError] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now);
   const [dailyNotice, setDailyNotice] = useState<string | null>(null);
+  const [savedStartState, setSavedStartState] = useState(loadSavedStarts);
+  const [selectedStartName, setSelectedStartName] = useState(() =>
+    savedStartState.entries.find(entry => entry.startedAt === clock.startedAt)?.name ?? "");
+  const [pendingStart, setPendingStart] = useState<number | null>(null);
+  const [saveNameDraft, setSaveNameDraft] = useState("");
+  const [pendingDeleteName, setPendingDeleteName] = useState<string | null>(null);
+  const savedStarts = savedStartState?.entries ?? [];
+  const savedStartError = savedStartState?.error ?? null;
   useEffect(() => {
     const tick = () => setNow(Date.now());
     const timer = window.setInterval(tick, 1000);
@@ -122,10 +147,10 @@ export default function ChocoboRaisingPlanner() {
       rememberTabState("raising", view);
       if (!view.persistenceError) {
         try {
-          saveJson(RAISING_DAILY_KEY, { form: view.form, defaultsVersion: view.defaultsVersion, daily: view.daily, progress: view.progress });
+          saveJson(RAISING_DAILY_KEY, { form: view.form, defaultsVersion: view.defaultsVersion, daily: view.daily, progress: view.progress, arrangedCare: view.arrangedCare });
         } catch (error) {
           console.error("Unable to save the raising checklist.", error);
-          setView(previous => previous === view ? { ...previous, persistenceError: "Unable to save the raising checklist on this device. Keep the app open; changes may be lost on restart. Try again after checking browser storage." } : previous);
+          setView(previous => previous === view ? { ...previous, persistenceError: "Unable to save the raising data on this device. Keep the app open; changes may be lost on restart. Try again after checking browser storage." } : previous);
         }
       }
     }
@@ -135,17 +160,21 @@ export default function ChocoboRaisingPlanner() {
   const futureStart = clock.startedAt !== null && clock.startedAt > now;
   const currentDay = clock.startedAt === null || futureStart ? 0 : raisingDayAt(clock.startedAt, now);
   const progress = dailyProgress(view.progress, clock.startedAt, currentDay);
+  const lockedCare = tomorrowCare(view, clock.startedAt, currentDay);
   const input: RaisingGoalInput = {
     ...form, current: currentStats(form), target: parseStats(form.target), currentDay,
-    today: { feedingDone: progress.feedingDone, storyDone: progress.storyDone },
+    today: { feedingDone: false, storyDone: false },
     feedingReport: feedingReport(form, currentDay),
     colorGoal: plannerColorGoal(form),
+    tomorrowCareId: lockedCare.careId,
   };
   const selectedPreset = RAISING_PRESETS.find(preset =>
     STAT_KEYS.every(key => preset.target[key] === input.target[key]) && preset.priority === form.priority
     && preset.desiredAbilities.length === form.desiredAbilities.length
     && preset.desiredAbilities.every(name => form.desiredAbilities.includes(name)));
-  const error = clock.error ?? (futureStart ? "The saved egg start time is in the future. Correct the start time or your device clock." : validateRaisingGoal(input));
+  const error = clock.error ?? (futureStart ? "The saved egg start time is in the future. Correct the start time or your device clock."
+    : lockedCare.careId === undefined ? "Select tomorrow's already-scheduled care; no previous recommendation is saved for that day."
+    : validateRaisingGoal(input));
   const isCurrent = view.todayMode === true && view.feedingMode === true && view.defaultsVersion === DEFAULTS_VERSION && view.calculatedDay === currentDay && view.calculatedStart === clock.startedAt && !error;
   const calculation = isCurrent ? view.calculation : undefined;
   const isCalculating = !!isCurrent && !calculation;
@@ -180,45 +209,69 @@ export default function ChocoboRaisingPlanner() {
       worker.onmessageerror = () => finish({ status: "error", message: "The calculation result could not be read." });
       const request: RaisingGoalInput = {
         ...view.form, current: currentStats(view.form), target: parseStats(view.form.target), currentDay,
-        today: { feedingDone: progress.feedingDone, storyDone: progress.storyDone },
+        today: { feedingDone: false, storyDone: false },
         feedingReport: feedingReport(view.form, currentDay),
         colorGoal: plannerColorGoal(view.form),
+        tomorrowCareId: tomorrowCare(view, view.calculatedStart ?? null, currentDay).careId,
       };
       worker.postMessage(request);
     } catch (error) {
       finish({ status: "error", message: error instanceof Error ? error.message : "The calculation could not start." });
     }
     return () => { active = false; worker?.terminate(); };
-  }, [view, currentDay, isCalculating, progress.feedingDone, progress.storyDone]);
+  }, [view, currentDay, isCalculating]);
   const calculate = () => {
     if (isCalculating) return;
     const refreshedNow = Date.now();
     setNow(refreshedNow);
     const refreshedFutureStart = clock.startedAt !== null && clock.startedAt > refreshedNow;
     const refreshedDay = clock.startedAt === null || refreshedFutureStart ? 0 : raisingDayAt(clock.startedAt, refreshedNow);
-    const invalid = clock.error || refreshedFutureStart || validateRaisingGoal({ ...input, currentDay: refreshedDay, feedingReport: feedingReport(form, refreshedDay) });
+    const refreshedCare = tomorrowCare(view, clock.startedAt, refreshedDay);
+    const invalid = clock.error || refreshedFutureStart || refreshedCare.careId === undefined
+      || validateRaisingGoal({ ...input, currentDay: refreshedDay, feedingReport: feedingReport(form, refreshedDay), tomorrowCareId: refreshedCare.careId });
     setDailyNotice(null);
     setView(previous => ({
-      ...previous, form, defaultsVersion: DEFAULTS_VERSION, todayMode: true, feedingMode: true, persistenceError: undefined, calculation: undefined,
+      ...previous, form: form.feedingReport ? { ...form, feedingReport: feedingReport(form, refreshedDay) } : form,
+      defaultsVersion: DEFAULTS_VERSION, todayMode: true, feedingMode: true, persistenceError: undefined, calculation: undefined,
       calculatedDay: invalid ? null : refreshedDay, calculatedStart: clock.startedAt,
+      progress: { ...dailyProgress(previous.progress, clock.startedAt, refreshedDay), feedingDone: false, storyDone: false },
     }));
   };
   const update = (patch: Partial<PlannerForm>) => setView(previous => ({
     ...previous, form: { ...form, ...patch }, defaultsVersion: DEFAULTS_VERSION, calculatedDay: null, calculation: undefined, persistenceError: undefined,
   }));
-  const completeToday = (patch: Partial<typeof progress>) => {
+  const updateLockedCare = (value: string) => {
+    const refreshedNow = Date.now();
+    setNow(refreshedNow);
+    if (clock.startedAt !== null && (clock.startedAt > refreshedNow || raisingDayAt(clock.startedAt, refreshedNow) !== currentDay)) {
+      setDailyNotice("The raising day changed. Check the trainer's scheduled care for the new day before correcting it.");
+      return;
+    }
+    const careId = Number(value);
+    if (value === "" || !RAISING.plans.some(entry => entry.id === careId
+      && (entry.id === 0 || entry.id >= 2 && currentDay + 1 >= careAvailableDay(entry.id) + 2))) {
+      setDailyNotice("Choose a valid activity for tomorrow's scheduled care.");
+      return;
+    }
+    setView(previous => ({
+      ...previous, arrangedCare: recordArrangedCare(previous.arrangedCare, clock.startedAt, currentDay + 1, currentDay + 1, careId),
+      daily: previous.daily ? { ...previous.daily, feedingInputs: undefined } : undefined,
+      calculatedDay: null, calculation: undefined, persistenceError: undefined,
+    }));
+    setDailyNotice("Tomorrow's locked care recorded. Recalculate using your current reports.");
+  };
+  const confirmCare = (careKey: string | null) => {
     const refreshedNow = Date.now();
     setNow(refreshedNow);
     if (clock.startedAt === null || clock.startedAt > refreshedNow || raisingDayAt(clock.startedAt, refreshedNow) !== currentDay) {
-      setDailyNotice("The raising day changed. Review the current day's checklist before marking an action.");
+      setDailyNotice("The raising day changed. Review the current day's care recommendation before confirming it.");
       return;
     }
-    setDailyNotice(patch.careKey !== undefined
-      ? patch.careKey === null ? "Care schedule check cleared." : "Care schedule marked as checked for today."
-      : "Marked for today. Before recalculating, update the trainer descriptions after any actions you have done. Finished feeding and story activities will not be recommended again today.");
+    setDailyNotice(careKey === null ? "Care schedule confirmation cleared." : "Care schedule confirmed.");
     setView(previous => ({
-      ...previous, progress: { ...progress, ...patch }, persistenceError: undefined,
-      ...(patch.careKey === undefined ? { calculatedDay: null, calculation: undefined } : {}),
+      ...previous, progress: { ...progress, careKey }, persistenceError: undefined,
+      arrangedCare: care ? recordArrangedCare(previous.arrangedCare, clock.startedAt,
+        care.firstDay, care.lastDay, careKey === null ? null : care.careId) : previous.arrangedCare,
     }));
   };
   const saveStart = (startedAt: number | null) => {
@@ -227,7 +280,7 @@ export default function ChocoboRaisingPlanner() {
     } catch (error) {
       console.error("Unable to save the raising start time.", error);
       setStartError("Unable to save the egg start time. The previous start time is unchanged.");
-      return;
+      return false;
     }
     setClock({ startedAt, error: null });
     setDraftStart(startedAt === null ? "" : localRaisingStart(startedAt));
@@ -235,10 +288,79 @@ export default function ChocoboRaisingPlanner() {
     setNow(Date.now());
     setDailyNotice(null);
     setView(previous => ({
-      form: previous.form, defaultsVersion: DEFAULTS_VERSION, calculatedDay: null,
+      form: clock.startedAt !== startedAt && previous.form.feedingReport
+        ? { ...previous.form, feedingReport: { ...previous.form.feedingReport, events: undefined } } : previous.form,
+      defaultsVersion: DEFAULTS_VERSION, calculatedDay: null,
       daily: previous.daily?.startedAt === startedAt ? previous.daily : undefined,
       progress: previous.progress?.startedAt === startedAt ? previous.progress : undefined,
+      arrangedCare: previous.arrangedCare?.startedAt === startedAt ? previous.arrangedCare : undefined,
     }));
+    return true;
+  };
+  const beginNamedStart = (startedAt: number) => {
+    if (savedStartError) {
+      setStartError(savedStartError);
+      return;
+    }
+    setPendingStart(startedAt);
+    setSaveNameDraft("");
+    setDraftStart(localRaisingStart(startedAt));
+    setStartError(null);
+  };
+  const saveNamedStart = () => {
+    if (pendingStart === null) return;
+    const name = saveNameDraft.trim();
+    if (!name) {
+      setStartError("Enter a name for this saved egg time.");
+      return;
+    }
+    if (savedStarts.some(entry => entry.name.toLowerCase() === name.toLowerCase())) {
+      setStartError("A saved egg time with that name already exists. Choose a different name.");
+      return;
+    }
+    const entries = [...savedStarts, { name, startedAt: pendingStart }];
+    try {
+      saveJson(RAISING_SAVED_STARTS_KEY, entries);
+    } catch (error) {
+      console.error("Unable to save the named raising start time.", error);
+      setStartError("Unable to save the named egg time. Check this device's browser storage and try again.");
+      return;
+    }
+    setSavedStartState({ entries, error: null });
+    const saved = saveStart(pendingStart);
+    setPendingStart(null);
+    setSaveNameDraft("");
+    if (saved) setSelectedStartName(name);
+  };
+  const selectSavedStart = (name: string) => {
+    if (!name) {
+      setSelectedStartName("");
+      return;
+    }
+    const entry = savedStarts.find(saved => saved.name === name);
+    if (entry && saveStart(entry.startedAt)) setSelectedStartName(entry.name);
+  };
+  const requestDeleteSavedStart = () => {
+    if (savedStarts.some(entry => entry.name === selectedStartName)) setPendingDeleteName(selectedStartName);
+  };
+  const deleteSavedStart = () => {
+    const entry = savedStarts.find(saved => saved.name === pendingDeleteName);
+    if (!entry) {
+      setPendingDeleteName(null);
+      return;
+    }
+    const entries = savedStarts.filter(saved => saved.name !== entry.name);
+    try {
+      saveJson(RAISING_SAVED_STARTS_KEY, entries);
+    } catch (error) {
+      console.error("Unable to delete the named raising start time.", error);
+      setStartError("Unable to delete the saved egg time. Check this device's browser storage and try again.");
+      return;
+    }
+    setSavedStartState({ entries, error: null });
+    setSelectedStartName("");
+    setPendingDeleteName(null);
+    if (clock.startedAt === entry.startedAt) saveStart(null);
   };
   const saveManualStart = () => {
     let startedAt: number;
@@ -248,25 +370,30 @@ export default function ChocoboRaisingPlanner() {
       setStartError(error instanceof Error ? error.message : "Invalid egg start time.");
       return;
     }
-    saveStart(startedAt);
+    beginNamedStart(startedAt);
   };
   const toggleAbility = (key: "desiredAbilities" | "knownAbilities", name: string) =>
     update({ [key]: form[key].includes(name) ? form[key].filter(entry => entry !== name) : [...form[key], name] });
   const riding = plan ? ridingEstimate(plan.result, plan.finalAbilities.includes("Gallop"), plan.finalAbilities.includes("Canter")) : null;
   const schedule = view.daily?.startedAt === clock.startedAt && view.daily.plannedDay <= currentDay ? view.daily : undefined;
-  const today = schedule?.days.find(step => step.day === currentDay);
-  const todayStory = RAISING_ABILITIES.find(ability => ability.name === today?.story);
   const care = schedule ? todayCare(schedule, currentDay) : null;
   const futureDays = plan?.days.filter(step => step.day > currentDay) ?? [];
+  const todayPlan = plan?.days.find(step => step.day === currentDay);
+  const todayStory = RAISING_ABILITIES.find(ability => ability.name === todayPlan?.story);
   const foodTotals = plan ? trainingFoodTotals(plan.days) : [];
   const canComplete = clock.startedAt !== null && !futureStart && currentDay <= LAST_RAISING_DAY && !isCalculating;
   const report = feedingReport(form, currentDay);
-  const reportError = validateFeedingReport(report, currentDay);
+  const health = healthGuidance(report, currentDay);
+  const healthFirst = needsHealthAttention(report);
+  const healthActions = health.careActions.length > 0 && <ul aria-label="Non-food recovery actions">
+    {health.careActions.map(action => <li key={action}>{action}</li>)}
+  </ul>;
+  const reportEvents = raisingEventGuidance(report, currentDay);
+  const eventInstructions = reportEvents.length > 0 && <ul aria-label="Report events and reminders">
+    {reportEvents.map(message => <li key={message}>{message}</li>)}
+  </ul>;
+  const separateDays = futureDays.filter(step => step.day === currentDay + 1 || raisingMilestoneGuidance(step.day).length > 0).map(step => step.day);
   const updateReport = (patch: Partial<FeedingReport>) => update({ feedingReport: { ...report, ...patch, day: currentDay } });
-  const feedingIsCurrent = schedule?.feedingReport?.day === currentDay
-    && schedule.feedingReport.affection === report.affection && schedule.feedingReport.fullness === report.fullness
-    && schedule.feedingReport.condition === report.condition && schedule.feedingInputs === feedingInputKey(form, report);
-
   return <section className="raising-planner" aria-label="Chocobo goal planner" style={styles.subCard}>
     <h4>Plan my chocobo</h4>
     <details>
@@ -277,18 +404,18 @@ export default function ChocoboRaisingPlanner() {
         <li><strong>Choose Build preset.</strong> Digging is the default, with Bore + Burrow and an Endurance/Receptivity focus. Racing is the community starter build with Gallop + Canter. Circuit is a specialized community build for an Elm saddle and NPC-heavy competition, not a universal best racer. Racing availability and effects are not verified for the live ruleset. Open Why these build stats and abilities? beside the selector to see each build's targets, tradeoffs and sources.</li>
         <li><strong>Enter your bird's current reports.</strong> Read today's stable care report, then select each stat description before doing the feeding and stories you want the app to plan. For example, Impressive Discernment means 160-191 points; the estimate starts at 160, not a measured exact value. Advanced: exact current stats is optional and off by default. Mark every already-learned or inherited ability under Already learned (occupies a slot), even if it differs from the preset. Only two abilities fit; selecting desired abilities does not teach them in game.</li>
         <li><strong>Adjust goals only if needed.</strong> A preset fills in minimum final stats, desired abilities and Most important stat. Editing those goals changes the selector to Custom goals. Applying another preset keeps your current reports, exact-stat mode, learned abilities and egg time. Zero means no minimum, 224 starts SS, and 255 is the raw maximum; the four targets must fit the {RAISING.settings.statGrowthCap}-point cap. Most important stat guides the search if a complete route cannot be found; it does not automatically maximize that stat.</li>
-        <li><strong>Calculate and read the estimate.</strong> Press Calculate plan for day N below the inputs, just above the divider before Estimated plan. The button shows the current raising day. Changing an input cancels the old calculation but keeps the saved daily checklist. Start with What to do today: it shows today's food, story attempt and care to arrange with the trainer. The future timeline below covers later days through day {LAST_RAISING_DAY}. Check the ability-preparation steps and any partial-route warning too. Do not lower Discernment until the selected abilities are actually learned, even if the estimate assumes learning has finished.</li>
+        <li><strong>Calculate and read the estimate.</strong> Press Calculate plan for day N below the inputs, just above the divider before Estimated plan. Each calculation simulates the start of the current day: no feeding, stories or treatment done yet. Start with the table's Today row. Later rows cover the forecast through day {LAST_RAISING_DAY}. Check the ability-preparation steps and any partial-route warning too. Do not lower Discernment until the selected abilities are actually learned, even if the estimate assumes learning has finished.</li>
       </ol>
       <p><strong>Read quantities as totals, not a daily diet.</strong> Food counts mean items actually eaten, not days or one large trade. Care counts mean executed training days. Follow the dated rows and allow for hunger, health, energy, story encounters, locked plans and retirement; do not apply the whole summary at once.</p>
       <h4>How often should I check in?</h4>
       <p><strong>Recommended routine: visit the home stable and check this guide once per raising day</strong> while actively raising the bird. That is one {RAISING.settings.dayLength / 3600}-hour period from egg hand-in, not every Vana'diel day or every hour. You do not need to keep the app open.</p>
       <ol>
         <li><strong>Read the report, then plan today's remaining actions.</strong> Check health, affection, hunger and the trainer's stat descriptions. Enter those reports and press Calculate plan for day N above the Estimated plan divider. This works even when an estimate is already displayed and uses the current device time. Recalculate even if the descriptions stayed the same: the available time has changed. An unchanged description does not mean no points were gained; do not enter the forecast's numbers as measured stats or reset the egg hand-in time.</li>
-        <li><strong>Use What to do today and check off finished activities.</strong> The checklist is saved on this device, so there is nothing to write down. Follow the food and story advice only if hunger, health, energy and Discernment allow. Check Feeding finished for today when you will not give any more food, and Story activities finished for today after the attempt, even if it fails. You can also check them when skipping an activity, or if you did it before opening the app. Refreshing will not recommend another completed activity that day. Mark an ability learned only when it actually succeeds.</li>
-        <li><strong>Check the trainer's schedule.</strong> Care to arrange today appears only when the saved plan has a future care block to prepare. For example, on day 20 you can arrange care for day 22 onward; day 21 is already decided. Check what is already scheduled in game and only change future activities if needed, then check Care schedule checked / arranged. The app cannot see or change the trainer's schedule, and it does not feed your bird.</li>
+        <li><strong>Follow today's table row.</strong> This is a start-of-day simulation, not a completion log. Follow it only if hunger, health, energy and Discernment allow. Recalculating does not remember actions or medicine already given; do not repeat them just because they appear again. Mark an ability learned only when it actually succeeds.</li>
+        <li><strong>Check the trainer's schedule.</strong> Today's care cell shows any future care block to prepare. For example, on day 20 you can arrange care for day 22 onward; day 21 is already decided. Check what is already scheduled in game and only change future activities if needed, then use Confirm care schedule. The app cannot see or change the trainer's schedule, and it does not feed your bird.</li>
       </ol>
       <p><strong>Check again sooner if something changes:</strong> an ability is learned, a stat description changes, illness or hunger prevents a planned action, or you change a goal. You do not need to recalculate after every individual food item; finish the day's routine first unless a change affects what is safe to do next.</p>
-      <p><strong>Leaving the app open:</strong> the raising day updates automatically, and What to do today displays that day's saved instructions with fresh checkboxes. You can also use Calculate plan for day N to read the device clock immediately and replace the plan after updating your reports. It keeps your egg time, goals, learned abilities and that day's completion marks. Within the same 24-hour period, the raising day stays the same. After doing any actions, update your current reports before recalculating; checked activities are excluded from today's new estimate.</p>
+      <p><strong>Leaving the app open:</strong> the raising day updates automatically. Use Calculate plan for day N to read the device clock immediately and replace the plan. It keeps your egg time, goals, learned abilities and confirmed care. Within the same 24-hour period, the raising day stays the same. Enter the reports for the start of the day you are simulating.</p>
       <p><strong>If you miss a day:</strong> raising time does not pause. Queued care and elapsed-day reports catch up at the next home-stable visit, but missed feeding and hands-on actions are not performed for you. Review the reports, update the guide and recalculate from the current age. Do not force-feed extra food to make up missed days.</p>
       <h4>What is a care plan?</h4>
       <p>A care plan is the daily routine you ask the stable trainer to carry out for your chocobo. You choose an activity and how many days it should run; the trainer performs it as raising days advance. Calculating a plan in this app does not queue anything in game.</p>
@@ -298,7 +425,7 @@ export default function ChocoboRaisingPlanner() {
         <li><strong>Hands-on activities:</strong> you choose a short, regular or long walk, tell a story, or perform another action. These use energy for encounters, stories and other effects. The Take a Walk care plan is not the same as taking a hands-on walk.</li>
       </ul>
       <p><strong>Examples:</strong> Take a Walk and Carry Packages train Strength and Endurance; Listen to Music trains Discernment and Receptivity; Exercise in a Group focuses on Endurance. Rest helps recovery instead of building stats. Availability depends on the bird's growth stage.</p>
-      <p>You can queue four care-plan blocks of 1-7 days each. Plan 1 is the first editable block; Plan 2 runs after Plan 1 finishes, not two days from now. A plan selected on day N first affects results on day N + 2, because the next day's plan is already locked. Care to arrange today gives the activity and duration to set in Plan 1 if those future days are not already correct. Do not add Basic Care days to cover the delay. Use the timeline's queue-by dates to arrange later blocks with the trainer, and recheck them if you change an earlier block's duration. Empty blocks refill with Basic Care. Good and poor results change the amount of training gained; keep the bird healthy and its affection up.</p>
+      <p>You can queue four care-plan blocks of 1-7 days each. Plan 1 is the first editable block; Plan 2 runs after Plan 1 finishes, not two days from now. A plan selected on day N first affects results on day N + 2, because the next day's plan is already locked. Today's table row gives the activity and duration to set in Plan 1 if those future days are not already correct. Do not add Basic Care days to cover the delay. Use the timeline's queue-by dates to arrange later blocks with the trainer, and recheck them if you change an earlier block's duration. Empty blocks refill with Basic Care. Good and poor results change the amount of training gained; keep the bird healthy and its affection up.</p>
       <h4>How often can I feed it?</h4>
       <p>You can feed more than one item in a day. Trade food to your stable trainer: up to four items can be eaten per trade, not per day. More trades are possible, but fullness is the practical limit. Each eaten item applies its own effects; negative stat changes stop at zero, with no hidden deficit.</p>
       <p>Fullness runs from 0 to 255. Eating an item while already at 224 or higher counts as force-feeding. The check happens before each item, including items in the same trade. Force-feeding flags a {RAISING.forcedFeedIllnessChance}% stomachache-onset chance at the next rollover. Feed one item at a time and check the trainer's response rather than forcing more food for faster stat gains.</p>
@@ -314,107 +441,61 @@ export default function ChocoboRaisingPlanner() {
       <p><strong>Getting hungry again:</strong> a newly hatched chick starts full. Chicks lose fullness at the daily update according to energy spent; adolescent and adult birds reset to starving at rollover in the pinned model. Raising days last 24 Earth hours, anchored to egg hand-in rather than midnight or the shorter Vana'diel day. Reports are processed when visiting the home stable. Eggs cannot be fed.</p>
       <p><strong>Calculator food totals are not days:</strong> a result of 80 Zegham Carrots means 80 items actually eaten, not 80 days. Food totals include both training and affection meals. Follow each day's order, one item per trade: mixed trades are reordered by the game. Check hunger between items and stop at completely full.</p>
       <p><strong>Affection and stat training together:</strong> the search compares single foods and two-food mixtures, aiming to keep affection in the highest band ({AFFECTION_TARGET}-255) while meeting your chosen build. It does not automatically feed Azouph Greens: training carrots also raise affection, while greens, suitable pastes or Cupid Worms can help with recovery. Stat losses and the shared stat cap still apply. Random food bonuses are not credited as guaranteed gains.</p>
-      <p><strong>Optional non-yellow goal:</strong> choose the original egg warmth and check Avoid a yellow bird. For non-bred eggs, the calculator follows the pinned hidden-gene distribution through each worm roll. It prioritizes top-band affection, then non-yellow odds, then stat training, comparing safe ordered meals including Parasite Worms before day {RAISING.settings.daysToAdolescent}. Zero worms can be best for a favorable egg. This is a bounded search under the displayed care and hunger assumptions, not proof of an optimal schedule or a guaranteed color.</p>
+      <p><strong>Optional non-yellow goal:</strong> choose the original egg warmth and check Avoid a yellow bird. For non-bred eggs, the calculator follows the pinned hidden-gene distribution through each worm roll. It prioritizes non-yellow odds, then balances training progress and affection, comparing safe ordered meals including Parasite Worms before day {RAISING.settings.daysToAdolescent}. Zero worms can be best for a favorable egg. This is a bounded search under the displayed care and hunger assumptions, not proof of an optimal schedule or a guaranteed color.</p>
       <p>Record the total Parasite Worms actually eaten before adolescence, including today's worms, before recalculating. Planned meals and Feeding finished for today never increase that count automatically: the checkbox can also mean you skipped feeding. Missed worms do not count. For a different bird, update the egg selection and reset the count. Bred eggs and unknown egg origins need different genetic information and are not supported by this estimate.</p>
       <p><strong>Today's reports matter:</strong> select the trainer's current hunger and affection descriptions and the bird's condition. Calculate becomes available when all required fields are valid. These three fields reset on a new raising day. The estimate uses the lowest affection and highest fullness in those descriptions, so it does not assume extra feeding capacity. Eggs cannot eat. Future chick meals assume only the displayed care plans, with no extra hunger from walks; actual activity and illness can change the amount. Recheck reports each day rather than forcing the future ration.</p>
+      <p><strong>Treat ailments before training:</strong> select the trainer's reported ailments at the start of the day. Guidance appears immediately below the ailments, then in today's row after calculating. Treatment details and alternatives lists other remedies. Medicine counts as food: do not give it to a completely full bird. No doses are tracked or assumed already given. Future meals require recovery and a fresh hunger check; the forecast does not include the proposed medicine's fullness. Health details reset each raising day.</p>
+      <p><strong>Report events:</strong> select events actually reported, not things you have completed. Today's row gives the next steps; age-based reminders appear on their own dated rows. Random events are not predicted and positive moods do not add unverified bonuses. Hands-on recovery and event actions are not added to the numeric forecast. Event selections reset each raising day and when changing eggs. White Handkerchief timing uses raising-report days, not Vana'diel days; its return is a trainer dialogue, not feeding. These rules follow the <a href={`${RAISING.source.repository}/blob/${RAISING.source.revision}/scripts/globals/hobbies/chocobo_raising/model.lua`} target="_blank" rel="noreferrer">pinned daily-event model</a>; live settings may differ.</p>
       <h4>One timeline through day 128</h4>
-      <p>The planner includes today's unfinished feeding and story actions, then the days through day {LAST_RAISING_DAY}. Today's care gains are already included in the reports you enter, so the model does not add them again. Day 0 is egg hand-in. Basic Care covers the egg stage; chick plans can be queued after hatching, and more plans become available at adolescence and adulthood. New care takes effect no earlier than two days after it is selected. Tomorrow's already-locked plan is assumed to be Basic Care with no random stat gain; update the reports at your next visit rather than treating that assumption as a change to the trainer's schedule.</p>
+      <p>The planner simulates today's feeding, stories and treatment from the start of the day, then forecasts through day {LAST_RAISING_DAY}. Today's automatic care gains are already included in the reports you enter, so the model does not add them again. Day 0 is egg hand-in. Basic Care covers the egg stage; chick plans can be queued after hatching, and more plans become available at adolescence and adulthood. New care takes effect no earlier than two days after it is selected. Tomorrow's locked activity comes from confirmed care, or from the last calculated recommendation as an unconfirmed estimate. Correct it to match the trainer's schedule before calculating. With no saved recommendation, choose the actual activity.</p>
       <p><strong>Before day 64:</strong> the calculation includes care-plan gains and losses, balancing early training against the stats you want to keep. <strong>Days 64-128:</strong> care-plan stat losses stop automatically. Food penalties do not stop: Vomp Carrots still lower Discernment and Receptivity. You no longer choose one period or the other. Day 129 starts retirement: raising ends, but you can keep using the registered riding bird. Keep the retirement registration card and re-register its final stats.</p>
       <p className="raising-small">This is a conditional training scenario, not a guaranteed or optimal schedule. Care rows show the assumed good-day roll and its source-model chance; you cannot choose that roll in game, and poor days can halve changes. Food and care affection changes are included. Basic Care's random stat gains, random food bonuses, medical treatment and unscheduled activities are not simulated. Future days assume a healthy bird with enough energy for the listed story. Story acquisition is not timed by the calculator. A partial route is not proof that the goal is impossible. These rules come from the pinned source, and live settings may differ.</p>
     </details>
-    <p>Save your egg hand-in time, choose a build preset, then enter today's trainer reports before feeding and stories. Calculate to fill What to do today, and check off activities as you finish them. Your checklist is saved on this device; the future timeline runs through day {LAST_RAISING_DAY}.</p>
+    <p>Enter your start-of-day reports and calculate. Follow the table's Today row. Every calculation assumes no feeding, stories or treatment done yet.</p>
     <p className="raising-small">The trainer reports ranges, not exact points. Poor is the default assumption, not a report read from the game. An SS goal starts at 224; 255 is the raw maximum. Minimum final points are goals you choose, not numbers you need to read from your bird.</p>
     <div className="raising-controls">
       <label>Egg hand-in date and time (local)<input style={styles.input} type="datetime-local" step={1}
         value={draftStart} onChange={event => { setDraftStart(event.target.value); setStartError(null); }} /></label>
-      <button style={styles.buttonCompact} type="button" onClick={() => saveStart(Date.now())}>Use current time</button>
+      <button style={styles.buttonCompact} type="button" onClick={() => beginNamedStart(Date.now())}>Use current time</button>
       <button style={styles.buttonCompact} type="button" onClick={saveManualStart}>Save start time</button>
-      {(clock.startedAt !== null || clock.error) && <button style={styles.buttonCompact} type="button" onClick={() => saveStart(null)}>Clear start time</button>}
+      {pendingStart !== null && <div className="raising-controls" role="group" aria-label="Name saved egg time">
+        <label>Name for saved egg time<input style={styles.input} value={saveNameDraft}
+          onChange={event => { setSaveNameDraft(event.target.value); setStartError(null); }} /></label>
+        <button style={styles.buttonCompact} type="button" onClick={saveNamedStart}>Save named time</button>
+        <button style={styles.buttonCompact} type="button" onClick={() => {
+          setPendingStart(null);
+          setSaveNameDraft("");
+          setStartError(null);
+        }}>Cancel</button>
+      </div>}
+      <label>Saved egg times<select style={styles.select} value={selectedStartName}
+        onChange={event => selectSavedStart(event.target.value)}>
+        <option value="">Choose a saved egg time</option>
+        {savedStarts.map(entry => <option key={entry.name} value={entry.name}>{entry.name}</option>)}
+      </select></label>
+      <button style={styles.buttonCompact} type="button" disabled={!selectedStartName || !!savedStartError}
+        onClick={requestDeleteSavedStart}>Delete saved time</button>
+      {pendingDeleteName && <div role="group" aria-label="Confirm saved time deletion">
+        <p>Delete saved egg time: <strong>{pendingDeleteName}</strong>?</p>
+        <button style={styles.buttonCompact} type="button" onClick={deleteSavedStart}>Confirm delete</button>
+        <button style={styles.buttonCompact} type="button" onClick={() => setPendingDeleteName(null)}>Cancel delete</button>
+      </div>}
+      {(clock.startedAt !== null || clock.error) && <button style={styles.buttonCompact} type="button" onClick={() => {
+        if (saveStart(null)) setSelectedStartName("");
+      }}>Clear start time</button>}
     </div>
     {startError && <p role="alert" className="raising-loss">{startError}</p>}
+    {savedStartError && <p role="alert" className="raising-loss">{savedStartError}</p>}
     <p role="status">{clock.startedAt === null
       ? "No start time saved: planning a new egg at day 0."
       : <>Started {new Date(clock.startedAt).toLocaleString()}. <strong>{futureStart ? "Start time is in the future." : `Current raising day: ${currentDay}`}</strong>. {currentDay <= LAST_RAISING_DAY ? `${LAST_RAISING_DAY - currentDay} future raising days remain through day ${LAST_RAISING_DAY}.` : "Retirement has begun in the pinned settings."}</>}</p>
-    <p className="raising-small">Use the time you traded the egg, not the hatch time. The clock follows {RAISING.settings.dayLength / 3600}-hour periods and is saved on this device. Enter descriptions after today's care report, before the feeding and stories you still need to do. Changing the saved egg time starts a new checklist; mark any activities already finished before calculating.</p>
+    <p className="raising-small">Use the time you traded the egg, not the hatch time. The clock follows {RAISING.settings.dayLength / 3600}-hour periods. Save names appear in the saved egg times menu, so you can restore or delete them later. Enter descriptions after today's care report, before feeding and stories.</p>
     {view.persistenceError && <div>
       <p role="alert" className="raising-loss">{view.persistenceError}</p>
-      <button type="button" style={styles.buttonCompact} onClick={() => setView(previous => ({ ...previous, persistenceError: undefined }))}>Save current checklist again</button>
+      <button type="button" style={styles.buttonCompact} onClick={() => setView(previous => ({ ...previous, persistenceError: undefined }))}>Save current raising data again</button>
     </div>}
     {dailyNotice && <p role="status" className="raising-notice">{dailyNotice}</p>}
-    <section aria-label="Today's chocobo checklist" className="raising-today" style={styles.subCard}>
-      <h4>What to do today - raising day {currentDay}</h4>
-      {futureStart || clock.error ? <p role="alert">Correct the saved egg time before using today's checklist.</p>
-        : currentDay > LAST_RAISING_DAY ? <p>Raising has ended. Keep the registration card and register the bird's final riding stats; there are no remaining training days.</p>
-        : <>
-          <p><strong>Start at the stable:</strong> read today's care report, then check your bird's health, hunger and energy. Enter the stat descriptions the trainer gives you now.</p>
-          {!today ? <p>No saved instructions for today yet. Enter your current reports and calculate a plan. If you have already finished feeding or stories, check them off below first so the app will not recommend doing them again.</p>
-            : <p className="raising-small">These are today's tasks from your last calculated plan. If the trainer reports different stats or your bird has learned an ability, update those details below and press Calculate plan for day {currentDay}. Feeding and story activities you already checked off stay checked.</p>}
-          {currentDay < RAISING.settings.daysToChick ? <p><strong>Egg stage:</strong> check on the egg. Do not feed it or tell stories yet.</p> : <>
-            <div>
-              <h4>Feeding</h4>
-              {progress.feedingDone ? <p>Finished for today. Refreshing will not add more training food today.</p>
-                : reportError ? <p>Enter today's hunger, affection and condition below, then calculate before feeding.</p>
-                : !["healthy", "tired"].includes(report.condition) ? <p>Attend to the bird's condition first. Check the health reference below for treatment; once it can eat normally, update the reports and recalculate. Medicine also uses fullness.</p>
-                : !feedingIsCurrent ? <p>Calculate again using the updated reports to choose today's remaining meals.</p>
-                : today?.feeding ? <>
-                  <p>{today.feeding.items.length
-                    ? <>Feed <strong>{feedingSummary(today.feeding.items)}</strong>, one item per trade in this order. Check hunger between items and stop at completely full. These are remaining meals, not extra food on top of anything already given.</>
-                    : "No further food fits the fullness estimate. If the trainer reports more room, update hunger and recalculate."}</p>
-                  <p className="raising-small">Estimated affection after feeding: {today.feeding.affectionAfter}/255, using the lower end of your report. Highest band: {AFFECTION_TARGET}-255. {today.feeding.affectionAfter < AFFECTION_TARGET ? "A full recovery does not fit today's safe feeding allowance; do not force-feed to reach it." : "Further affection gains above 255 are wasted."}</p>
-                </>
-                  : <p>Calculate to see today's food recommendation.</p>}
-              {!progress.feedingDone && form.desiredAbilities.some(name => !form.knownAbilities.includes(name)) && <p className="raising-small">Still learning an ability? Do not follow a meal that would lower Discernment below its learning requirement. A saved estimate may assume the ability was learned; update your reports and recalculate if it was not.</p>}
-              <label className="raising-exact-toggle"><input type="checkbox" checked={progress.feedingDone} disabled={!canComplete}
-                onChange={event => completeToday({ feedingDone: event.target.checked })} />Feeding finished for today</label>
-            </div>
-            <div>
-              <h4>Stories</h4>
-              {progress.storyDone ? <p>Finished for today. Refreshing will not add another story attempt today.</p>
-                : reportError ? <p>Enter today's hunger, affection and condition below, then calculate before planning story activities.</p>
-                : report.condition !== "healthy" ? <p>Resume story activities when the bird is healthy, awake and has enough energy. Update its condition and recalculate first.</p>
-                : todayStory ? form.knownAbilities.includes(todayStory.name)
-                  ? <p>{todayStory.name} is already marked learned. Do not retell its story to learn it again; recalculate for the remaining abilities.</p>
-                  : <>
-                    <p><strong>Try to learn {todayStory.name} today.</strong> This is a separate hands-on action, not the Take a Walk or Act in a Play care plan.</p>
-                    <ol aria-label={`${todayStory.name} story steps`}>
-                      <li><strong>Have the {todayStory.story} story ready.</strong> This is the story's title. If you do not have it yet: {todayStory.obtain} Use hands-on walks, not the scheduled Take a Walk care plan. Long walks unlock on day {RAISING.settings.daysToAdult1}; encounters can take several walks. If you cannot get the story today, skip the attempt.</li>
-                      <li><strong>Check the bird before telling the story.</strong> It must be at least day {RAISING.settings.daysToAdolescent}, healthy and awake, with at least {RAISING.actionEnergy[50]["2"]} energy even in clear weather, and a free ability slot. Keep Discernment at {todayStory.discernment} or higher ({STAT_BANDS[statRank(todayStory.discernment)].description} or better). If it is not ready, skip the attempt and update its reports.</li>
-                      <li><strong>At the stable, choose Tell a Story, then {todayStory.story}.</strong> Make one attempt today. The pinned model gives an eligible attempt a {RAISING.learnChance}% chance to learn {todayStory.name}; learning is not guaranteed.</li>
-                      <li><strong>Record the result.</strong> If it learns {todayStory.name}, select that ability under Already learned below. If it fails, keep the story for another day. Check Story activities finished for today after the attempt, or if you are skipping it today.</li>
-                    </ol>
-                  </>
-                    : <p>{today ? "No story attempt is planned today. Collect the required stories through eligible walks as health and energy allow." : "Calculate to see whether a story attempt is planned today."}</p>}
-              <label className="raising-exact-toggle"><input type="checkbox" checked={progress.storyDone} disabled={!canComplete}
-                onChange={event => completeToday({ storyDone: event.target.checked })} />Story activities finished for today</label>
-            </div>
-            {care && <div>
-              <h4>Care to arrange today</h4>
-              <p>On day <strong>{currentDay}</strong>, arrange <strong>{trainingActionName({ kind: "care", id: care.careId })}</strong> for days <strong>{care.firstDay}-{care.lastDay}</strong>.</p>
-              <ol aria-label="Care-plan steps">
-                <li><strong>Check the trainer's existing schedule first.</strong> If those days already have this activity, leave them alone; do not restart the whole schedule.</li>
-                <li><strong>If they need changing, edit Plan 1</strong> at the stable trainer. Choose <strong>{trainingActionName({ kind: "care", id: care.careId })}</strong> and set the duration to <strong>{care.count} {care.count === 1 ? "day" : "days"}</strong>. This covers days {care.firstDay}-{care.lastDay}. Plan 2 runs after Plan 1 finishes; it is not the slot for the two-day delay.</li>
-                <li><strong>Confirm the schedule, then check the box below.</strong> If you changed Plan 1's duration, recheck later blocks against the timeline because their start days move.</li>
-              </ol>
-              <p className="raising-small">Day {currentDay + 1} is already locked; this change first affects results on day {care.firstDay}. The app assumes tomorrow's locked activity is Basic Care, but cannot read the trainer's schedule. Do not add a Basic Care block for the delay. The trainer's "Next program" can still show the locked activity after you edit Plan 1.</p>
-              <label className="raising-exact-toggle"><input type="checkbox" checked={progress.careKey === care.key} disabled={!canComplete}
-                onChange={event => completeToday({ careKey: event.target.checked ? care.key : null })} />Care schedule checked / arranged</label>
-            </div>}
-            <p className="raising-small">Check feeding and stories when you are finished for the day, including when you stop early or skip them because of the bird's condition. If you already did them before opening the app, check them before calculating. Update current reports before recalculating after actions. Uncheck only to correct a mistake; that allows new recommendations for that activity.</p>
-          </>}
-          <p className="raising-small">{view.persistenceError ? "Saving is unavailable. The checklist currently shown may not survive restarting the app."
-            : clock.startedAt === null ? "Save the egg hand-in time to record daily completion." : "Instructions and checkmarks are saved on this device. Each new raising day gets its own unchecked checklist; missed activities are not carried forward as extra feeding."}</p>
-        </>}
-    </section>
     <form id={formId} onSubmit={event => { event.preventDefault(); calculate(); }}>
-      <div className="raising-controls">
-        <label>Build preset<select style={styles.select} value={selectedPreset?.id ?? ""} onChange={event => {
-          const preset = RAISING_PRESETS.find(entry => entry.id === event.target.value);
-          if (preset) update({ target: statInputs(preset.target), desiredAbilities: [...preset.desiredAbilities], priority: preset.priority });
-        }}>
-          {RAISING_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
-          <option value="" disabled>Custom goals</option>
-        </select></label>
-      </div>
       <section aria-label="Chocobo color goal">
         <h4>Color preference</h4>
         <div className="raising-controls">
@@ -432,12 +513,18 @@ export default function ChocoboRaisingPlanner() {
               type="number" min={0} step={1} required value={form.wormsFed ?? "0"}
               onChange={event => update({ wormsFed: event.target.value })} /></label>
           </div>
-          <p className="raising-small">Affection first, then the best non-yellow odds found, then stat training. Worm meals appear in today's checklist, food totals and timeline. A favorable egg may need no worms; no color is guaranteed. Only non-bred eggs with a known warmth are supported.</p>
-          <p className="raising-small">Count only worms actually eaten before day {RAISING.settings.daysToAdolescent}, including any eaten today. Update this total before recalculating; checking Feeding finished for today does not record worms. Reset it for a new bird.</p>
           {currentDay >= RAISING.settings.daysToAdolescent && <p role="status" className="raising-notice">Plumage is already fixed. No Parasite Worms will be planned; further worms affect breeding genes only. The estimate describes historical odds, not the color you can now see.</p>}
         </>}
       </section>
-      <p className="raising-small">Presets replace your targets, desired abilities and most important stat. Current reports, exact-stat mode, already-learned abilities and egg time stay unchanged. Change any goal to customize the build.</p>
+      <div className="raising-controls">
+        <label>Build preset<select style={styles.select} value={selectedPreset?.id ?? ""} onChange={event => {
+          const preset = RAISING_PRESETS.find(entry => entry.id === event.target.value);
+          if (preset) update({ target: statInputs(preset.target), desiredAbilities: [...preset.desiredAbilities], priority: preset.priority });
+        }}>
+          {RAISING_PRESETS.map(preset => <option key={preset.id} value={preset.id}>{preset.label}</option>)}
+          <option value="" disabled>Custom goals</option>
+        </select></label>
+      </div>
       {selectedPreset && selectedPreset.id !== "digging" && <p className="raising-notice">Community racing goal only: racing is marked disabled in the pinned public source. Confirm live availability before raising a racer. This calculator predicts training, not race wins.</p>}
       {selectedPreset?.id === "circuit" && <p className="raising-notice">Circuit assumes an Elm saddle and NPC-heavy competition. Its low Endurance is a deliberate equipment-dependent tradeoff. Confirm saddle availability and effects before committing; saddle bonuses are not included in the training plan. Trainer descriptions cannot confirm the exact 254/34/224/128 allocation.</p>}
       <details>
@@ -461,17 +548,37 @@ export default function ChocoboRaisingPlanner() {
               Stat roles follow the <a href="https://www.bg-wiki.com/ffxi/Chocobo_Racing" target="_blank" rel="noreferrer">retail racing reference</a>. The <a href={`${RAISING.source.repository}/blob/${RAISING.source.revision}/scripts/globals/chocobo_racing.lua`} target="_blank" rel="noreferrer">pinned racing implementation</a> marks racing disabled. Treat racing advice as secondary guidance, not confirmed live-server mechanics. No saddle, racing-item or training-token bonuses are applied to training calculations.</p>}
         </section>)}
       </details>
+      {currentDay + 1 >= RAISING.settings.daysToChick + 2 && currentDay < LAST_RAISING_DAY && <section aria-label="Tomorrow's locked care">
+        <h4>Tomorrow's locked care - day {currentDay + 1}</h4>
+        <div className="raising-controls">
+          <label>Already-scheduled activity<select style={styles.select} required value={lockedCare.careId ?? ""}
+            onChange={event => updateLockedCare(event.target.value)}>
+            <option value="" disabled>Choose the trainer's scheduled activity</option>
+            {RAISING.plans.filter(entry => entry.id === 0 || entry.id >= 2 && currentDay + 1 >= careAvailableDay(entry.id) + 2)
+              .map(entry => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+          </select></label>
+        </div>
+        <p className="raising-small">{lockedCare.source === "confirmed"
+          ? "Recorded as arranged or corrected by you."
+          : lockedCare.source === "estimated"
+            ? "Unconfirmed estimate from your last calculated plan, not a report from the trainer."
+            : "No saved care covers tomorrow. Select the activity already queued with the trainer."} Correct this if it differs in game. Changing this field records the existing schedule; it does not change the trainer's locked activity.</p>
+      </section>}
       {currentDay >= RAISING.settings.daysToChick && currentDay <= LAST_RAISING_DAY && <section aria-label="Today's feeding reports">
         <h4>Today's hunger, affection and condition</h4>
         <div className="raising-controls">
           <label>Affection report<select style={styles.select} required value={report.affection < 0 ? "" : report.affection}
             onChange={event => updateReport({ affection: event.target.value === "" ? -1 : Number(event.target.value) })}>
             <option value="" disabled>Choose the trainer's description</option>
+            {report.affection >= 0 && !AFFECTION_REPORTS.some(entry => entry.min === report.affection)
+              && <option value={report.affection}>Saved estimate: {report.affection}/255</option>}
             {AFFECTION_REPORTS.map(entry => <option key={entry.min} value={entry.min}>{entry.label} ({entry.min}-{entry.max})</option>)}
           </select></label>
           <label>Hunger report<select style={styles.select} required value={report.fullness < 0 ? "" : report.fullness}
             onChange={event => updateReport({ fullness: event.target.value === "" ? -1 : Number(event.target.value) })}>
             <option value="" disabled>Choose the trainer's description</option>
+            {report.fullness >= 0 && !HUNGER_REPORTS.some(entry => entry.max === report.fullness)
+              && <option value={report.fullness}>Saved estimate: {report.fullness}/255</option>}
             {HUNGER_REPORTS.map(entry => <option key={entry.max} value={entry.max}>{entry.label}</option>)}
           </select></label>
           <label>Condition / activity readiness<select style={styles.select} required value={report.condition === "unknown" ? "" : report.condition} onChange={event => {
@@ -482,7 +589,39 @@ export default function ChocoboRaisingPlanner() {
             {BIRD_CONDITIONS.map(entry => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
           </select></label>
         </div>
-        <p className="raising-small">Use the trainer's latest reports. If you already fed the bird, gave it medicine or did activities today, check its reports again afterward. Fill in all three fields to calculate; they reset on a new raising day.</p>
+        <fieldset><legend>Ailments reported by the trainer (select all that apply)</legend>
+          {BIRD_AILMENTS.map(ailment => <label key={ailment.id} className="raising-exact-toggle">
+            <input type="checkbox" checked={report.ailments?.includes(ailment.id) ?? false}
+              onChange={event => updateReport({ ailments: event.target.checked
+                ? [...(report.ailments ?? []), ailment.id] : (report.ailments ?? []).filter(id => id !== ailment.id) })} />
+            {ailment.label}
+          </label>)}
+        </fieldset>
+        {!plan && (healthFirst || report.condition === "tired") && <div role="status" aria-label="Ailment guidance">
+          <p>{health.treatmentAction}</p>{healthActions}
+        </div>}
+        <details aria-label="Health and treatment">
+          <summary>Treatment details and alternatives</summary>
+          {health.messages.map(message => <p key={message}>{message}</p>)}
+          {health.remedies.length > 0 && <>
+            <p>{health.canTreat ? "Choose one matching treatment, not one per ailment." : "Reference only; do not feed these items now."}</p>
+            <ul>{health.remedies.map(ailment => <li key={ailment.id}><strong>{ailment.label}:</strong>{" "}
+              {ailment.foods.map(food => food.name).join("; ")}.
+            </li>)}</ul>
+          </>}
+          <p>Rest gives a 50% cure roll per bad condition in the pinned model and induces sleep. New care starts two days later, not immediately. Do not use extra walks to force hunger in an ill bird. Live settings may differ.</p>
+        </details>
+        <fieldset><legend>Other events in the trainer's report (select all that apply)</legend>
+          {RAISING_EVENTS.map(event => <label key={event.id} className="raising-exact-toggle">
+            <input type="checkbox" checked={report.events?.includes(event.id) ?? false}
+              onChange={change => updateReport({ events: change.target.checked
+                ? [...(report.events ?? []).filter(id => !(event.id === "whistle-search" && id === "whistle-found")
+                  && !(event.id === "whistle-found" && id === "whistle-search")), event.id]
+                : (report.events ?? []).filter(id => id !== event.id) })} />
+            {event.label}
+          </label>)}
+        </fieldset>
+        <p className="raising-small">Use reports from before today's feeding, stories and medicine. Fill in all three fields; they reset on a new raising day.</p>
         <p className="raising-small">A story needs at least {RAISING.actionEnergy[50]["2"]} energy to start, even in clear weather. If the bird is healthy but cannot afford a story, choose "Healthy, but too tired for activities." The planner can still recommend food, but will skip today's story attempt.</p>
       </section>}
       <details>
@@ -537,6 +676,12 @@ export default function ChocoboRaisingPlanner() {
           <input type="checkbox" checked={form.knownAbilities.includes(ability.name)} onChange={() => toggleAbility("knownAbilities", ability.name)} />{ability.name}
         </label>)}</fieldset>
       </div>
+      {care && <p className="raising-small">
+        <button type="button" style={styles.buttonCompact} aria-label="Confirm recommended care schedule"
+          disabled={!canComplete} onClick={() => confirmCare(progress.careKey === care.key ? null : care.key)}>
+          {progress.careKey === care.key ? "Clear care confirmation" : "Confirm care schedule"}
+        </button>{" "}{trainingActionName({ kind: "care", id: care.careId })}, days {care.firstDay}-{care.lastDay}
+      </p>}
       {error && <p role="alert" className="raising-loss">{error}</p>}
     </form>
     <div className="raising-controls">
@@ -555,9 +700,11 @@ export default function ChocoboRaisingPlanner() {
           : <p>No plan available for the current day and inputs. Calculate a plan for raising day {currentDay} to see your estimated training timeline here.</p>}
         {error && <p className="raising-small">Before calculating: {error}</p>}
       </>}
+      {eventInstructions}
     </div>}
     {plan && <div className="raising-plan-result" aria-live="polite">
       <h4>Estimated plan</h4>
+      {healthFirst && <p role="status" className="raising-notice"><strong>Hypothetical recovery forecast, not feeding instructions.</strong> Future meals and stories require confirmed recovery and fresh hunger/energy reports. Proposed medicine is not included in the fullness forecast. Skip training while the bird remains unwell.</p>}
       <p>{useExactStats ? "Starting points (exact overrides)" : "Starting-point estimate (lower ends of the selected ranges)"}: <strong>{statSummary(input.current)}</strong>. This is a scenario, not a measurement of your bird.</p>
       {colorPlan && <section aria-label="Estimated non-yellow strategy">
         <h4>{colorPlan.locked ? "Color already locked" : "Non-yellow feeding strategy"}</h4>
@@ -573,19 +720,20 @@ export default function ChocoboRaisingPlanner() {
         <p className="raising-small">{colorPlan.locked
           ? "These are historical model probabilities, not a new chance to change the bird's visible color."
           : colorPlan.plannedWorms === 0
-            ? "No beneficial worm meal was found within the remaining safe feeding opportunities while prioritizing affection. This may be because the egg already has better odds without worms."
+            ? "No beneficial worm meal was found within the remaining safe feeding opportunities. This may be because the egg already has better odds without worms."
             : "Follow the listed meal order and recheck hunger between items. Do not add worms on top of these meals or force-feed to meet the estimated count."} The calculation averages over hidden genes and assumes the recorded egg and worm history are correct. It is not a measurement or a guarantee; live settings may differ.</p>
-        <p className="raising-small">Best route found by a bounded search: top-band affection takes priority over color, and color takes priority over stat training. Future chick hunger assumes scheduled care only. Recalculate after reports or missed meals; training goals may take longer or remain incomplete.</p>
+        <p className="raising-small">Best route found by a bounded search: non-yellow odds come first, then training progress and affection are balanced. Future chick hunger assumes scheduled care only. Recalculate after reports or missed meals; training goals may take longer or remain incomplete.</p>
       </section>}
       <p className="raising-notice" aria-label="Estimated food totals"><strong>Total food needed for this plan:</strong>{" "}
         {foodTotals.length ? foodTotals.map(food => `${food.count} ${food.name}`).join("; ") : "No food needed in this estimate"}.
-        {" "}Includes today's remaining planned food and all future meals through day {LAST_RAISING_DAY}, including affection meals. Use these estimates to plan gardening; recalculate after daily reports. Already-completed feeding is excluded.
+        {" "}Includes today's planned food and all future meals through day {LAST_RAISING_DAY}, including affection meals. Use these estimates to plan gardening; recalculate after daily reports.
+        {healthFirst && " Hypothetical totals conditional on recovery, not a medicine or feeding prescription."}
       </p>
       <p className="raising-notice">Conditional scenario, not guaranteed results: today's care is already in your reports. Future care rows assume the displayed good-day roll ({RAISING.planStatPoints.join(" or ")} points per arrow); the listed chance is a source-model estimate, not a live guarantee. Food and care affection changes are included, but random food bonuses and Basic Care's random stat gains are not. Chick hunger assumes scheduled care only, with no extra hunger credited for today's unmeasured energy use. Actual walks, illness and recovery can change the plan. Recalculate from reports each day.</p>
       {plan.days.some(day => day.day >= RAISING.settings.daysToChick && day.feeding && day.feeding.affectionAfter < AFFECTION_TARGET)
         && <p role="status" className="raising-notice">Some days remain below the highest affection band in this estimate. Safe feeding capacity or the reported condition limits recovery. Do not force-feed; prioritize the next safe recovery meal and check actual care results.</p>}
-      {plan.pending.length > 0 && <section>
-        <h4>Ability preparation and learning checkpoint</h4>
+      {plan.pending.length > 0 && <details>
+        <summary>Ability preparation and learning checkpoint</summary>
         <p>Build at least <strong>{plan.threshold} Discernment</strong>, then keep it at or above that level until the selected abilities are learned. The timeline includes early care gains and food together; do not add a separate 80-carrot preparation phase.</p>
         <ol>{plan.pending.map(ability => <li key={ability.name}>
           <strong>{ability.name}: {ability.story}</strong> - requires {ability.discernment} DSC after the story's +1. {ability.obtain}
@@ -593,31 +741,60 @@ export default function ChocoboRaisingPlanner() {
         <p>Tell stories from adolescence (day {RAISING.settings.daysToAdolescent}); long walks require adulthood (day {RAISING.settings.daysToAdult1}). This scenario starts attempts no earlier than day {plan.firstStoryDay}, assuming the stories have been collected, and budgets one eligible attempt per day for {STORY_ATTEMPTS_95} days per missing ability. Each attempt has a {RAISING.learnChance}% chance; {STORY_ATTEMPTS_95} attempts gives {(storyLearningProbability(STORY_ATTEMPTS_95) * 100).toFixed(1)}% for <strong>one ability</strong>, not a guarantee or a combined chance for both.</p>
         <p>Failed attempts retain the story. Successful learning consumes it. Stop retelling a learned ability's story: that can give inspiration instead of a new ability.</p>
         <p className="raising-small">For stat arithmetic, each ability is assumed learned on the last of its {STORY_ATTEMPTS_95} reserved attempts; every attempt adds capped +1 DSC. Real learning can happen earlier or later. If a story is not yet available or the ability is still missing, do not follow later steps that lower DSC: keep feeding suitable maintenance food such as Azouph Greens, maintain the threshold, and recalculate. Mark abilities already learned to avoid reserving another full allowance.</p>
-      </section>}
+      </details>}
       {!plan.pending.length && <p>No new ability learning is required for these selections. Already-learned abilities are retained.</p>}
       <section>
-        <h4>Estimated training timeline: {futureDays.length ? `days ${currentDay + 1}-${LAST_RAISING_DAY}` : "no future raising days"}</h4>
-        {futureDays.some(step => step.story) && <p>Daily care and story attempts are separate tasks. The care plan trains stats; it does not teach the ability in the Story attempts column. On a story day, follow the numbered instructions under Stories in What to do today.</p>}
+        <h4>Estimated training timeline: {futureDays.length ? `days ${currentDay}-${LAST_RAISING_DAY}` : `day ${currentDay}`}</h4>
+        <p>Today starts before feeding, stories and treatment. Later rows are forecasts, not extra actions for today.</p>
+        {healthFirst && <p className="raising-notice">Future meals after today's treatment row are conditional on confirmed recovery and a fresh hunger check. This forecast does not predict when the illness will end.</p>}
         {!plan.complete && <p role="alert" className="raising-loss">No complete route was found within the remaining days and this model. This does not prove the goals are impossible. Partial progress only: {plan.remaining.join("; ")}. Check the start time, trainer descriptions or exact overrides, and learned abilities, or revise your goals.</p>}
-        {futureDays.length ? <div className="raising-table-wrap">
+        <div className="raising-table-wrap">
           <table aria-label="Goal training steps">
-            <thead><tr><th>Raising days</th><th>Daily care / assumed roll</th><th>Food per day, in feeding order</th><th>Story attempts</th><th>Modeled stats afterward</th></tr></thead>
-            <tbody>{groupTrainingDays(futureDays).map(step => <tr key={step.day}>
+            <thead><tr><th>Raising days</th><th>Daily care / assumed roll</th><th>Food / treatment, in feeding order</th><th>Story attempts</th><th>Modeled stats afterward</th></tr></thead>
+            <tbody>
+              <tr aria-label="Today's remaining actions">
+                <th scope="row">Today - day {currentDay}{clock.startedAt !== null && <span className="raising-stat-purpose">{new Date(clock.startedAt + currentDay * RAISING.settings.dayLength * 1000).toLocaleDateString()}</span>}</th>
+                <td>Today's care is already in your reports.
+                  {care && <span className="raising-stat-purpose">{healthFirst ? "After reviewing recovery, check" : "Check"} Plan 1: {trainingActionName({ kind: "care", id: care.careId })}, {care.count} days ({care.firstDay}-{care.lastDay}). Leave it unchanged if already correct.</span>}
+                </td>
+                <td className="raising-description">{currentDay < RAISING.settings.daysToChick ? "Egg stage: no food or medicine."
+                  : healthFirst ? health.treatmentAction
+                  : todayPlan?.feeding?.items.length ? `Feed ${feedingSummary(todayPlan.feeding.items)}, one at a time. Stop at completely full.`
+                  : "Full in this estimate; recheck hunger."}
+                  {healthFirst && <span className="raising-stat-purpose">No stat food or Parasite Worms while unwell.</span>}
+                  {healthActions}
+                  {eventInstructions}
+                </td>
+                <td>{currentDay < RAISING.settings.daysToChick ? "Egg stage: no stories."
+                  : healthFirst || report.condition !== "healthy" ? "Skip stories until healthy, awake and ready."
+                  : todayStory && !form.knownAbilities.includes(todayStory.name) ? <span aria-label="Today's story instruction">
+                    Tell a Story: {todayStory.story}, once ({todayStory.name}). Requires {todayStory.discernment} DSC, {RAISING.actionEnergy[50]["2"]}+ energy and a free ability slot.
+                  </span>
+                  : "No story attempt remaining today."}</td>
+                <td>{statSummary(todayPlan?.after ?? input.current)}
+                  {healthFirst && <span className="raising-stat-purpose">Treatment is not assumed to have cured the condition.</span>}
+                </td>
+              </tr>
+              {groupTrainingDays(futureDays, separateDays).map(step => <tr key={step.day}>
               <th scope="row">{step.day === step.endDay ? step.day : `${step.day}-${step.endDay}`}{clock.startedAt !== null && <span className="raising-stat-purpose">{new Date(clock.startedAt + step.day * RAISING.settings.dayLength * 1000).toLocaleDateString()}</span>}</th>
-              <td>{trainingActionName({ kind: "care", id: step.careId })}<br /><span className="raising-small">{step.careId === 0 ? "No random gain assumed" : `${step.carePoints} points per arrow; queue by day ${step.day - 2}`}</span>
+              <td>{trainingActionName({ kind: "care", id: step.careId })}<br /><span className="raising-small">{step.careId === 0 ? "No random gain assumed" : `${step.carePoints} points per arrow`}; {step.day === currentDay + 1 ? "already locked" : `queue by day ${step.day - 2}`}</span>
+                {raisingMilestoneGuidance(step.day).map(message => <span key={message} className="raising-stat-purpose">{message}</span>)}
                 {step.feeding && step.careId !== 0 && <span className="raising-stat-purpose">Good-day chance: {step.feeding.careSuccess}%{step.days > 1 ? " minimum in this block" : ""}</span>}</td>
               <td className="raising-description">{step.feeding
                 ? step.feeding.items.length ? `${feedingSummary(step.feeding.items)} (${step.feeding.items.length * step.days} items total)`
                   : step.day < RAISING.settings.daysToChick ? "Egg stage" : "Full in this estimate; recheck hunger that day"
                 : step.foodId === null ? "Recalculate with feeding reports" : `${step.foodCount} ${trainingActionName({ kind: "food", id: step.foodId })} (${step.foodCount * step.days} total)`}
+                {healthFirst && (step.feeding?.items.length || step.foodCount > 0) ? <strong className="raising-stat-purpose">Only after confirmed recovery and a fresh hunger check.</strong> : null}
                 {step.feeding && <span className="raising-stat-purpose">Affection afterward: {step.feeding.affectionAfter}/255{step.days > 1 ? " at block end" : ""} (estimate)</span>}</td>
-              <td>{step.story ? `${step.story}: ${step.firstAttempt === step.attempt ? step.attempt : `${step.firstAttempt}-${step.attempt}`}/${STORY_ATTEMPTS_95}${step.assumedLearned ? "; assumes learned at end" : ""}` : "-"}</td>
+              <td>{step.story ? <>{`${step.story}: ${step.firstAttempt === step.attempt ? step.attempt : `${step.firstAttempt}-${step.attempt}`}/${STORY_ATTEMPTS_95}${step.assumedLearned ? "; assumes learned at end" : ""}`}
+                {healthFirst && <strong className="raising-stat-purpose">Only after confirmed recovery and an energy check.</strong>}</> : "-"}</td>
               <td>{statSummary(step.after)}</td>
             </tr>)}</tbody>
           </table>
-        </div> : <p>Day {LAST_RAISING_DAY} is the last training day. Check today's checklist for any remaining actions; retirement starts on day {RAISING.settings.daysToAdult4}.</p>}
+        </div>
+        {!futureDays.length && <p>Day {LAST_RAISING_DAY} is the last training day. Check today's row for any remaining actions; retirement starts on day {RAISING.settings.daysToAdult4}.</p>}
         <p><strong>{plan.foodItems} food items total, including affection meals</strong>; <strong>{plan.careDays} targeted care days</strong> ({plan.earlyCareDays} before day 64, {plan.lateCareDays} from day 64). Other days use Basic Care. Trade one item at a time in the listed order, checking hunger between items. Future adolescent/adult meals assume the daily reset to starving and no earlier food. Never add this ration on top of meals already eaten; recalculate from the latest reports. Do not force-feed at fullness 224 or higher.</p>
-        <p className="raising-small">Queue care plans two days before execution in 1-7 day blocks, refilling the four-slot schedule as needed. Tomorrow's locked plan is assumed to be Basic Care. If it differs, process that day and recalculate using updated trainer descriptions or known exact points. The forecast accounts for age, not random health setbacks or the time needed to find stories. It cannot guarantee finishing by retirement.</p>
+        <p className="raising-small">Queue care plans two days before execution in 1-7 day blocks, refilling the four-slot schedule as needed. Tomorrow uses the recorded activity or the last recommendation as an explicit estimate; correct Tomorrow's locked care if it differs in game. The forecast accounts for age, not random health setbacks or the time needed to find stories. It cannot guarantee finishing by retirement.</p>
         {plan.pending.length > 0 && <p>Learn the selected abilities before lowering Discernment. Lowering it later does not erase learned abilities; avoid Lethe foods, which can forget a random ability.</p>}
       </section>
       <div className="raising-table-wrap"><table aria-label="Goal planner results">

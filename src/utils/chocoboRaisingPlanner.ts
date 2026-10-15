@@ -5,11 +5,32 @@ import {
 import { pad2, parseLocalDateTimeToMs } from "./time";
 import { colorStrategy, validateColorGoal, PARASITE_WORM_ID, type ColorGoal } from "./chocoboColor";
 import {
-  AFFECTION_TARGET, careSuccessChance, feedingOptions, validateFeedingReport,
+  AFFECTION_TARGET, careSuccessChance, feedingOptions, validateFeedingReport, needsHealthAttention,
   type FeedingEstimate, type FeedingReport,
 } from "./chocoboFeeding";
 
 export const RAISING_START_KEY = "kupo.raising.startedAt.v1";
+export const RAISING_SAVED_STARTS_KEY = "kupo.raising.savedStarts.v1";
+export type SavedRaisingStart = { name: string; startedAt: number };
+
+export function parseSavedRaisingStarts(raw: string): SavedRaisingStart[] {
+  const value: unknown = JSON.parse(raw);
+  if (!Array.isArray(value)) throw new Error("Saved egg times must be a list.");
+  const names = new Set<string>();
+  return value.map(entry => {
+    if (typeof entry !== "object" || entry === null) throw new Error("A saved egg time is invalid.");
+    const record = entry as Record<string, unknown>;
+    if (typeof record.name !== "string" || !record.name.trim()
+      || typeof record.startedAt !== "number" || !Number.isFinite(new Date(record.startedAt).getTime())) {
+      throw new Error("A saved egg time is invalid.");
+    }
+    const name = record.name.trim();
+    const key = name.toLowerCase();
+    if (names.has(key)) throw new Error("Saved egg time names must be unique.");
+    names.add(key);
+    return { name, startedAt: record.startedAt };
+  });
+}
 
 export function raisingDayAt(startedAt: number, now: number): number {
   if (!Number.isFinite(startedAt) || !Number.isFinite(now) || !Number.isFinite(new Date(startedAt).getTime()) || startedAt > now) {
@@ -59,6 +80,7 @@ export type RaisingGoalInput = {
   today?: { feedingDone: boolean; storyDone: boolean };
   feedingReport?: FeedingReport;
   colorGoal?: ColorGoal;
+  tomorrowCareId?: number;
 };
 type RaisingPreset = Pick<RaisingGoalInput, "target" | "desiredAbilities" | "priority"> & {
   id: string;
@@ -129,6 +151,11 @@ const statsKey = (stats: RaisingStats) => stats.strength | (stats.endurance << 8
 export const LAST_RAISING_DAY = RAISING.settings.daysToAdult4 - 1;
 
 export function validateRaisingGoal(input: RaisingGoalInput): string | null {
+  if (input.tomorrowCareId !== undefined && !RAISING.plans.some(plan => plan.id !== 1
+    && plan.id === input.tomorrowCareId
+    && (plan.id === 0 || input.currentDay + 1 >= careAvailableDay(plan.id) + 2))) {
+    return "Choose a valid activity for tomorrow's locked care plan.";
+  }
   if (input.colorGoal) {
     const error = validateColorGoal(input.colorGoal);
     if (error) return error;
@@ -209,7 +236,6 @@ type SearchNode = {
   energySpent: number;
   affectionDebt: number;
   worms: number;
-  colorAffectionDebt: number;
 };
 
 export function careAvailableDay(id: number): number {
@@ -241,13 +267,14 @@ export function trainingFoodTotals(days: readonly Pick<TrainingDay, "feeding" | 
   }).sort((a, b) => a.name.localeCompare(b.name));
 }
 
-export function groupTrainingDays(days: TrainingDay[]) {
+export function groupTrainingDays(days: TrainingDay[], separateDays: readonly number[] = []) {
   const groups: (TrainingDay & { endDay: number; days: number; firstAttempt: number })[] = [];
   for (const entry of days) {
     const previous = groups.at(-1);
     const samePhase = previous && [RAISING.settings.daysToChick, RAISING.settings.daysToAdolescent, RAISING.settings.daysToAdult3]
       .every(boundary => (previous.day < boundary) === (entry.day < boundary));
-    if (previous && samePhase && previous.endDay + 1 === entry.day && previous.careId === entry.careId && previous.carePoints === entry.carePoints
+    if (previous && samePhase && !separateDays.includes(entry.day) && !separateDays.includes(previous.day)
+      && previous.endDay + 1 === entry.day && previous.careId === entry.careId && previous.carePoints === entry.carePoints
       && previous.foodId === entry.foodId && previous.foodCount === entry.foodCount && previous.story === entry.story
       && previous.feeding?.items.join(",") === entry.feeding?.items.join(",")) {
       previous.endDay = entry.day;
@@ -284,7 +311,7 @@ export function planRaisingGoal(input: RaisingGoalInput) {
     stats: { ...input.current }, parent: null, entry: null, attempts: 0, cost: 0,
     affection: input.feedingReport?.affection ?? RAISING.feeding.initialAffection,
     fullness: input.feedingReport?.fullness ?? 255, energySpent: 0, affectionDebt: 0,
-    worms: 0, colorAffectionDebt: 0,
+    worms: 0,
   };
   const score = (node: SearchNode) => {
     const learning = node.attempts < attemptBudget;
@@ -298,8 +325,6 @@ export function planRaisingGoal(input: RaisingGoalInput) {
   };
   const compare = (a: SearchNode, b: SearchNode) => {
     if (color && optimizingColor) {
-      const affection = a.colorAffectionDebt - b.colorAffectionDebt;
-      if (affection) return affection;
       const yellow = color.options[a.worms].odds.yellow - color.options[b.worms].odds.yellow;
       if (Math.abs(yellow) > 1e-12) return yellow;
     }
@@ -309,15 +334,16 @@ export function planRaisingGoal(input: RaisingGoalInput) {
   const foods = PROJECTION_FOODS.filter(food => !food.forgetsAbility);
   for (let day = firstDay; day <= LAST_RAISING_DAY; day++) {
     const candidates = new Map<string, SearchNode>();
-    const plans = RAISING.plans.filter(plan => plan.id === 0
-      || (plan.id >= 2 && day >= input.currentDay + 2 && day >= careAvailableDay(plan.id) + 2))
+    const lockedCare = day === input.currentDay + 1;
+    const plans = RAISING.plans.filter(plan => lockedCare ? plan.id === (input.tomorrowCareId ?? 0)
+      : plan.id === 0 || (plan.id >= 2 && day >= input.currentDay + 2 && day >= careAvailableDay(plan.id) + 2))
       .flatMap(plan => plan.id === 0 ? [{ ...plan, points: 2 as const }]
         : [{ ...plan, points: 2 as const }, { ...plan, points: 3 as const }]);
     for (const parent of frontier) {
       const learning = parent.attempts < attemptBudget;
       const reached = !learning && meetsGoal(parent.stats, input.target);
       const seekingColor = !!color && day < RAISING.settings.daysToAdolescent && parent.worms < color.best.worms;
-      for (const care of reached && !seekingColor ? plans.filter(plan => plan.id === 0) : plans) {
+      for (const care of reached && !seekingColor && !lockedCare ? plans.filter(plan => plan.id === 0) : plans) {
         const afterCare = applyTrainingAction(parent.stats, { kind: "care", id: care.id }, day, care.points);
         let meals: { foodId: number | null; foodCount: number; stats: RaisingStats; feeding?: FeedingEstimate }[] = [
           { foodId: null, foodCount: 0, stats: afterCare },
@@ -328,15 +354,14 @@ export function planRaisingGoal(input: RaisingGoalInput) {
           const fullness = isToday ? parent.fullness : day <= RAISING.settings.daysToChick ? 255
             : day < RAISING.settings.daysToAdolescent
               ? Math.max(0, parent.fullness - Math.floor(RAISING.feeding.chickHungerPerEnergy * parent.energySpent)) : 0;
-          const allowed = !isToday || (!input.today?.feedingDone && ["healthy", "tired"].includes(input.feedingReport.condition));
+          const allowed = !isToday || (!input.today?.feedingDone && !needsHealthAttention(input.feedingReport));
           const success = careSuccessChance(parent.stats, parent.affection, care.id);
           const options = feedingOptions(afterCare, affection, fullness, day, allowed, seekingColor)
             .filter(meal => (!learning || meal.stats.discernment >= Math.min(parent.stats.discernment, threshold))
               && (!reached || meetsGoal(meal.stats, input.target))
               && (!color || parent.worms + meal.items.filter(id => id === PARASITE_WORM_ID).length <= color.best.worms));
           const canMaintain = options.some(meal => meal.affection >= AFFECTION_TARGET);
-          const requiredAffection = seekingColor ? Math.min(AFFECTION_TARGET, Math.max(...options.map(meal => meal.affection)))
-            : canMaintain ? AFFECTION_TARGET : 0;
+          const requiredAffection = seekingColor ? 0 : canMaintain ? AFFECTION_TARGET : 0;
           meals = options.filter(meal => meal.affection >= requiredAffection).map(meal => ({
             foodId: null, foodCount: 0, stats: meal.stats,
             feeding: {
@@ -362,7 +387,7 @@ export function planRaisingGoal(input: RaisingGoalInput) {
           let story: string | null = null;
           let attempt = 0;
           if (learning && day >= firstStoryDay && stats.discernment >= threshold && !(day === input.currentDay && input.today?.storyDone)
-            && (!isToday || !input.feedingReport || input.feedingReport.condition === "healthy")) {
+            && (!isToday || !input.feedingReport || input.feedingReport.condition === "healthy" && !needsHealthAttention(input.feedingReport))) {
             const ability = pending[Math.floor(attempts / STORY_ATTEMPTS_95)];
             story = ability.name;
             attempt = attempts % STORY_ATTEMPTS_95 + 1;
@@ -383,8 +408,6 @@ export function planRaisingGoal(input: RaisingGoalInput) {
             energySpent: isToday || story !== null ? 0 : care.energy,
             affectionDebt: parent.affectionDebt + (meal.feeding ? Math.max(0, AFFECTION_TARGET - affection) * 0.05 : 0),
             worms: parent.worms + (meal.feeding?.items.filter(id => id === PARASITE_WORM_ID).length ?? 0),
-            colorAffectionDebt: parent.colorAffectionDebt + (color && day >= RAISING.settings.daysToChick
-              && day < RAISING.settings.daysToAdolescent ? Math.max(0, AFFECTION_TARGET - affection) : 0),
           };
           const nextDayResetsHunger = day + 1 >= RAISING.settings.daysToAdolescent;
           // Older birds eat every modeled day; any top-band value survives the next care-and-meal cycle.
@@ -398,13 +421,13 @@ export function planRaisingGoal(input: RaisingGoalInput) {
         }
       }
     }
-    // Retain chick feeding states: an early worm must not crowd out a later affection-safe route.
+    // Retain chick feeding states so early choices do not crowd out better final color odds.
     const sorted = [...candidates.values()].sort(compare);
     frontier = optimizingColor && day < RAISING.settings.daysToAdolescent ? sorted : sorted.slice(0, 48);
     if (!frontier.length) throw new Error(`No valid training candidates on day ${day}.`);
   }
-  const preferred = color && optimizingColor ? frontier.filter(node => node.colorAffectionDebt === frontier[0].colorAffectionDebt
-    && Math.abs(color.options[node.worms].odds.yellow - color.options[frontier[0].worms].odds.yellow) <= 1e-12) : frontier;
+  const preferred = color && optimizingColor ? frontier.filter(node =>
+    Math.abs(color.options[node.worms].odds.yellow - color.options[frontier[0].worms].odds.yellow) <= 1e-12) : frontier;
   const route = preferred.find(node => meetsGoal(node.stats, input.target) && node.attempts === attemptBudget) ?? preferred[0];
   const days: TrainingDay[] = [];
   for (let node: SearchNode | null = route; node?.entry; node = node.parent) days.push(node.entry);

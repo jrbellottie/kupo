@@ -11,6 +11,7 @@ async function load(entry) {
 
 const { nextEarthMsForVanaDailySchedule: nextAlert, getVanaNow, DEFAULT_CALIBRATION } = await load("src\\vanadiel.ts");
 const { TRANSPORT_GROUPS, createTransportTimer, formatTransportDepartures, getTransportArrivalMinutes, getTransportPorts, getTransportPortColor } = await load("src\\utils\\transport.ts");
+const { nextGuildAlertTarget } = await load("src\\utils\\guilds.ts");
 const { formatCountdown } = await load("src\\utils\\time.ts");
 const routes = TRANSPORT_GROUPS.flatMap(group => group.routes);
 const MINUTE = 2400;
@@ -324,9 +325,22 @@ test("invalid schedules fail explicitly", () => {
   for (const departureMinutes of [[], [-1], [1440], [0.5], [NaN]]) {
     assert.throws(() => nextAlert({ ...valid, departureMinutes }), /Invalid/);
   }
-  for (const offsetHours of [-1, 24, 0.5, NaN]) {
+  for (const offsetHours of [-1, 24, 0.501, NaN]) {
     assert.throws(() => nextAlert({ ...valid, offsetHours }), /Invalid/);
   }
   assert.throws(() => nextAlert({ ...valid, nowEarthMs: NaN }), /Invalid/);
   assert.throws(() => nextAlert({ ...valid, cal: { ...cal, timeOffsetMs: NaN } }), /Invalid/);
+});
+
+test("real-time minute offsets schedule guild and transport alerts accurately", () => {
+  const realMinutes = 5;
+  const offsetHours = realMinutes * 5 / 12;
+  const schedule = nextAlert({ nowEarthMs: 0, cal, departureMinutes: [480], offsetHours });
+  const departure = nextAlert({ nowEarthMs: 0, cal, departureMinutes: [480], offsetHours: 0 });
+  assert.equal(departure - schedule, realMinutes * 60_000);
+
+  assert.deepEqual(
+    nextGuildAlertTarget({ weekday: "Firesday", hour: 0, minute: 0 }, { openHour: 6 }, offsetHours),
+    { targetWeekday: "Firesday", targetHour: 3, targetMinute: 55 }
+  );
 });
