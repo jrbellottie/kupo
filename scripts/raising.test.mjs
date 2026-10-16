@@ -536,9 +536,13 @@ test("health guidance matches pinned remedies, stages and safe treatment boundar
     for (const food of guide.remedies[0].foods) assert.ok((day < 19 ? food.chick : food).cures.includes(id));
     if (day >= 19) assert.ok(!guide.remedies[0].foods.some(food => food.name === "Ball of Herb Paste"));
     const fullGuide = healthGuidance({ ...report, day, fullness: 255, ailments: [id] }, day);
-    assert.match(fullGuide.treatmentAction, /Completely full: do not feed medicine/);
-    assert.ok(fullGuide.treatmentAction.includes(`Remedy for ${guide.remedies[0].label}: ${guide.remedies[0].foods[0].name}`));
-    assert.match(fullGuide.treatmentAction, /Wait until the bird is present, awake and has feeding room/);
+    assert.equal(fullGuide.canForceFeedRemedy, true);
+    assert.match(fullGuide.treatmentAction, /Completely full.*Optional tradeoff/);
+    assert.match(fullGuide.treatmentAction, /queues? (its|their) cure for the next raising-day update/);
+    assert.match(fullGuide.treatmentAction, /10% chance of a stomachache/);
+    assert.match(fullGuide.treatmentAction, /Rest instead has a 50% cure roll/);
+    assert.ok(fullGuide.remedies[0].foods.some(food => fullGuide.treatmentAction.includes(food.name)));
+    assert.doesNotMatch(fullGuide.treatmentAction, /Wait until the bird is present, awake and has feeding room/);
     assert.doesNotMatch(fullGuide.treatmentAction, /^Give 1/);
   }
   guide = healthGuidance({ ...report, ailments: ["sick", "lovesick"] }, 6);
@@ -546,16 +550,21 @@ test("health guidance matches pinned remedies, stages and safe treatment boundar
   for (const patch of [{ fullness: -1 }, { condition: "unknown" }, { condition: "sleeping" }, { condition: "away" }]) {
     const blocked = healthGuidance({ ...report, ...patch, ailments: ["lovesick"] }, 6);
     assert.equal(blocked.canTreat, false);
-    assert.match(blocked.treatmentAction, /Remedy for Lovesick: Celerity Salad/);
+    assert.ok(blocked.remedies[0].foods.some(food => food.name === "Celerity Salad"));
     assert.doesNotMatch(blocked.treatmentAction, /^Give 1/);
   }
   for (const fullness of [224, 255]) {
     guide = healthGuidance({ ...report, fullness }, 6);
     assert.equal(guide.canTreat, false);
-    assert.match(guide.messages.join(" "), /do not feed medicine/);
+    assert.equal(guide.canForceFeedRemedy, true);
+    assert.match(guide.messages.join(" "), /Optional tradeoff/);
     assert.doesNotMatch(guide.treatmentAction, /^Give 1/);
-    assert.match(guide.messages.join(" "), /10% stomachache/);
+    assert.match(guide.messages.join(" "), /10% (?:chance of a )?stomachache/);
   }
+  const unconfirmedFull = healthGuidance({ ...report, fullness: 255, ailments: [] }, 6);
+  assert.match(unconfirmedFull.treatmentAction, /do not force-feed an unverified remedy/);
+  assert.equal(unconfirmedFull.canForceFeedRemedy, false);
+  assert.doesNotMatch(unconfirmedFull.treatmentAction, /Optional tradeoff/);
   guide = healthGuidance({ ...report, fullness: 255, treatmentGiven: true }, 6);
   assert.equal(guide.canTreat, false);
   assert.match(guide.treatmentAction, /Treatment already given/);
@@ -565,6 +574,9 @@ test("health guidance matches pinned remedies, stages and safe treatment boundar
   assert.equal(healthGuidance({ ...report, fullness: -1 }, 6).canTreat, false);
   assert.equal(healthGuidance({ ...report, condition: "unknown" }, 6).canTreat, false);
   for (const condition of ["away", "sleeping"]) assert.equal(healthGuidance({ ...report, condition }, 6).canTreat, false);
+  for (const condition of ["away", "sleeping", "unknown"]) {
+    assert.equal(healthGuidance({ ...report, fullness: 255, condition }, 6).canForceFeedRemedy, false);
+  }
   assert.match(healthGuidance({ ...report, condition: "sleeping" }, 6).messages.join(" "), /Chocotonic.*32.*-48/);
   assert.match(healthGuidance({ ...report, condition: "away" }, 6).messages.join(" "), /cannot feed or treat/);
   assert.equal(healthGuidance(report, 3).canTreat, false);
@@ -578,12 +590,12 @@ test("non-food ailment recovery respects stage, energy costs and pinned action e
   const report = { day: 30, affection: 224, fullness: 255, condition: "healthy", ailments: [] };
   const spoiled = healthGuidance({ ...report, ailments: ["spoiled"] }, 30);
   assert.match(spoiled.careActions.join(" "), /Scold.*20\+ energy.*10 affection/);
-  assert.match(spoiled.treatmentAction, /Completely full: do not feed medicine/);
+  assert.match(spoiled.treatmentAction, /Completely full.*Optional tradeoff/);
   const bored = healthGuidance({ ...report, ailments: ["bored"] }, 30);
   assert.match(bored.careActions.join(" "), /Compete with Others.*rivals.*34\+ energy.*healthy and awake/);
   assert.match(bored.careActions.join(" "), /next report even on a loss/);
   assert.match(healthGuidance({ ...report, day: 6, ailments: ["bored"] }, 6).careActions.join(" "), /not available until day 19/);
-  assert.match(healthGuidance({ ...report, ailments: ["lonely"] }, 30).careActions.join(" "), /rebuild affection.*Watch Over is not an affection boost/);
+  assert.match(healthGuidance({ ...report, ailments: ["lonely"] }, 30).careActions.join(" "), /rebuild affection.*Watch Over does not boost affection/);
   assert.match(healthGuidance({ ...report, condition: "sleeping" }, 30).careActions.join(" "), /Scold.*20 energy.*wakes.*10 affection/);
   assert.match(healthGuidance({ ...report, condition: "away" }, 30).careActions.join(" "), /No food or hands-on care.*without training/);
   assert.deepEqual(healthGuidance({ ...report, day: 3, ailments: ["spoiled"] }, 3).careActions, []);
@@ -605,11 +617,31 @@ test("reported raising events give source-specific next steps without inventing 
   }
   for (const day of [7, 8, 14]) {
     const messages = raisingEventGuidance({ ...report, day, events: ["white-handkerchief"] }, day);
-    assert.equal(messages.length, 1, "reported handkerchief replaces its generic age reminder");
+    assert.equal(messages.length, 1, "reported handkerchief has event-specific guidance");
     assert.match(messages[0], /raising-report day.*next report.*zone out and back.*before day 15/);
     assert.match(messages[0], /not a food trade/);
   }
-  assert.match(raisingEventGuidance({ ...report, events: ["white-handkerchief"] }, 15).join(" "), /expires on day 15.*whistle quest is not blocked/);
+  assert.match(raisingEventGuidance({ ...report, events: ["white-handkerchief"] }, 15).join(" "), /expires on day 15.*key item is taken back.*does not block the adult Whistle quest/);
+  const highSpirits = raisingEventGuidance({ ...report, events: ["high-spirits"] }, 30).join(" ");
+  assert.match(highSpirits, /Happiness.*care plans are more effective.*does not directly add affection or stat points/);
+  assert.match(highSpirits, /increases the chance.*Full of energy.*Bright and focused/);
+  const fullOfEnergy = raisingEventGuidance({ ...report, events: ["full-of-energy"] }, 30).join(" ");
+  assert.match(fullOfEnergy, /Vitality.*physical care plans.*Strength and Endurance/);
+  assert.match(fullOfEnergy, /higher chance to teach an unlearned ability/);
+  assert.match(fullOfEnergy, /not extra stored energy/);
+  const brightAndFocused = raisingEventGuidance({ ...report, events: ["bright-and-focused"] }, 30).join(" ");
+  assert.match(brightAndFocused, /Intelligence.*mental care plans.*Discernment and Receptivity/);
+  assert.match(brightAndFocused, /higher chance to teach an unlearned ability/);
+  assert.match(brightAndFocused, /not a direct Discernment gain or a guarantee of learning/);
+  assert.match(raisingEventGuidance({ ...report, events: ["returned"] }, 30).join(" "),
+    /away days passed without care or training.*no catch-up bonus/);
+  assert.match(raisingEventGuidance({ ...report, events: ["lost-chick"] }, 30).join(" "),
+    /correct owner earns the Diligent Chocobo story.*wrong guess.*later short walk/);
+  for (const day of [7, 14, 15]) {
+    assert.doesNotMatch(raisingMilestoneGuidance(day).join(" "), /White Handkerchief/);
+    assert.doesNotMatch(raisingEventGuidance({ ...report, day }, day).join(" "), /White Handkerchief/);
+  }
+  assert.deepEqual(raisingEventGuidance(report, 29), [], "age milestones are separate from selected-event guidance");
   for (const id of ["high-spirits", "full-of-energy", "bright-and-focused"]) {
     assert.match(raisingEventGuidance({ ...report, events: [id] }, 30).join(" "), /No medicine|no remedy/i);
   }
@@ -622,7 +654,7 @@ test("reported raising events give source-specific next steps without inventing 
     assert.match(advice, /Wait until healthy, awake, present and energetic enough/);
     assert.match(advice, /Watch Over.*4\+ energy/);
   }
-  assert.match(raisingEventGuidance({ ...report, events: ["recovered"] }, 30).join(" "), /clear only the ailments.*Do not repeat medicine/);
+  assert.match(raisingEventGuidance({ ...report, events: ["recovered"] }, 30).join(" "), /Clear only the conditions.*do not repeat medicine/i);
   const input = goal({ currentDay: 128, desiredAbilities: [], today: { feedingDone: false, storyDone: false },
     feedingReport: { ...report, day: 128 } });
   assert.deepEqual(planRaisingGoal({ ...input, feedingReport: { ...input.feedingReport, events: ["high-spirits"] } }),
@@ -630,11 +662,11 @@ test("reported raising events give source-specific next steps without inventing 
 });
 
 test("age reminders stay on exact timeline days and event selections persist with validated reports", () => {
-  const milestoneDays = [4, 7, 14, 15, 19, 29, 43, 64, 128, 129];
+  const milestoneDays = [4, 19, 29, 43, 64, 128, 129];
   for (const day of milestoneDays) assert.equal(raisingMilestoneGuidance(day).length, 1, `day ${day}`);
-  for (const day of [0, 3, 6, 8, 13, 16, 18, 20, 28, 30, 42, 44, 63, 65, 127]) assert.deepEqual(raisingMilestoneGuidance(day), []);
-  assert.match(raisingMilestoneGuidance(7)[0], /if the trainer offers.*key item.*not food.*Whistle holders/);
-  assert.match(raisingMilestoneGuidance(14)[0], /today.*expires on day 15/);
+  for (const day of [0, 3, 6, 7, 8, 13, 14, 15, 16, 18, 20, 28, 30, 42, 44, 63, 65, 127]) {
+    assert.deepEqual(raisingMilestoneGuidance(day), []);
+  }
   assert.match(raisingMilestoneGuidance(29)[0], /outside San d'Oria.*Hantileon.*outcome does not block/);
   assert.match(raisingMilestoneGuidance(129)[0], /Raising has ended/);
   const days = Array.from({ length: 129 }, (_, day) => ({
@@ -1314,6 +1346,10 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     desiredAbilities: form.desiredAbilities, knownAbilities: form.knownAbilities,
     priority: form.priority, currentDay: 3, today: { feedingDone: false, storyDone: false },
   });
+  const textContent = element => React.isValidElement(element)
+    ? element.type.name === "RaisingFoodText" ? element.props.text
+      : React.Children.toArray(element.props.children).map(textContent).join("")
+    : String(element ?? "");
   for (const calculation of [undefined, { status: "error", message: "Try again" }, { status: "success", plan: result }]) {
     states = [{ ...view, todayMode: true, feedingMode: true, calculation }, { startedAt: start, error: null }, localRaisingStart(start), null, start + 3 * day];
     stateIndex = 0;
@@ -1329,9 +1365,10 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
       assert.ok(findElement(tree, element => element.props.className === "raising-plan-result"));
       const totals = findElement(tree, element => element.props["aria-label"] === "Estimated food totals");
       assert.ok(totals);
-      assert.ok(React.Children.toArray(totals.props.children).includes(
-        trainingFoodTotals(result.days).map(food => `${food.count} ${food.name}`).join("; "),
-      ));
+      assert.match(totals.props.className, /raising-food-totals/);
+      const expectedTotals = trainingFoodTotals(result.days).map(food => `${food.count} ${food.name}`).join("; ");
+      assert.ok(findElement(totals, element => element.type.name === "RaisingFoodText"
+        && element.props.text === expectedTotals));
     } else {
       assert.equal(findElement(tree, element => element.props["aria-label"] === "Estimated food totals"), undefined);
     }
@@ -1388,9 +1425,6 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   clickTime = states[4];
   const careButton = tree => findElement(tree, element => element.type === "button"
     && element.props["aria-label"] === "Confirm recommended care schedule");
-  const textContent = element => React.isValidElement(element)
-    ? React.Children.toArray(element.props.children).map(textContent).join("")
-    : String(element ?? "");
   const todayRow = tree => findElement(tree, element => element.type === "tr" && element.props["aria-label"] === "Today's remaining actions");
   for (const [age, careId, count] of [[4, 3, 7], [4, 3, 1], [20, 0, 3], [126, 4, 1]]) {
     states[4] = start + age * day;
@@ -1464,34 +1498,45 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     feedingReport: { day: 6, affection: 224, fullness: 255, condition: "unwell" },
   } }, { startedAt: start, error: null }, localRaisingStart(start), null, start + 6 * day];
   clickTime = states[4];
-  const healthSection = tree => findElement(tree, element => element.props["aria-label"] === "Health and treatment");
+  const ailmentGuidance = tree => findElement(tree, element => element.props["aria-label"] === "Ailment guidance");
+  const assertTreatmentInTable = tree => {
+    const action = React.Children.toArray(ailmentGuidance(tree).props.children)[0];
+    const tableText = textContent(todayRow(tree));
+    assert.ok(tableText.includes(textContent(action)), "the food/treatment cell repeats the explicit treatment action");
+    assert.doesNotMatch(tableText, /See the ailment guidance above/);
+  };
+  const ailmentBox = tree => findElement(tree, element => element.type === "fieldset"
+    && textContent(element).includes("Ailments reported by the trainer"));
   const healthCheckbox = (tree, label) => findElement(findElement(tree, element => element.type === "label"
     && React.Children.toArray(element.props.children).includes(label)), element => element.type === "input");
-  assert.match(textContent(healthSection(render())), /not specific enough/);
+  assert.ok(findElement(ailmentBox(render()), element => element.props["aria-label"] === "Ailment guidance"),
+    "ailment guidance is inside the ailments box");
+  assert.equal(ailmentGuidance(render()).type, "ul", "ailment advice is a bulleted list");
+  assert.match(textContent(ailmentGuidance(render())), /not specific enough/);
   healthCheckbox(render(), "Sick / minor illness").props.onChange({ target: { checked: true } });
   assert.deepEqual(states[0].form.feedingReport.ailments, ["sick"]);
-  let healthText = textContent(healthSection(render()));
+  let healthText = textContent(ailmentGuidance(render()));
   assert.match(healthText, /Clump of Tokopekko Wildgrass/);
-  assert.match(healthText, /Completely full: do not feed medicine/);
-  assert.match(healthText, /Reference only; do not feed these items now/);
-  assert.equal(healthSection(render()).type, "details", "treatment references stay available without duplicating the visible guide");
-  assert.notEqual(healthSection(render()).props.open, true);
+  assert.match(healthText, /Completely full.*Optional tradeoff/);
+  assert.match(healthText, /Reference only: a matching remedy is an optional force-feeding tradeoff described above/);
+  assert.equal((healthText.match(/Completely full:/g) ?? []).length, 1, "the full-food guidance appears once");
   assert.match(healthText, /Listen to Music is stat training, not treatment/);
   assert.equal(states[0].calculatedDay, null, "health advice does not require a plan calculation");
-  const ailmentGuidance = tree => findElement(tree, element => element.props["aria-label"] === "Ailment guidance");
   healthCheckbox(render(), "Sick / minor illness").props.onChange({ target: { checked: false } });
   healthCheckbox(render(), "Lovesick").props.onChange({ target: { checked: true } });
-  assert.match(textContent(ailmentGuidance(render())), /Remedy for Lovesick: Celerity Salad/);
-  assert.match(textContent(ailmentGuidance(render())), /Completely full: do not feed medicine/);
+  assert.match(textContent(ailmentGuidance(render())), /Lovesick:.*Celerity Salad/);
+  assert.match(textContent(ailmentGuidance(render())), /Completely full.*Optional tradeoff/);
   reportSelect(render(), "Hunger report").props.onChange({ target: { value: "191" } });
   assert.match(textContent(ailmentGuidance(render())), /Give 1 Celerity Salad, alone, for Lovesick/);
   healthCheckbox(render(), "Lovesick").props.onChange({ target: { checked: false } });
   assert.match(textContent(ailmentGuidance(render())), /not specific enough/, "unwell readiness still requires an exact ailment");
   healthCheckbox(render(), "Sick / minor illness").props.onChange({ target: { checked: true } });
-  const eventGuidance = tree => findElement(tree, element => element.props["aria-label"] === "Report events and reminders");
+  const eventGuidance = tree => findElement(tree, element => element.props["aria-label"] === "Other event guidance");
+  const handkerchiefGuidance = tree => findElement(tree, element => element.props["aria-label"] === "White Handkerchief guidance");
   healthCheckbox(render(), "Crying at night / holding White Handkerchief").props.onChange({ target: { checked: true } });
   assert.deepEqual(states[0].form.feedingReport.events, ["white-handkerchief"]);
-  assert.match(textContent(eventGuidance(render())), /key item.*raising-report day.*zone out and back/);
+  assert.match(textContent(handkerchiefGuidance(render())), /key item.*raising-report day.*zone out and back/);
+  assert.doesNotMatch(textContent(eventGuidance(render())), /White Handkerchief/);
   assert.equal(healthCheckbox(render(), "Treatment already given today - do not recommend another dose"), undefined);
   assert.equal(findElement(render(), element => element.type === "button" && element.props.children === "Record one eaten medicine"), undefined);
   states[0] = { ...parseSavedRaisingDaily(JSON.stringify(states[0])), calculatedDay: null };
@@ -1500,7 +1545,8 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   states[4] = start + 7 * day;
   assert.equal(healthCheckbox(render(), "Sick / minor illness").props.checked, false, "new day requires fresh health reports");
   assert.equal(healthCheckbox(render(), "Crying at night / holding White Handkerchief").props.checked, false, "event selections reset on a new raising day");
-  assert.match(textContent(eventGuidance(render())), /White Handkerchief window/, "age reminders do not require a completed calculation");
+  assert.equal(handkerchiefGuidance(render()), undefined, "handkerchief guidance stays with its checked event");
+  assert.doesNotMatch(textContent(eventGuidance(render())), /White Handkerchief/, "handkerchief guidance requires the event checkbox");
 
   states[4] = start + 6 * day;
   clickTime = states[4];
@@ -1512,8 +1558,10 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   tree = render();
   assert.match(textContent(tree), /Hypothetical recovery forecast, not feeding instructions/);
   assert.match(textContent(todayRow(tree)), /Today - day 6/);
+  assert.match(textContent(ailmentGuidance(tree)), /Give 1 Clump of Tokopekko Wildgrass/);
+  assert.match(textContent(ailmentGuidance(tree)), /cure normally waits for the next raising-day update/);
   assert.match(textContent(todayRow(tree)), /Give 1 Clump of Tokopekko Wildgrass/);
-  assert.match(textContent(todayRow(tree)), /cure normally waits for the next raising-day update/);
+  assertTreatmentInTable(tree);
   assert.match(textContent(todayRow(tree)), /Skip stories until healthy/);
   assert.match(textContent(todayRow(tree)), /Today's care is already in your reports/);
   assert.equal(findElement(tree, element => element.props["aria-label"] === "Today's chocobo checklist"), undefined);
@@ -1528,14 +1576,26 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   }
   const healthTimelineView = states[0];
   states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
-    feedingReport: { ...healthTimelineView.form.feedingReport, events: ["white-handkerchief"] },
+    feedingReport: { ...healthTimelineView.form.feedingReport, events: ["white-handkerchief", "high-spirits"] },
   } };
-  assert.match(textContent(todayRow(render())), /White Handkerchief \/ nighttime crying.*not a food trade/);
+  const selectedEventTree = render();
+  assert.match(textContent(findElement(selectedEventTree, element => element.props["aria-label"] === "White Handkerchief guidance")),
+    /White Handkerchief \/ nighttime crying.*not a food trade/);
+  assert.match(textContent(eventGuidance(selectedEventTree)), /High spirits.*Happiness.*increases the chance/);
+  const otherEventsFieldset = findElement(selectedEventTree, element => element.type === "fieldset"
+    && textContent(element).includes("Other events in the trainer's report"));
+  assert.ok(findElement(otherEventsFieldset, element => element.props["aria-label"] === "Other event guidance"),
+    "checked-event guidance is shown inside the event section");
+  assert.match(textContent(otherEventsFieldset), /These guide-described benefits are not included in the numeric forecast/);
+  assert.match(textContent(otherEventsFieldset), /condition effects guide/);
+  assert.doesNotMatch(textContent(todayRow(selectedEventTree)), /High spirits.*Happiness/);
+  assert.doesNotMatch(textContent(todayRow(selectedEventTree)), /White Handkerchief \/ nighttime crying/);
   for (const [ailment, expected] of [["spoiled", /Scold.*20\+ energy/], ["bored", /not available until day 19/], ["lonely", /rebuild affection/]]) {
     states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
       feedingReport: { ...healthTimelineView.form.feedingReport, ailments: [ailment] },
     } };
-    assert.match(textContent(todayRow(render())), expected);
+    assert.match(textContent(ailmentGuidance(render())), expected);
+    assertTreatmentInTable(render());
   }
   for (const { id, label } of BIRD_AILMENTS) for (const fullness of [191, 255]) {
     states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
@@ -1543,26 +1603,30 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     } };
     const expectedRemedy = healthGuidance(states[0].form.feedingReport, 6).remedies[0].foods[0].name;
     const rendered = render();
-    const text = textContent(todayRow(rendered));
+    const text = textContent(ailmentGuidance(rendered));
     assert.ok(text.includes(label), `${id} is named in today's report`);
     assert.ok(text.includes(expectedRemedy), `${id} has a remedy even when full`);
-    assert.match(text, fullness === 255 ? /Completely full: do not feed medicine/ : /Give 1/);
-    assert.equal(ailmentGuidance(rendered), undefined, "calculated report does not duplicate the ailment summary");
+    assert.match(text, fullness === 255 ? /Completely full.*Optional tradeoff/ : /Give 1/);
+    assertTreatmentInTable(rendered);
   }
   for (const [patch, expected] of [
-    [{ fullness: 255 }, /Completely full: do not feed medicine/],
+    [{ fullness: 255 }, /Completely full.*Optional tradeoff/],
     [{ condition: "sleeping" }, /Sleeping birds refuse other foods/],
     [{ condition: "away" }, /cannot feed or treat/],
   ]) {
     states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
       feedingReport: { ...healthTimelineView.form.feedingReport, ...patch },
     } };
-    const text = textContent(todayRow(render()));
+    const rendered = render();
+    const text = textContent(ailmentGuidance(rendered));
     assert.match(text, expected);
+    assertTreatmentInTable(rendered);
     assert.doesNotMatch(text, /Give 1 Clump of Tokopekko/);
   }
   states[0] = { ...healthTimelineView, progress: { startedAt: start, day: 6, feedingDone: true, storyDone: true, careKey: null } };
-  assert.match(textContent(todayRow(render())), /Give 1 Clump of Tokopekko Wildgrass/, "legacy completion does not suppress today's treatment");
+  assert.match(textContent(ailmentGuidance(render())), /Give 1 Clump of Tokopekko Wildgrass/,
+    "legacy completion does not suppress today's treatment guidance");
+  assertTreatmentInTable(render());
   assert.match(textContent(todayRow(render())), /Skip stories until healthy/);
   states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
     feedingReport: { ...healthTimelineView.form.feedingReport, condition: "healthy", ailments: [] },
@@ -1575,7 +1639,9 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
       ...healthTimelineView.form.feedingReport, treatmentGiven: true, medicineId: 2201,
     } },
   };
-  assert.match(textContent(todayRow(render())), /Give 1 Clump of Tokopekko Wildgrass/, "legacy treatment marks do not suppress a start-of-day simulation");
+  assert.match(textContent(ailmentGuidance(render())), /Give 1 Clump of Tokopekko Wildgrass/,
+    "legacy treatment marks do not suppress the start-of-day recommendation");
+  assertTreatmentInTable(render());
   findElement(render(), element => element.type === "form").props.onSubmit({ preventDefault() {} });
   assert.deepEqual(states[0].progress, { startedAt: start, day: 6, feedingDone: false, storyDone: false, careKey: null });
   assert.equal(states[0].form.feedingReport.treatmentGiven, undefined);
@@ -1591,11 +1657,16 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     calculation: { status: "success", plan: { ...result, days: result.days.map(step =>
       step.day === 30 ? { ...step, story: "Bore" } : step) } },
   };
+  const colorStrategy = {
+    locked: false, plannedWorms: 1, wormsFed: 0,
+    before: { yellow: 0.95, black: 0.03, blue: 0.01, red: 0.005, green: 0.005 },
+    after: { yellow: 0.8, black: 0.08, blue: 0.04, red: 0.04, green: 0.04 },
+  };
   states = [storyView, { startedAt: start, error: null }, localRaisingStart(start), null, start + 30 * day];
   clickTime = states[4];
   for (const ability of RAISING_ABILITIES) {
     states[0] = { ...storyView, calculation: { status: "success", plan: { ...result, pending: [ability],
-      days: result.days.map(step => step.day === 30 ? { ...step, story: ability.name } : step) } } };
+      color: colorStrategy, days: result.days.map(step => step.day === 30 ? { ...step, story: ability.name } : step) } } };
     tree = render();
     const instruction = storyInstruction(tree);
     assert.ok(instruction, `${ability.name} gets a concise table instruction`);
@@ -1607,6 +1678,27 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
       && textContent(element).startsWith("Ability preparation and learning checkpoint"));
     assert.ok(textContent(reference).includes(ability.obtain), "acquisition remains in collapsed reference");
     assert.notEqual(reference.props.open, true);
+    const colorDetails = findElement(tree, element => element.type === "details"
+      && element.props["aria-label"] === "Estimated non-yellow strategy");
+    assert.ok(colorDetails);
+    assert.notEqual(colorDetails.props.open, true, "non-yellow strategy starts collapsed");
+    assert.ok(findElement(colorDetails, element => element.type === "table"
+      && element.props["aria-label"] === "Planned plumage color chances"));
+    const plannerText = textContent(tree);
+    assert.ok(plannerText.indexOf("Estimated training timeline") < plannerText.indexOf("Estimated result"));
+    assert.ok(plannerText.lastIndexOf("Grade") < plannerText.indexOf("Total food needed for this plan"));
+    assert.ok(plannerText.indexOf("Total food needed for this plan")
+      < plannerText.indexOf("Ability preparation and learning checkpoint"));
+    assert.ok(plannerText.indexOf("Ability preparation and learning checkpoint")
+      < plannerText.indexOf("Non-yellow feeding strategy"));
+    assert.doesNotMatch(plannerText, /food items total, including affection meals|Queue care plans two days before execution/);
+    assert.doesNotMatch(plannerText, /Some days remain below the highest affection band/);
+    assert.ok(findElement(tree, element => element.type.name === "RaisingFoodText"
+      && element.props.text.includes("Vomp Carrot")));
+    assert.ok(findElement(tree, element => element.type.name === "RaisingFoodText"
+      && element.props.text === "Parasite Worms"));
+    assert.ok(findElement(tree, element => element.type.name === "RaisingFoodText"
+      && element.props.text === "Azouph Greens"));
   }
   for (const condition of ["tired", "unwell", "sleeping", "away", "unknown"]) {
     states[0] = { ...storyView, form: { ...storyView.form, feedingReport: { ...storyView.form.feedingReport, condition } } };
@@ -1691,7 +1783,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(statHelp, /SS-grade RCP \(224-255\) corresponds to a 35% increase, not a flat 35% chance/);
   assert.match(statHelp, /do not list a direct Strength bonus to finds/);
   assert.match(statHelp, /source-derived digging guide/);
-  assert.match(statHelp, /documentation and that snapshot differ/);
+  assert.match(statHelp, /documentation and override differ/);
   assert.match(statHelp, /not included in the current Digging tab estimates/);
   assert.match(html, /224 or higher/);
   assert.match(html, /Plan my chocobo/);
@@ -1738,13 +1830,29 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(help, /up to four items can be eaten per trade, not per day/);
   assert.match(help, /already at 224 or higher counts as force-feeding/);
   assert.match(help, /10% stomachache-onset chance at the next rollover/);
-  assert.match(help, /<th scope="row">Vomp Carrot<\/th><td>\+64<\/td><td>4<\/td>/);
-  assert.match(help, /<th scope="row">Zegham Carrot<\/th><td>\+96<\/td><td>3<\/td>/);
+  assert.match(help, /a matching illness remedy is a separate optional tradeoff explained in today&#x27;s health guidance/);
+  assert.match(help, /<th scope="row"><span class="raising-food raising-food-vomp-carrot">Vomp Carrot<\/span><\/th><td>\+64<\/td><td>4<\/td>/);
+  assert.match(help, /<th scope="row"><span class="raising-food raising-food-zegham-carrot">Zegham Carrot<\/span><\/th><td>\+96<\/td><td>3<\/td>/);
+  assert.match(html, /class="raising-food raising-food-azouph-greens">Azouph Greens<\/span>/);
+  assert.match(html, /class="raising-food raising-food-tokopekko-wildgrass">Tokopekko<\/span> treats minor\/serious illness/);
+  assert.match(html, /class="raising-food raising-food-parasite-worm">Parasite Worm<\/span>/);
+  assert.match(html, /class="raising-food raising-food-chocotonic">Chocotonic<\/span>/);
+  const displayedFoodClasses = new Map([...html.matchAll(/<span class="raising-food (raising-food-[\w-]+)">([^<]+)<\/span>/g)]
+    .map(([, className, name]) => [name, className]));
+  const foodClasses = RAISING.foods.map(food => displayedFoodClasses.get(food.name));
+  assert.ok(foodClasses.every(Boolean), "every food has an individual display class");
+  assert.equal(new Set(foodClasses).size, RAISING.foods.length, "each food has its own display class");
+  const foodColorRules = new Map([...readFileSync("src/ChocoboRaisingTab.css", "utf8")
+    .matchAll(/\.raising \.(raising-food-[\w-]+) \{ color: (#[\da-f]{6}); \}/gi)]
+    .map(([, className, color]) => [className, color]));
+  const foodColors = foodClasses.map(className => foodColorRules.get(className));
+  assert.ok(foodColors.every(Boolean), "every food has a color rule");
+  assert.equal(new Set(foodColors).size, RAISING.foods.length, "every food has its own color or shade");
   assert.match(help, /adolescent and adult birds reset to starving at rollover/);
   assert.match(help, /anchored to egg hand-in/);
   assert.match(help, /80 items actually eaten, not 80 days/);
   assert.match(help, /Food totals include both training and affection meals/);
-  assert.match(help, /It does not automatically feed Azouph Greens/);
+  assert.match(help, /It does not automatically feed <span class="raising-food raising-food-azouph-greens">Azouph Greens<\/span>/);
   assert.match(help, /Random food bonuses are not credited as guaranteed gains/);
   assert.match(help, /lowest affection and highest fullness/);
   assert.match(help, /Calculate becomes available when all required fields are valid/);
@@ -1841,7 +1949,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   const whistleHelp = html.match(/<details><summary>Chocobo Whistle: unlock, register and ride<\/summary>[\s\S]*?<\/details>/)?.[0];
   assert.ok(whistleHelp);
   assert.match(whistleHelp, /Retirement is not required/);
-  assert.match(whistleHelp, /adulthood \(day 29 in the pinned settings\)/);
+  assert.match(whistleHelp, /adulthood \(day 29\)/);
   assert.match(whistleHelp, /continuing to raise and train it through day 128/);
   assert.match(whistleHelp, /How to re-register after training/);
   assert.match(whistleHelp, /250 gil each time/);
@@ -1869,7 +1977,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   ]) {
     assert.ok(activityHelp.includes(`<th scope="row">${stable}</th><td>${short}</td><td>${regular}</td><td>${long}</td>`));
   }
-  const colorHelp = html.match(/<details><summary>Chocobo color: eggs, breeding and Parasite Worms<\/summary>[\s\S]*?<\/details>/)?.[0];
+  const colorHelp = html.match(/<details><summary>Chocobo color: eggs, breeding and <span class="raising-food raising-food-parasite-worm">Parasite Worms<\/span><\/summary>[\s\S]*?<\/details>/)?.[0];
   assert.ok(colorHelp, "color guide starts collapsed");
   assert.match(colorHelp, /aria-label="Egg color chances"/);
   assert.match(colorHelp, /bred egg follows its inherited genes instead of this table/);
@@ -2009,7 +2117,7 @@ test("restored planner state requires an explicit opt-in for exact current stats
     "color preference appears in its own section before the build preset");
   assert.match(colorHtml, /<input type="checkbox" checked=""\/>Avoid a yellow bird/);
   assert.match(colorHtml, /value="2312" selected="">Faintly warm/);
-  assert.match(colorHtml, /Parasite Worms already eaten before day 19/);
+  assert.match(colorHtml, /<span class="raising-food raising-food-parasite-worm">Parasite Worms<\/span> already eaten before day 19/);
   assert.match(colorHtml, /never increase that count automatically/);
   assert.doesNotMatch(colorHtml, /role="alert"/);
   for (const patch of [{ eggId: "" }, { wormsFed: "" }, { wormsFed: "1" }]) {

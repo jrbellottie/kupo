@@ -413,7 +413,7 @@ test("offline tab renders search, pagination, source limitations and timing guid
   assert.match(html, /Desired harvest item/);
   assert.match(html, /LSB-based gardening code from a pinned public source snapshot/);
   assert.match(html, /Private-server modules and settings may override these rules; unpublished overrides cannot be reviewed or verified here/);
-  assert.match(html, /pot choice, weekday, moon phase and room aura do not modify results/);
+  assert.match(html, /Pot choice, weekday, moon phase and room aura do not modify results/);
   assert.match(html, /Additional source types - availability unverified/);
   assert.doesNotMatch(html, /Try a harvest:|gardening-examples|Pot compatibility:|all listed recipes work with every source-classified planting pot/);
   assert.doesNotMatch(html, />(?:Vomp Carrot|Zegham Carrot|Fire Ore|Tree Saplings)<\/button>/);

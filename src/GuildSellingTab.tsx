@@ -115,7 +115,7 @@ export default function GuildSellingTab({ fishingOnly = false, ...timerControls 
         </label>
       </div>
     </CollapsibleSection>
-    <div style={styles.sub}>Hours use your app clock calibration. Weekly holidays are enabled by default to match confirmed live behavior (the pinned source default is {SOURCE_GUILD_SHOP_HOLIDAYS ? "on" : "off"}). Opening reminders appear in Clock &amp; Timers and fire once; keep Kupo running.</div>
+    <div style={styles.sub}>Hours use your app clock calibration. Weekly holidays are enabled by default to match confirmed live behavior (the reference default is {SOURCE_GUILD_SHOP_HOLIDAYS ? "on" : "off"}). Opening reminders appear in Clock &amp; Timers and fire once; keep Kupo running.</div>
 
     {!selected ? <p role="status">No sellable guild items match these filters. Try another item or guild; buy-only items are excluded.</p> : <>
       <h4 style={{ margin: 0 }}>{selected.item} <span style={styles.sub}>({rows.length} stock pools)</span></h4>
@@ -188,7 +188,7 @@ export default function GuildSellingTab({ fishingOnly = false, ...timerControls 
         <li>A Vana&apos;diel day lasts 57 minutes 36 seconds. Refresh occurs on shop interaction for a new game day. Opening hours and enabled guild holidays still restrict selling.</li>
         <li>The guild&apos;s payout is locked from opening stock for the game day. The default ranges from 1.5 times base NPC sell value when empty to base value when full, with source rounding; fixed-price overrides take precedence.</li>
         <li>Daily totals assume you filled every listed pool before the refresh, then sell into all freed space without other players competing. Fresh totals assume the source&apos;s initial inventory.</li>
-        <li>Some target stocks are explicitly assumed in the pinned source. These tables use the reference ruleset, not universal or guaranteed live-server values.</li>
+        <li>Some target stocks are assumptions rather than confirmed values. These tables use the reference ruleset, not universal or guaranteed live-server values.</li>
       </ul>
       <a href={`${PHOENIX_SOURCE.repository}/blob/${PHOENIX_SOURCE.revision}/scripts/data/guild_shops.lua`} target="_blank" rel="noreferrer">Pinned stock definitions</a>
       {" | "}

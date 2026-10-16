@@ -24,12 +24,9 @@ export function validRaisingEvents(value: unknown): value is RaisingEvent[] | un
 export function raisingMilestoneGuidance(day: number): string[] {
   const s = RAISING.settings;
   if (day === s.daysToChick) return ["Hatching: name the chick at the trainer. Newly hatched chicks start completely full; do not feed yet."];
-  if (day === 7) return ["White Handkerchief window: if the trainer offers it for nighttime crying, accept the key item. Hold it through a raising-report day, then zone out and back and talk to the trainer. Return it before day 15; it is not food. Whistle holders may not receive this event."];
-  if (day === 14) return ["White Handkerchief deadline: if still holding it and a report day has passed, zone out and back and speak to the trainer today. The unfinished event expires on day 15."];
-  if (day === 15) return ["White Handkerchief window closes: an unfinished event is cancelled. Do not feed medicine for the missed event; the adult whistle quest remains available."];
   if (day === s.daysToAdolescent) return ["Adolescence: check visible color and new reports. Stories and regular walks unlock; color is now locked. Newly selected care still starts two days later."];
   if (day === s.daysToAdult1) return ["Adulthood: long walks and documentation unlock. If you do not have a Chocobo Whistle, ask about the quest; raisers outside San d'Oria first visit Hantileon in Southern San d'Oria. The White Handkerchief outcome does not block it."];
-  if (day === s.daysToAdult2) return ["Adult growth report: update the trainer's stats and condition. This milestone does not add a training multiplier in the pinned model."];
+  if (day === s.daysToAdult2) return ["Adult growth report: update the trainer's stats and condition. This milestone does not add a training multiplier."];
   if (day === s.daysToAdult3) return ["Growth stabilizes: care-plan stat losses stop, but food penalties remain. An unnamed bird may be named automatically; check the trainer's report."];
   if (day === s.daysToAdult4 - 1) return ["Last training day: prepare to collect the retirement registration card and re-register the final riding stats. Do not give up the bird instead of retiring it."];
   if (day >= s.daysToAdult4) return ["Retirement: collect the registration card from the home trainer and register the final bird. Raising has ended; no more feeding or training is planned."];
@@ -44,22 +41,22 @@ export function raisingEventGuidance(report: FeedingReport, day: number): string
   const activityGate = ready ? "Check the required energy before acting." : "Wait until healthy, awake, present and energetic enough before doing activities.";
   if (selected.has("white-handkerchief")) {
     messages.push(day >= 15
-      ? "White Handkerchief: the unfinished event expires on day 15 in the pinned rules. Check the trainer's dialogue; do not use medicine or restart the egg clock. The whistle quest is not blocked."
-      : "White Handkerchief / nighttime crying: hold the key item through one raising-report day. Receive the next report, then zone out and back and speak to the home trainer to return it before day 15. This is a dialogue event, not a food trade; the following report closes the event.");
+      ? "White Handkerchief: the event expires on day 15 and the key item is taken back. This has no stat effect and does not block the adult Whistle quest; no medicine is needed."
+      : "White Handkerchief / nighttime crying: hold the key item through one raising-report day. Receive the next report, then zone out and back and speak to the home trainer to return it before day 15. This is a dialogue event, not a food trade; it has no stat effect, and the following report closes the event.");
   }
-  if (selected.has("high-spirits")) messages.push("High spirits: a positive report, not an ailment. No medicine is needed for it; continue only the planned actions allowed by current health, hunger and energy.");
-  if (selected.has("full-of-energy")) messages.push("Full of energy: no remedy needed. Check actual energy before activities; this report does not grant extra meals or extra story attempts in the forecast.");
-  if (selected.has("bright-and-focused")) messages.push("Bright and focused: no remedy needed. Continue eligible training and stories; do not assume an ability was learned or add an unverified stat bonus.");
-  if (selected.has("returned")) messages.push("Returned after running away: confirm the bird is back, then enter fresh health, hunger and affection reports. Restore low affection with safe meals after any treatment. Do not make up missed feeding or care.");
-  if (selected.has("recovered")) messages.push("Recovery report: clear only the ailments the trainer says have ended and enter fresh hunger, affection and readiness reports. Do not repeat medicine for a cured condition or assume every other ailment ended too.");
+  if (selected.has("high-spirits")) messages.push("High spirits (Happiness): care plans are more effective while this positive condition is active, and from adolescence it increases the chance of later Full of energy (Vitality) and Bright and focused (Intelligence) reports. It does not directly add affection or stat points. No remedy is needed.");
+  if (selected.has("full-of-energy")) messages.push("Full of energy (Vitality): physical care plans give better Strength and Endurance training results. Tell a Story also has a higher chance to teach an unlearned ability. This is not extra stored energy or extra story attempts; check the actual energy meter before activities. No remedy is needed.");
+  if (selected.has("bright-and-focused")) messages.push("Bright and focused (Intelligence): mental care plans give better Discernment and Receptivity training results. Tell a Story also has a higher chance to teach an unlearned ability. This is not a direct Discernment gain or a guarantee of learning. No remedy is needed.");
+  if (selected.has("returned")) messages.push("Returned after running away: the bird is back, but away days passed without care or training, so there is no catch-up bonus. Enter fresh health, hunger and affection reports; restore low affection with safe meals after any treatment. Do not make up missed feeding or care.");
+  if (selected.has("recovered")) messages.push("Recovery report: the reported ailment has ended, but this gives no stat bonus and does not clear other ailments. Clear only the conditions the trainer says have ended, enter fresh hunger, affection and readiness reports, and do not repeat medicine for a cured condition.");
   if (selected.has("whistle-found")) {
-    messages.push("Handkerchief / Dirty Handkerchief found: speak to Hantileon in Southern San d'Oria and receive the Chocobo Whistle. Then register the adult bird with its trainer. These are not the chick's White Handkerchief.");
+    messages.push("Handkerchief / Dirty Handkerchief found: this is Whistle quest progress, not a stat reward. Speak to Hantileon in Southern San d'Oria to receive the Chocobo Whistle, then register the adult bird with its trainer. These are not the chick's White Handkerchief.");
   } else if (selected.has("whistle-search")) {
     messages.push(day < RAISING.settings.daysToAdult1
-      ? `Whistle quest: it begins at adulthood, day ${RAISING.settings.daysToAdult1}; the chick's White Handkerchief is a separate event.`
-      : `Whistle search: speak to Hantileon first if directed there. Use hands-on short, regular or long walks from the home stable and choose to search; try another distance if empty. The hiding distance stays fixed for this quest. ${activityGate}`);
+      ? `Whistle quest: it begins at adulthood, day ${RAISING.settings.daysToAdult1}; the chick's White Handkerchief is a separate event. There is no raising bonus or detriment yet.`
+      : `Whistle search: speak to Hantileon first if directed there. Use hands-on short, regular or long walks from the home stable and choose to search; try another distance if empty. The hiding distance stays fixed for this quest. This advances the riding quest, not training stats. ${activityGate}`);
   }
-  if (selected.has("held-item")) messages.push(`Item from a walk: free an inventory slot, then choose Watch Over to collect it (requires ${RAISING.actionEnergy[48]["2"]}+ energy after hatching). ${activityGate}`);
-  if (selected.has("lost-chick")) messages.push("Lost chick: ask the stable clerk and gather the trainers' clues before choosing its owner. A correct return earns the Diligent Chocobo story; some owner dialogue hooks are incomplete in the pinned source. Do not guess an owner or feed a remedy.");
-  return [...messages, ...(selected.has("white-handkerchief") && [7, 14, 15].includes(day) ? [] : raisingMilestoneGuidance(day))];
+  if (selected.has("held-item")) messages.push(`Item from a walk: carrying it gives no stat bonus. Free an inventory slot, then choose Watch Over to collect it (requires ${RAISING.actionEnergy[48]["2"]}+ energy after hatching). ${activityGate}`);
+  if (selected.has("lost-chick")) messages.push("Lost chick: this is a short-walk mini-quest, not an ailment. Ask the stable clerk and gather the trainers' clues before choosing its owner. Returning it to the correct owner earns the Diligent Chocobo story; a wrong guess does not award the story, and a later short walk can give another chance. Do not guess an owner or feed a remedy.");
+  return messages;
 }

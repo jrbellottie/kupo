@@ -111,7 +111,7 @@ export default function GardeningTab({ timers = [], nowMs = Date.now(), onSetTim
 
   return <section className="gardening" style={styles.card}>
     <div style={styles.titleRow}><h3 style={styles.h3}>Gardening</h3><span style={styles.sub}>Mog House pots - {GARDENING.recipes.length} recipes / {RESULT_NAMES.length} harvest items</span></div>
-    <p className="gardening-notice">Find what to plant for an item, or explore a seed and crystal combination. This reference uses LSB-based gardening code from a pinned public source snapshot. Private-server modules and settings may override these rules; unpublished overrides cannot be reviewed or verified here. In the pinned settings, pot choice, weekday, moon phase and room aura do not modify results. This is flowerpot gardening, not Mog Garden gathering.</p>
+    <p className="gardening-notice">Find what to plant for an item, or explore a seed and crystal combination. This reference uses LSB-based gardening code from a pinned public source snapshot. Private-server modules and settings may override these rules; unpublished overrides cannot be reviewed or verified here. Pot choice, weekday, moon phase and room aura do not modify results. This is flowerpot gardening, not Mog Garden gathering.</p>
     {timers.length > 0 && <section aria-label="Saved gardening timers" className="gardening-detail">
       <h4>Gardening timers</h4>
       <p className="gardening-small">One countdown per planting. Disable or delete reminders from the main Timers list. Keep Kupo running for notifications.</p>
@@ -174,7 +174,7 @@ export default function GardeningTab({ timers = [], nowMs = Date.now(), onSetTim
     <details>
       <summary>Getting started and keeping plants alive</summary>
       <ol>
-        <li>Obtain a planting pot and a seed, cutting or sapling. Place the pot as furniture on the first floor of your Mog House. The ordinary furniture item named Flowerpot is not a planting pot in the source.</li>
+        <li>Obtain a planting pot and a seed, cutting or sapling. Place the pot as furniture on the first floor of your Mog House. The ordinary furniture item named Flowerpot is not a planting pot.</li>
         <li>Keep the seed and crystals in your Mog Safe or accessible Mog Safe 2. Use the Moogle's Gardening menu to plant and examine. Gardening guides describe a ten-pot room limit; availability and client restrictions should be checked in game.</li>
         <li>Examine regularly, including before long absences and during every growth stage. Feeding marks the new stage as examined. Do not treat a long growth estimate as permission to ignore the plant.</li>
         <li>Feed a single crystal when the appropriate option appears. Herbs, grains, vegetables and wildgrass have one feeding; fruit, cactus, cuttings and saplings have two. To use No crystal, let that window expire while continuing to tend the plant.</li>
@@ -202,7 +202,7 @@ export default function GardeningTab({ timers = [], nowMs = Date.now(), onSetTim
     <details>
       <summary>Results, probabilities and useful gardening goals</summary>
       <p>Every planting receives one hidden integer roll from 0 through 32. Seed affinity and the crystals fed establish a starting strength; the hidden roll raises it toward 100. The source walks the result table's cumulative weights using that strength, then derives quantity from the same value. Kupo enumerates all 33 rolls, so displayed chances advance in steps of about 3.03%, not the database's apparent weight percentages.</p>
-      <p>These are predictions for new plantings under the pinned defaults, conditioned on a healthy harvest. They do not reveal an existing plant's hidden roll, predict how many attempts guarantee an item, or account for a live operator enabling optional modifiers. A source-listed result can have zero reachable rolls.</p>
+      <p>These are predictions for new plantings under the default reference settings, conditioned on a healthy harvest. They do not reveal an existing plant's hidden roll, predict how many attempts guarantee an item, or account for a live operator enabling optional modifiers. A source-listed result can have zero reachable rolls.</p>
       <p><strong>Chocobo food:</strong> use the harvest search for Vomp/Zegham Carrots, greens and wildgrasses, then compare crystal choices and alternative crops. <strong>Elemental ores:</strong> explore Tree Saplings; even matching crystal feeds do not guarantee an ore. <strong>Growing your inputs:</strong> Tree Cuttings can produce Tree Saplings, but other results compete for the harvest.</p>
       <p>Wiki advice about city-pot bonuses, stronger room aura, full-moon harvesting, special clothing or waiting longer for a better yield is not used by this default calculation. Nor does this harvest handler apply the later-retail 90-day character-age one-item restriction. Live customizations can differ.</p>
     </details>

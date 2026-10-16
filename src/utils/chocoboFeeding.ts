@@ -90,6 +90,11 @@ export function healthGuidance(report: FeedingReport, day: number) {
       .sort((a, b) => (chick ? a.chick : a).cures.length - (chick ? b.chick : b).cures.length);
     return { ...ailment, foods };
   });
+  const matchingMedicine = remedies[0]?.foods.find(food =>
+    remedies.every(ailment => (chick ? food.chick : food).cures.includes(ailment.id)));
+  const canForceFeedRemedy = day >= RAISING.settings.daysToChick && report.fullness >= 224
+    && !report.treatmentGiven && !!matchingMedicine
+    && !["away", "sleeping", "unknown"].includes(report.condition);
   const messages: string[] = [];
   const canTreat = day >= RAISING.settings.daysToChick && report.condition !== "away"
     && report.condition !== "unknown" && Number.isInteger(report.fullness) && report.fullness >= 0
@@ -97,41 +102,41 @@ export function healthGuidance(report: FeedingReport, day: number) {
   if (day < RAISING.settings.daysToChick) messages.push("Eggs cannot be fed medicine. Check the trainer's report after hatching.");
   else if (report.condition === "away") messages.push("The bird is away: you cannot feed or treat it at the stable. Check with the trainer for its return; do not buy or feed a medicine as a guaranteed return remedy.");
   else if (report.treatmentGiven) messages.push("Treatment already given today: do not repeat it just because the condition is still reported. Most cures wait for the next raising-day update. Recheck health and hunger with the trainer then; clear this mark only to correct an entry mistake.");
-  else if (report.fullness >= 224) messages.push(`Completely full: do not feed medicine, worms or other food now. Medicine also counts as food. Wait for a safe feeding opportunity and recheck the trainer's report. Force-feeding flags a ${RAISING.forcedFeedIllnessChance}% stomachache chance at the next update in the pinned model, not a guaranteed stomachache.`);
+  else if (report.fullness >= 224) messages.push(canForceFeedRemedy
+    ? `Completely full: medicine counts as food. Optional tradeoff: one ${matchingMedicine.name} alone matches the reported ailment${remedies.length > 1 ? "s" : ""} and queues their cure for the next raising-day update, but force-feeding carries a ${RAISING.forcedFeedIllnessChance}% chance of a stomachache then. Rest instead has a 50% cure roll per bad condition. You can force-feed the matching remedy or wait until there is feeding room; recheck the trainer's report either way.`
+    : `Completely full: do not feed medicine, worms or other food now. Medicine also counts as food. Force-feeding carries a ${RAISING.forcedFeedIllnessChance}% stomachache chance at the next update. Wait for a safe feeding opportunity and recheck the trainer's report; do not force-feed an unverified remedy.`);
   else if (!Number.isInteger(report.fullness) || report.fullness < 0 || report.condition === "unknown") messages.push("Check the trainer's hunger and condition reports before giving medicine.");
   else if (report.condition === "sleeping") {
     const tonic = RAISING.foods.find(food => food.wakes);
-    if (!tonic) throw new Error("The pinned waking medicine is missing.");
+    if (!tonic) throw new Error("The waking medicine is missing.");
     const variant = chick ? tonic.chick : tonic;
-    messages.push(`Sleeping birds refuse other foods. ${tonic.name} is the pinned source's immediate waking item; it adds ${variant.fullness} fullness and changes affection by ${variant.affection}. If choosing to wake the bird, trade it alone once, then recheck reports before any other treatment. Waiting for the trainer's next report avoids the tonic's affection cost.`);
+    messages.push(`Sleeping birds refuse other foods. ${tonic.name} is the immediate waking item; it adds ${variant.fullness} fullness and changes affection by ${variant.affection}. If choosing to wake the bird, trade it alone once, then recheck reports before any other treatment. Waiting for the trainer's next report avoids the tonic's affection cost.`);
   }
   else if (remedies.length) messages.push("There is room for one treatment item under the reported fullness estimate. Choose one matching remedy below, trade one item alone, then recheck hunger. Alternatives are not a shopping list or a combined dose. Do not repeat doses to chase an immediate cure.");
   if (report.condition === "unwell" && !remedies.length) messages.push("Ill or injured is not specific enough to choose a medicine. Select the exact ailment or ailments the trainer reported below.");
   if (report.condition === "tired") messages.push("Low energy alone is not an illness diagnosis. Skip energy-costing activities until enough energy is available; do not give illness medicine solely for tiredness.");
-  if (report.treatmentGiven && report.fullness >= 224) messages.push(`The bird is completely full: no additional medicine or food now. A forcing-itself-to-eat message indicates force-feeding, with a ${RAISING.forcedFeedIllnessChance}% stomachache chance at the next update in the pinned model. This does not mean a stomachache is guaranteed; do not feed another remedy to undo the dose.`);
+  if (report.treatmentGiven && report.fullness >= 224) messages.push(`The bird is completely full: no additional medicine or food now. A forcing-itself-to-eat message indicates force-feeding, with a ${RAISING.forcedFeedIllnessChance}% stomachache chance at the next update. This does not mean a stomachache is guaranteed; do not feed another remedy to undo the dose.`);
   if (needsHealthAttention(report)) messages.push("Health comes before the training forecast. Skip today's stat/worm meals and story attempts while addressing these reports. Future training assumes recovery, not a predicted cure date. Listen to Music is stat training, not treatment.");
   if (report.ailments?.includes("spoiled")) messages.push("For spoiled behavior, Scold is a non-food option from the chick stage, but costs energy and lowers affection by 10. Use it only if the bird is awake, present and able to act.");
-  if (report.ailments?.includes("bored")) messages.push("For boredom, Compete with Others is an alternative from adolescence after meeting the rivals, if the bird has enough energy. The pinned action queues a boredom cure even on a loss; wins are needed for the Happy Chocobo story, not the cure.");
+  if (report.ailments?.includes("bored")) messages.push("For boredom, Compete with Others is an alternative from adolescence after meeting the rivals, if the bird has enough energy. It queues a boredom cure even on a loss; wins are needed for the Happy Chocobo story, not the cure.");
   const careActions: string[] = [];
   if (day >= RAISING.settings.daysToChick && !report.treatmentGiven) {
     if (report.ailments?.includes("spoiled")) careActions.push(`Spoiled: Scold is a non-food alternative; it clears spoiled behavior and costs ${RAISING.actionEnergy[51]["2"]}+ energy to start and 10 affection. Use only when present and fit for the activity, not in addition to medicine just to repeat treatment.`);
     if (report.ailments?.includes("bored")) careActions.push(day < RAISING.settings.daysToAdolescent
       ? `Bored: use the matching remedy; Compete with Others is not available until day ${RAISING.settings.daysToAdolescent}.`
-      : `Bored: alternatively, Compete with Others after meeting the rivals on a regular walk (${RAISING.actionEnergy[52]["2"]}+ energy, healthy and awake). This queues a cure for the next report even on a loss in the pinned model.`);
-    if (report.ailments?.includes("lonely")) careActions.push("Lonely: after treatment, rebuild affection with safe planned meals. Low affection can trigger loneliness or running away; Watch Over is not an affection boost in this model.");
+      : `Bored: alternatively, Compete with Others after meeting the rivals on a regular walk (${RAISING.actionEnergy[52]["2"]}+ energy, healthy and awake). This queues a cure for the next report even on a loss.`);
+    if (report.ailments?.includes("lonely")) careActions.push("Lonely: after treatment, rebuild affection with safe planned meals. Low affection can trigger loneliness or running away; Watch Over does not boost affection.");
     if (report.condition === "sleeping") careActions.push(`Sleeping: wait for the next raising-day report, or Scold if the trainer allows it and at least ${RAISING.actionEnergy[51]["2"]} energy is available. Scold wakes the bird and costs 10 affection; do not combine waking remedies. Rest can put it back to sleep.`);
     if (report.condition === "away") careActions.push("Ran away: check the next raising-day report for its return. No food or hands-on care is possible while away; queued days still pass without training. After it returns, check affection and hunger rather than making up missed meals.");
   }
-  const matchingMedicine = remedies[0]?.foods.find(food =>
-    remedies.every(ailment => (chick ? food.chick : food).cures.includes(ailment.id)));
   const ailmentNames = remedies.map(ailment => ailment.label).join(", ");
-  const remedyReference = matchingMedicine && day >= RAISING.settings.daysToChick && !report.treatmentGiven
-    ? ` Remedy for ${ailmentNames}: ${matchingMedicine.name}. Wait until the bird is present, awake and has feeding room before giving one item alone.`
-    : "";
   const treatmentAction = canTreat && report.condition !== "sleeping" && matchingMedicine
     ? `Give 1 ${matchingMedicine.name}, alone, for ${ailmentNames}; recheck hunger. The cure normally waits for the next raising-day update; do not repeat the dose.`
-    : (messages[0] ?? "Check the trainer's current health report.") + remedyReference;
-  return { remedies, messages, careActions, canTreat: canTreat && report.condition !== "sleeping", treatmentAction };
+    : messages[0] ?? "Check the trainer's current health report.";
+  return {
+    remedies, messages, careActions, canTreat: canTreat && report.condition !== "sleeping",
+    canForceFeedRemedy, treatmentAction,
+  };
 }
 export type FeedingEstimate = {
   items: number[];

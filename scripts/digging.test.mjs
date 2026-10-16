@@ -263,7 +263,7 @@ test("Bore, Burrow and Treasure remain sourced reference layers, never active re
   assert.equal(matchesDiggingSearch(rows.find(row => row.item === "Bone Chip" && row.category === "Bore"), "ore"), false, "ore searches must not match the word Bore");
   for (const row of rows.filter(row => ["Bore", "Burrow", "Treasure"].includes(row.category))) {
     assert.equal(row.status, "reference");
-    assert.match(row.condition, /Not applied by the pinned override/);
+    assert.match(row.condition, /Not applied by the active override/);
     assert.equal(row.perAttempt, null);
     assert.ok(matchesDiggingSearch(row, row.category));
   }
@@ -348,9 +348,9 @@ test("digging table exposes opt-in conditional browsing and source limitations",
   assert.match(html, /e.g. elemental ore, gold ore, Bore/);
   assert.match(html, /not as extra rewards in the active pool/);
   assert.match(html, /Only the 26 supported digging zones/);
-  assert.match(html, /Pinned base-layer item lists/);
+  assert.match(html, /Base-layer item lists/);
   assert.match(html, /When conditions met rates use a separate complete pool for each row/);
-  assert.match(html, /ore starts at level 50 rather than 60/);
+  assert.match(html, /active override starts ore at level 50 rather than 60/);
   assert.match(html, /Ore weight \(not %\)/);
   assert.match(html, /aria-label="Elemental ore rank scaling"/);
   assert.match(html, /Their rates remain unmodeled/);

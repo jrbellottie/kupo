@@ -111,10 +111,10 @@ export const RAISING_PRESETS: RaisingPreset[] = [
     reasons: {
       strength: "Retail racing references tie Strength to top speed. SS gives the main speed foundation, so this preset prioritizes Strength. SS begins at 224; it is not the raw 255 maximum.",
       endurance: "Determines starting race stamina in retail references. B provides a stamina base without spending the whole budget on physical stats; Canter complements it.",
-      discernment: "Helps manage race stamina and item-use timing in retail references. A supports efficient stamina use, not just story learning; the pinned Canter threshold is only 96 DSC.",
+      discernment: "Helps manage race stamina and item-use timing in retail references. A supports efficient stamina use, not just story learning; Canter's threshold is only 96 DSC.",
       receptivity: "Helps avoid accidents and opponents' attacks in retail references. C is useful for a first racer facing NPCs, rather than sacrificing all defensive stats for speed.",
     },
-    abilityReason: "Gallop and Canter are the community's standard speed/stamina pair. The pinned raising model teaches them at 64 and 96 DSC respectively; learn both before using food that lowers DSC. Their confirmed whistle effects are riding speed and duration, not a simulated race result.",
+    abilityReason: "Gallop and Canter are the community's standard speed/stamina pair. The raising rules teach them at 64 and 96 DSC respectively; learn both before using food that lowers DSC. Their confirmed whistle effects are riding speed and duration, not a simulated race result.",
   },
   {
     id: "circuit", label: "Circuit - Elm saddle (community)", priority: "strength",
@@ -122,12 +122,12 @@ export const RAISING_PRESETS: RaisingPreset[] = [
     desiredAbilities: ["Gallop", "Canter"],
     summary: "A community Circuit allocation aimed at NPC-heavy races with an Elm saddle: 254/34/224/128 uses all 640 points. It trades the starter's stamina reserve for near-maximum speed, stronger stamina management and item defense. It is not a universal C1 optimum; opponents, items and jockey orders matter.",
     reasons: {
-      strength: "Retail community reports say speed continues improving within SS, so 254 aims near the raw maximum rather than stopping at 224. This follows the cited allocation; the pinned raising cap is 255, not 254.",
+      strength: "Retail community reports say speed continues improving within SS, so 254 aims near the raw maximum rather than stopping at 224. This follows the cited allocation; the raising cap is 255, not 254.",
       endurance: "E at 34 is a deliberately small race-stamina reserve, not raising-action energy. The recommendation relies on an Elm saddle's reported +16 END during Circuit races. Do not assume this low-END tradeoff is suitable without that saddle.",
       discernment: "SS at 224 favors efficient race-stamina use to complement low END, rather than merely meeting the 96 DSC needed to learn Canter. This is the more END-balanced of the community's two suggested allocations, not the 254 DSC / 4 END variant.",
       receptivity: "B at 128 is an item-defense investment for NPC-heavy races. Against player fields using speed items rather than attacks, community guidance suggests less RCP may be useful; this preset is not optimized for every opponent lineup.",
     },
-    abilityReason: "Gallop + Canter supply the community-recommended speed/stamina pair and occupy both slots. The training model uses the same pinned 64/96 DSC learning thresholds; neither race effects nor saddle bonuses are added to the projected raised stats.",
+    abilityReason: "Gallop + Canter supply the community-recommended speed/stamina pair and occupy both slots. The training model uses the same 64/96 DSC learning thresholds; neither race effects nor saddle bonuses are added to the projected raised stats.",
   },
 ];
 export type TrainingAction = { kind: "food" | "care"; id: number };

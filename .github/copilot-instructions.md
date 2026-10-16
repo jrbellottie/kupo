@@ -34,6 +34,9 @@ The maintainer can edit this file to set ongoing Copilot project rules.
   needed. Keep visible link labels and documented commands server-neutral.
 - Do not describe source-specific behavior as universal across all servers.
   Keep relevant assumptions and live-server variation caveats.
+- In app copy, do not preface ordinary mechanics, formulas, or results with
+  phrases such as "in the pinned model/source" when the reference context is
+  already clear. State them directly.
 
 ## README scope
 

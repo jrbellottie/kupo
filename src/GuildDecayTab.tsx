@@ -227,7 +227,7 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
       {selection.inputMode === "itemsBought" && selection.quantityBought === 0
         && <p role="status" style={styles.sub}>No purchase was entered, so stock and price remain at the daily target.</p>}
       {selectedOffer.restockRate === 0 && startingStock !== selectedOffer.targetStock
-        && <p role="status" style={styles.sub}>This item has no automatic restock in the source data, so the price will not decay from waiting alone.</p>}
+        && <p role="status" style={styles.sub}>This item has no automatic restock, so the price will not decay from waiting alone.</p>}
       {preview && preview.days.length > 0 && preview.days.every(day => day.price === startingPrice)
         && <p role="status" style={styles.sub}>This stock level is replenished by the next daily refresh, so the calculated price stays at its current level.</p>}
 

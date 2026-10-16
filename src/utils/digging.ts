@@ -165,7 +165,7 @@ export function diggingCatalog(zone: string, conditions: DigConditions, includeC
       : `Registered personal chocobo with ${category}`;
     add({
       ...entry,
-      condition: `${requirement}; ${DIG_RANKS[entry.minimumRank]} (${entry.minimumRank * 10}+) in base source. Not applied by the pinned override; live availability unverified.`,
+      condition: `${requirement}; ${DIG_RANKS[entry.minimumRank]} (${entry.minimumRank * 10}+) in base source. Not applied by the active override; live availability unverified.`,
     }, category, "reference");
   }
   return { distribution, rows };
