@@ -37,6 +37,7 @@
   "linux": {
     "icon": "build/icon.png",
     "category": "Utility",
+    "syncDesktopName": true,
     "target": [
       "AppImage"
     ],
