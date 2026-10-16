@@ -7,7 +7,7 @@ import { buildSync } from "esbuild";
 const bundle = buildSync({ entryPoints: ["src/utils/chocoboRaising.ts"], bundle: true, write: false, platform: "node", format: "esm" });
 const { RAISING, STAT_KEYS, STAT_BANDS, PROJECTION_FOODS, foodStatText, foodEffects, projectFoodOnly, validateFoodProjection, ridingEstimate, statRank, carePlanRange, applyRaisingStatChanges } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 const plannerBundle = buildSync({ entryPoints: ["src/utils/chocoboRaisingPlanner.ts"], bundle: true, write: false, platform: "node", format: "esm" });
-const { RAISING_ABILITIES, RAISING_PRESETS, STORY_ATTEMPTS_95, LAST_RAISING_DAY, RAISING_START_KEY, RAISING_SAVED_STARTS_KEY, parseSavedRaisingStarts, validateRaisingGoal, planRaisingGoal, applyTrainingAction, trainingActionName, storyLearningProbability, careAvailableDay, trainingFoodLimit, trainingFoodTotals, groupTrainingDays, raisingDayAt, parseRaisingStart, localRaisingStart } = await import(`data:text/javascript;base64,${Buffer.from(plannerBundle.outputFiles[0].text).toString("base64")}`);
+const { RAISING_ABILITIES, RAISING_PRESETS, STORY_ATTEMPTS_95, LAST_RAISING_DAY, RAISING_START_KEY, RAISING_SAVED_STARTS_KEY, parseSavedRaisingStarts, validateRaisingGoal, planRaisingGoal, applyTrainingAction, trainingActionName, storyLearningProbability, careAvailableDay, maxManualShortWalks, trainingFoodLimit, trainingFoodTotals, groupTrainingDays, raisingDayAt, parseRaisingStart, localRaisingStart } = await import(`data:text/javascript;base64,${Buffer.from(plannerBundle.outputFiles[0].text).toString("base64")}`);
 const dailyBundle = buildSync({ entryPoints: ["src/utils/raisingDaily.ts"], bundle: true, write: false, platform: "node", format: "esm" });
 const { RAISING_DAILY_KEY, parseSavedRaisingDaily, dailyProgress, todayCare, tomorrowCare, recordArrangedCare, feedingInputKey, plannerColorGoal } = await import(`data:text/javascript;base64,${Buffer.from(dailyBundle.outputFiles[0].text).toString("base64")}`);
 const colorBundle = buildSync({ entryPoints: ["src/utils/chocoboColor.ts"], bundle: true, write: false, platform: "node", format: "esm" });
@@ -453,6 +453,8 @@ test("daily checklist persists valid reports and resets completion only for a di
 test("feeding menus respect stage, report uncertainty, source effects and the force-feeding boundary", () => {
   assert.equal(RAISING.feeding.initialAffection, 255);
   assert.equal(RAISING.feeding.chickHungerPerEnergy, 2.25);
+  assert.equal(maxManualShortWalks(0), 3);
+  assert.equal(maxManualShortWalks(2), 3);
   assert.equal(AFFECTION_TARGET, 224);
   assert.deepEqual(AFFECTION_REPORTS.at(-1), { label: "Regards you as a parent", min: 224, max: 255 });
   assert.ok(FEEDING_FOODS.every(food => !food.forgetsAbility && !food.rerollGene && !food.random.eitherWay));
@@ -793,8 +795,11 @@ test("day-six digging color goal trains Discernment without giving up non-yellow
     assert.equal(plan.days[2].careId, 3, "arrange Listen to Music rather than an affection-only Basic Care route");
     assert.ok(plan.days[2].after.discernment > 0);
     const energy = RAISING.plans.find(care => care.id === tomorrowCareId).energy;
-    assert.equal(plan.days[2].feeding.fullnessBefore, plan.days[1].feeding.fullnessAfter - Math.floor(2.25 * energy),
-      "locked care energy affects the following day's hunger");
+    const walks = plan.days[1].manualShortWalks ?? 0;
+    const walkEnergy = RAISING.actionEnergy[42]["2"];
+    assert.equal(plan.days[2].feeding.fullnessBefore,
+      plan.days[1].feeding.fullnessAfter - Math.floor(2.25 * (energy + walks * walkEnergy)),
+      "locked care and planned walks affect the following day's hunger");
     assert.ok(plan.color.plannedWorms >= 1, "preserve or improve the reported one-worm color strategy");
     assert.equal(plan.complete, true);
   }
@@ -928,12 +933,20 @@ test("color lifetime route prioritizes odds over affection and still meets the d
     colorGoal: { eggId: 2312, wormsFed: 0 },
   }));
   assert.equal(plan.complete, true);
-  assert.equal(plan.color.plannedWorms, 2, "care-only chick hunger permits two worms when color odds come first");
+  assert.equal(plan.color.plannedWorms, 48, "walk-assisted hunger permits more safe chick worm meals");
   assert.ok(plan.color.after.yellow < plan.color.before.yellow);
   let count = 0;
+  let fullness = 255;
+  let affection = 255;
+  let energySpent = 0;
   for (const day of plan.days) {
-    let fullness = day.feeding.fullnessBefore;
-    let affection = day.feeding.affectionBefore;
+    const care = RAISING.plans.find(entry => entry.id === day.careId);
+    if (day.day > 0) {
+      affection = Math.max(0, Math.min(255, affection + care.affection));
+      fullness = day.day <= 4 ? 255 : day.day < 19 ? Math.max(0, fullness - Math.floor(2.25 * energySpent)) : 0;
+    }
+    assert.equal(day.feeding.fullnessBefore, fullness);
+    assert.equal(day.feeding.affectionBefore, affection);
     let current = applyTrainingAction(day.before, { kind: "care", id: day.careId }, day.day, day.carePoints);
     for (const id of day.feeding.items) {
       assert.ok(day.day >= 4 && fullness < 224);
@@ -946,6 +959,8 @@ test("color lifetime route prioritizes odds over affection and still meets the d
     }
     if (day.story) current = applyRaisingStatChanges(current, stats(0, 0, 1, 0));
     assert.deepEqual(current, day.after);
+    energySpent = day.day === 0 || day.day >= 19 ? 0 : care.energy
+      + (day.manualShortWalks ?? 0) * RAISING.actionEnergy[42]["2"];
     assert.equal(fullness, day.feeding.fullnessAfter);
     assert.equal(affection, day.feeding.affectionAfter);
   }
@@ -1104,6 +1119,7 @@ test("report-aware full routes meet all preset goals while maintaining affection
     const plan = planRaisingGoal(input);
     assert.equal(plan.complete, true, `${preset.id}: ${plan.remaining.join("; ")}`);
     assert.ok(STAT_KEYS.every(key => plan.result[key] >= preset.target[key]));
+    assert.ok(plan.days.some(step => (step.manualShortWalks ?? 0) > 0), `${preset.id}: the route uses walks when they improve feeding capacity`);
     let current = stats();
     let affection = 255;
     let fullness = 255;
@@ -1127,7 +1143,9 @@ test("report-aware full routes meet all preset goals while maintaining affection
         fullness = Math.min(255, fullness + variant.fullness);
       }
       if (step.story) current = applyRaisingStatChanges(current, stats(0, 0, 1));
-      energySpent = step.day === 0 || step.story ? 0 : care.energy;
+      assert.ok((step.manualShortWalks ?? 0) <= maxManualShortWalks(step.careId));
+      energySpent = step.day === 0 || step.story ? 0
+        : care.energy + (step.manualShortWalks ?? 0) * RAISING.actionEnergy[42]["2"];
       assert.equal(step.feeding.affectionAfter, affection);
       assert.equal(step.feeding.fullnessAfter, fullness);
       assert.ok(affection >= 224, `${preset.id}, day ${step.day}`);
@@ -1143,13 +1161,19 @@ test("report-aware full routes meet all preset goals while maintaining affection
     const saved = {
       form: { ...input, current: Object.fromEntries(STAT_KEYS.map(key => [key, "0"])), target: Object.fromEntries(STAT_KEYS.map(key => [key, String(input.target[key])])) },
       daily: { startedAt: null, plannedDay: 0, feedingReport: input.feedingReport,
-        days: plan.days.map(({ day, foodId, foodCount, story, careId, feeding }) => ({ day, foodId, foodCount, story, careId, feeding })) },
+        days: plan.days.map(({ day, foodId, foodCount, story, careId, feeding, manualShortWalks }) =>
+          ({ day, foodId, foodCount, story, careId, feeding, manualShortWalks })) },
     };
     saved.daily.feedingInputs = feedingInputKey(saved.form, input.feedingReport);
     assert.notEqual(feedingInputKey({ ...saved.form, current: { ...saved.form.current, strength: "32" } }, input.feedingReport),
       saved.daily.feedingInputs, "changed stats invalidate saved meals, not just changed hunger");
     assert.notEqual(feedingInputKey(saved.form, { ...input.feedingReport, fullness: 223 }), saved.daily.feedingInputs);
     assert.deepEqual(parseSavedRaisingDaily(JSON.stringify(saved)), saved);
+    const excessiveWalks = structuredClone(saved);
+    const chickStep = excessiveWalks.daily.days.find(step => step.day >= 4 && step.day < 19);
+    assert.ok(chickStep);
+    chickStep.manualShortWalks = 4;
+    assert.throws(() => parseSavedRaisingDaily(JSON.stringify(excessiveWalks)), /invalid/, "saved walk counts cannot exceed the energy budget");
     const bad = structuredClone(saved);
     const fed = bad.daily.days.find(step => step.feeding.items.length);
     fed.feeding.fullnessBefore = 255;
@@ -1575,6 +1599,27 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     }
   }
   const healthTimelineView = states[0];
+  states[0] = { ...healthTimelineView, calculation: { status: "success", plan: { ...result, days: [] } },
+    form: { ...healthTimelineView.form, feedingReport: {
+      ...healthTimelineView.form.feedingReport, condition: "healthy", fullness: 255, ailments: [],
+    } },
+  };
+  const fullChickInstructions = textContent(todayRow(render()));
+  assert.match(fullChickInstructions, /Optional today: a Short Walk spends 24-30 energy/);
+  assert.match(fullChickInstructions, /lowers chick fullness by 2\.25 per energy at the next daily update/);
+  assert.match(fullChickInstructions, /requires at least 30 energy/);
+  states[0] = { ...states[0], form: { ...states[0].form, feedingReport: {
+    ...states[0].form.feedingReport, condition: "tired",
+  } } };
+  assert.doesNotMatch(textContent(todayRow(render())), /Optional today: a Short Walk/,
+    "walk advice is not shown when the report says the chick is too tired for activities");
+  states[0] = healthTimelineView;
+  states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form, feedingReport: {
+    ...healthTimelineView.form.feedingReport, condition: "healthy", fullness: 255, ailments: [],
+  } }, calculation: { status: "success", plan: { ...result, days: result.days.map(step => step.day === 7
+    ? { ...step, manualShortWalks: 2 } : step) } } };
+  const walkTimeline = findElement(render(), element => element.type === "table" && element.props["aria-label"] === "Goal training steps");
+  assert.match(textContent(walkTimeline), /Manual Short Walks: 2 per day, minimum for these meals; budgeted at 30 energy each/);
   states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
     feedingReport: { ...healthTimelineView.form.feedingReport, events: ["white-handkerchief", "high-spirits"] },
   } };
@@ -1855,6 +1900,10 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(help, /It does not automatically feed <span class="raising-food raising-food-azouph-greens">Azouph Greens<\/span>/);
   assert.match(help, /Random food bonuses are not credited as guaranteed gains/);
   assert.match(help, /lowest affection and highest fullness/);
+  assert.match(help, /plans up to three manual Short Walks when needed to fit its selected meals/);
+  assert.match(help, /It budgets 30 energy per walk, the higher-weather cost; chicks lose 2\.25 fullness per energy at the next daily update/);
+  assert.match(help, /Walks do not directly change stats, and daily care refills energy; they do use energy needed for other manual actions, which are not modeled/);
+  assert.match(help, /timeline shows the minimum walks needed for its meals/);
   assert.match(help, /Calculate becomes available when all required fields are valid/);
   assert.doesNotMatch(html, /These reports are from today|requires confirmation again/);
   const affectionHelp = html.match(/<details><summary>Affection: levels, feeding and care<\/summary>[\s\S]*?<\/details>/)?.[0];

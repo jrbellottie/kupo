@@ -1,5 +1,5 @@
 import { RAISING, STAT_KEYS, PROJECTION_FOODS, type RaisingStats } from "./chocoboRaising";
-import { LAST_RAISING_DAY, RAISING_ABILITIES, careAvailableDay, type RaisingGoalInput, type TrainingDay } from "./chocoboRaisingPlanner";
+import { LAST_RAISING_DAY, RAISING_ABILITIES, careAvailableDay, maxManualShortWalks, type RaisingGoalInput, type TrainingDay } from "./chocoboRaisingPlanner";
 import { BIRD_CONDITIONS, PLANNER_FEEDING_FOODS, validateFeedingReport, validHealthDetails, type FeedingReport } from "./chocoboFeeding";
 import { PARASITE_WORM_ID, type ColorGoal } from "./chocoboColor";
 
@@ -12,7 +12,7 @@ export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "current
   eggId?: string;
   wormsFed?: string;
 };
-export type DailyStep = Pick<TrainingDay, "day" | "foodId" | "foodCount" | "story" | "careId" | "feeding">;
+export type DailyStep = Pick<TrainingDay, "day" | "foodId" | "foodCount" | "story" | "careId" | "feeding" | "manualShortWalks">;
 export type DailySchedule = {
   startedAt: number | null; plannedDay: number; days: DailyStep[];
   feedingReport?: FeedingReport; feedingInputs?: string;
@@ -96,6 +96,10 @@ function isSavedDaily(value: unknown): value is SavedRaisingDaily {
         && typeof step.foodCount === "number" && Number.isInteger(step.foodCount) && step.foodCount >= 0 && step.foodCount <= 4
         && (step.foodId !== null || step.foodCount === 0)
         && (step.story === null || RAISING_ABILITIES.some(ability => ability.name === step.story))
+        && (step.manualShortWalks === undefined || typeof step.manualShortWalks === "number" && Number.isInteger(step.manualShortWalks)
+          && step.manualShortWalks >= 0 && typeof step.careId === "number"
+          && step.manualShortWalks <= maxManualShortWalks(step.careId)
+          && (step.manualShortWalks === 0 || step.day >= RAISING.settings.daysToChick && step.day < RAISING.settings.daysToAdolescent))
         && (step.feeding === undefined || (step.foodId === null && step.foodCount === 0 && validFeeding(step.feeding, step.day))))) return false;
     if (daily.feedingReport !== undefined) {
       const report = daily.feedingReport;

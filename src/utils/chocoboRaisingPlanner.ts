@@ -135,6 +135,7 @@ export type TrainingDay = {
   day: number;
   careId: number;
   carePoints: 2 | 3;
+  manualShortWalks?: number;
   foodId: number | null;
   foodCount: number;
   story: string | null;
@@ -148,6 +149,7 @@ const zeroStats = (): RaisingStats => ({ strength: 0, endurance: 0, discernment:
 const total = (stats: RaisingStats) => STAT_KEYS.reduce((sum, key) => sum + stats[key], 0);
 const meetsGoal = (stats: RaisingStats, target: RaisingStats) => STAT_KEYS.every(key => stats[key] >= target[key]);
 const statsKey = (stats: RaisingStats) => stats.strength | (stats.endurance << 8) | (stats.discernment << 16) | (stats.receptivity << 24);
+const COLOR_STATES_PER_WORM_COUNT = 8;
 export const LAST_RAISING_DAY = RAISING.settings.daysToAdult4 - 1;
 
 export function validateRaisingGoal(input: RaisingGoalInput): string | null {
@@ -245,6 +247,92 @@ export function careAvailableDay(id: number): number {
     : plan.stage === "Adolescent" ? RAISING.settings.daysToAdolescent : RAISING.settings.daysToAdult1;
 }
 
+export function maxManualShortWalks(careId: number): number {
+  const plan = RAISING.plans.find(entry => entry.id === careId && entry.id !== 1);
+  if (!plan) throw new Error(`Unsupported care plan: ${careId}.`);
+  const energyThreshold = RAISING.actionEnergy[42]["2"];
+  const energyCost = RAISING.actionEnergy[42]["2"];
+  let energy = 100 - plan.energy;
+  let walks = 0;
+  while (energy >= energyThreshold) {
+    walks++;
+    energy -= energyCost;
+  }
+  return walks;
+}
+
+function fitManualWalkSchedule(days: TrainingDay[], currentDay: number): void {
+  if (!days.some(day => day.feeding)) {
+    for (const day of days) day.manualShortWalks = 0;
+    return;
+  }
+  type State = {
+    fullness: number;
+    energySpent: number;
+    totalWalks: number;
+    walkCounts: number[];
+    fullnessByDay: { before: number; after: number }[];
+  };
+  let states: State[] = [{ fullness: 255, energySpent: 0, totalWalks: 0, walkCounts: [], fullnessByDay: [] }];
+  const walkCost = RAISING.actionEnergy[42]["2"];
+  for (let index = 0; index < days.length; index++) {
+    const day = days[index];
+    const next = days[index + 1];
+    const candidates = new Map<string, State>();
+    for (const state of states) {
+      const fullnessBefore = index === 0 ? day.feeding?.fullnessBefore ?? 255
+        : day.day <= RAISING.settings.daysToChick ? 255
+          : day.day < RAISING.settings.daysToAdolescent
+            ? Math.max(0, state.fullness - Math.floor(RAISING.feeding.chickHungerPerEnergy * state.energySpent)) : 0;
+      let fullnessAfter = fullnessBefore;
+      let fits = true;
+      for (const id of day.feeding?.items ?? []) {
+        if (fullnessAfter >= 224) {
+          fits = false;
+          break;
+        }
+        const food = RAISING.foods.find(entry => entry.id === id);
+        if (!food) throw new Error(`Unsupported food in planned meal: ${id}.`);
+        fullnessAfter = Math.min(255, fullnessAfter
+          + (day.day < RAISING.settings.daysToAdolescent ? food.chick.fullness : food.fullness));
+      }
+      if (!fits) continue;
+      const care = RAISING.plans.find(entry => entry.id === day.careId && entry.id !== 1);
+      if (!care) throw new Error(`Unsupported care plan: ${day.careId}.`);
+      const canWalk = day.day > currentDay && day.day >= RAISING.settings.daysToChick
+        && day.day < RAISING.settings.daysToAdolescent && next?.day === day.day + 1
+        && next.day < RAISING.settings.daysToAdolescent;
+      const walkOptions = canWalk
+        ? Array.from({ length: maxManualShortWalks(day.careId) + 1 }, (_, walks) => walks) : [0];
+      for (const walks of walkOptions) {
+        const energySpent = day.day === currentDay || day.day >= RAISING.settings.daysToAdolescent || day.story !== null
+          ? 0 : care.energy + walks * walkCost;
+        const candidate: State = {
+          fullness: fullnessAfter, energySpent, totalWalks: state.totalWalks + walks,
+          walkCounts: [...state.walkCounts, walks],
+          fullnessByDay: [...state.fullnessByDay, { before: fullnessBefore, after: fullnessAfter }],
+        };
+        const key = `${candidate.fullness}:${candidate.energySpent}`;
+        const existing = candidates.get(key);
+        if (!existing || candidate.totalWalks < existing.totalWalks) candidates.set(key, candidate);
+      }
+    }
+    if (!candidates.size) throw new Error(`The selected meal route cannot be fed safely on day ${day.day}.`);
+    states = [...candidates.values()];
+  }
+  states.sort((a, b) => a.totalWalks - b.totalWalks);
+  const route = states[0];
+  for (let index = 0; index < days.length; index++) {
+    days[index].manualShortWalks = route.walkCounts[index];
+    const feeding = days[index].feeding;
+    if (feeding) days[index].feeding = {
+      ...feeding,
+      fullnessBefore: route.fullnessByDay[index].before,
+      fullnessAfter: route.fullnessByDay[index].after,
+    };
+  }
+}
+
 export function trainingFoodLimit(id: number): number {
   const food = PROJECTION_FOODS.find(entry => entry.id === id && !entry.forgetsAbility);
   if (!food || food.fullness <= 0) throw new Error(`Unsupported training food: ${id}.`);
@@ -275,6 +363,7 @@ export function groupTrainingDays(days: TrainingDay[], separateDays: readonly nu
       .every(boundary => (previous.day < boundary) === (entry.day < boundary));
     if (previous && samePhase && !separateDays.includes(entry.day) && !separateDays.includes(previous.day)
       && previous.endDay + 1 === entry.day && previous.careId === entry.careId && previous.carePoints === entry.carePoints
+      && previous.manualShortWalks === entry.manualShortWalks
       && previous.foodId === entry.foodId && previous.foodCount === entry.foodCount && previous.story === entry.story
       && previous.feeding?.items.join(",") === entry.feeding?.items.join(",")) {
       previous.endDay = entry.day;
@@ -328,7 +417,13 @@ export function planRaisingGoal(input: RaisingGoalInput) {
       const yellow = color.options[a.worms].odds.yellow - color.options[b.worms].odds.yellow;
       if (Math.abs(yellow) > 1e-12) return yellow;
     }
-    return score(a) - score(b);
+    const scoreDifference = score(a) - score(b);
+    if (scoreDifference !== 0) return scoreDifference;
+    if (color && optimizingColor) {
+      if (a.fullness !== b.fullness) return a.fullness - b.fullness;
+      if (a.energySpent !== b.energySpent) return b.energySpent - a.energySpent;
+    }
+    return 0;
   };
   let frontier = [start];
   const foods = PROJECTION_FOODS.filter(food => !food.forgetsAbility);
@@ -345,6 +440,9 @@ export function planRaisingGoal(input: RaisingGoalInput) {
       const seekingColor = !!color && day < RAISING.settings.daysToAdolescent && parent.worms < color.best.worms;
       for (const care of reached && !seekingColor && !lockedCare ? plans.filter(plan => plan.id === 0) : plans) {
         const afterCare = applyTrainingAction(parent.stats, { kind: "care", id: care.id }, day, care.points);
+        const manualShortWalks = input.feedingReport && day > input.currentDay && day >= RAISING.settings.daysToChick
+          && day < RAISING.settings.daysToAdolescent
+          ? maxManualShortWalks(care.id) : 0;
         let meals: { foodId: number | null; foodCount: number; stats: RaisingStats; feeding?: FeedingEstimate }[] = [
           { foodId: null, foodCount: 0, stats: afterCare },
         ];
@@ -395,7 +493,8 @@ export function planRaisingGoal(input: RaisingGoalInput) {
             attempts++;
           }
           const entry: TrainingDay = {
-            day, careId: care.id, carePoints: care.points, foodId: meal.foodId, foodCount: meal.foodCount, story, attempt,
+            day, careId: care.id, carePoints: care.points, manualShortWalks,
+            foodId: meal.foodId, foodCount: meal.foodCount, story, attempt,
             assumedLearned: attempt === STORY_ATTEMPTS_95, before: parent.stats, after: stats,
             feeding: meal.feeding,
           };
@@ -405,7 +504,8 @@ export function planRaisingGoal(input: RaisingGoalInput) {
           const node: SearchNode = {
             stats, parent, entry, attempts, cost, affection, fullness: meal.feeding?.fullnessAfter ?? parent.fullness,
             // Today's remaining energy is not measured. Story success can also refill energy.
-            energySpent: isToday || story !== null ? 0 : care.energy,
+            energySpent: isToday || story !== null ? 0
+              : care.energy + manualShortWalks * RAISING.actionEnergy[42]["2"],
             affectionDebt: parent.affectionDebt + (meal.feeding ? Math.max(0, AFFECTION_TARGET - affection) * 0.05 : 0),
             worms: parent.worms + (meal.feeding?.items.filter(id => id === PARASITE_WORM_ID).length ?? 0),
           };
@@ -421,9 +521,19 @@ export function planRaisingGoal(input: RaisingGoalInput) {
         }
       }
     }
-    // Retain chick feeding states so early choices do not crowd out better final color odds.
+    // Keep diverse worm totals without allowing extra chick meals to make the color search unbounded.
     const sorted = [...candidates.values()].sort(compare);
-    frontier = optimizingColor && day < RAISING.settings.daysToAdolescent ? sorted : sorted.slice(0, 48);
+    if (optimizingColor && day < RAISING.settings.daysToAdolescent) {
+      const byWormCount = new Map<number, SearchNode[]>();
+      for (const node of sorted) {
+        const states = byWormCount.get(node.worms) ?? [];
+        if (states.length < COLOR_STATES_PER_WORM_COUNT) states.push(node);
+        byWormCount.set(node.worms, states);
+      }
+      frontier = [...byWormCount.values()].flat().sort(compare);
+    } else {
+      frontier = sorted.slice(0, 48);
+    }
     if (!frontier.length) throw new Error(`No valid training candidates on day ${day}.`);
   }
   const preferred = color && optimizingColor ? frontier.filter(node =>
@@ -432,6 +542,7 @@ export function planRaisingGoal(input: RaisingGoalInput) {
   const days: TrainingDay[] = [];
   for (let node: SearchNode | null = route; node?.entry; node = node.parent) days.push(node.entry);
   days.reverse();
+  fitManualWalkSchedule(days, input.currentDay);
   const assumedAbilities = pending.slice(0, Math.floor(route.attempts / STORY_ATTEMPTS_95)).map(ability => ability.name);
   const remaining = STAT_KEYS.filter(key => route.stats[key] < input.target[key])
     .map(key => `${STAT_LABELS[key]}: ${input.target[key] - route.stats[key]} more points`);

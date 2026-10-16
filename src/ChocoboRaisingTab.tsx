@@ -12,7 +12,7 @@ import "./ChocoboRaisingTab.css";
 const sourceRoot = `${RAISING.source.repository}/blob/${RAISING.source.revision}/`;
 const actions = [
   { id: 48, name: "Watch Over", stage: "Egg", effect: "Free for eggs; otherwise costs energy. Collects an item held from a walk. No direct stat gain is implemented here." },
-  { id: 42, name: "Short Walk", stage: "Chick", effect: "Local trainer encounters, items and the lost-chick mini-quest. Not the daily Take a Walk care plan." },
+  { id: 42, name: "Short Walk", stage: "Chick", effect: "Local trainer encounters, items and the lost-chick mini-quest. Energy spent lowers chick fullness at the next daily update. Not the daily Take a Walk care plan." },
   { id: 43, name: "Regular Walk", stage: "Adolescent", effect: "Trainer/rival encounters and items. The first regular walk meets the rivals, unlocking Compete with Others." },
   { id: 44, name: "Long Walk", stage: "Adult", effect: "More trainer encounters, including Brutus. Dietmund can appear after Save My Son; this alone does not verify a story reward." },
   { id: 50, name: "Tell a Story", stage: "Adolescent", effect: "A selected ability story adds +1 DSC before its threshold check. A successful learning/inspiration roll consumes the story and restores 10-100 energy." },
