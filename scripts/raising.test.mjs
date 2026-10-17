@@ -15,7 +15,7 @@ const { CHOCOBO_COLORS, PARASITE_WORM_ID, geneColor, eggGeneDistribution, chocob
 const feedingBundle = buildSync({ entryPoints: ["src/utils/chocoboFeeding.ts"], bundle: true, write: false, platform: "node", format: "esm" });
 const { AFFECTION_TARGET, AFFECTION_REPORTS, HUNGER_REPORTS, FEEDING_FOODS, BIRD_AILMENTS, healthGuidance, needsHealthAttention, treatmentFoods, recordMedicineEaten, validateFeedingReport, feedingOptions, feedingFood, feedingSummary, careSuccessChance } = await import(`data:text/javascript;base64,${Buffer.from(feedingBundle.outputFiles[0].text).toString("base64")}`);
 const eventsBundle = buildSync({ entryPoints: ["src/utils/raisingEvents.ts"], bundle: true, write: false, platform: "node", format: "esm" });
-const { RAISING_EVENTS, raisingEventGuidance, raisingMilestoneGuidance, validRaisingEvents } = await import(`data:text/javascript;base64,${Buffer.from(eventsBundle.outputFiles[0].text).toString("base64")}`);
+const { LOST_CHICK_OWNERS, RAISING_EVENTS, filterLostChickOwners, raisingEventGuidance, raisingMilestoneGuidance, validLostChickClues, validRaisingEvents } = await import(`data:text/javascript;base64,${Buffer.from(eventsBundle.outputFiles[0].text).toString("base64")}`);
 const food = name => {
   const found = RAISING.foods.find(entry => entry.name === name);
   assert.ok(found, `Missing ${name}`);
@@ -638,7 +638,17 @@ test("reported raising events give source-specific next steps without inventing 
   assert.match(raisingEventGuidance({ ...report, events: ["returned"] }, 30).join(" "),
     /away days passed without care or training.*no catch-up bonus/);
   assert.match(raisingEventGuidance({ ...report, events: ["lost-chick"] }, 30).join(" "),
-    /correct owner earns the Diligent Chocobo story.*wrong guess.*later short walk/);
+    /Take it home.*short walk.*first initial, race\/gender and occupation.*Kiria-Romaria.*separate NPC from Pulonono.*Enter the clues above to filter the owner list/);
+  assert.equal(LOST_CHICK_OWNERS.length, 25);
+  assert.equal(validLostChickClues({ firstLetter: "G", raceGender: "Mithra", occupation: "Hunter" }), true);
+  assert.equal(validLostChickClues({ firstLetter: "GG" }), false);
+  const gMithraOwners = filterLostChickOwners({ firstLetter: "g", raceGender: "mithra" });
+  assert.deepEqual(gMithraOwners.map(owner => owner.name), ["Gioh Ajihri", "Gottah Maporushanoh"]);
+  assert.deepEqual(filterLostChickOwners({ firstLetter: "G", raceGender: "Mithra", occupation: "Hunter" }).map(owner => owner.name),
+    ["Gioh Ajihri"]);
+  assert.deepEqual(filterLostChickOwners({ firstLetter: "G", raceGender: "Mithra", occupation: "Adventurer" }).map(owner => owner.name),
+    ["Gottah Maporushanoh"]);
+  assert.equal(filterLostChickOwners({ firstLetter: "Z" }).length, 0);
   for (const day of [7, 14, 15]) {
     assert.doesNotMatch(raisingMilestoneGuidance(day).join(" "), /White Handkerchief/);
     assert.doesNotMatch(raisingEventGuidance({ ...report, day }, day).join(" "), /White Handkerchief/);
@@ -1635,6 +1645,31 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   assert.match(textContent(otherEventsFieldset), /condition effects guide/);
   assert.doesNotMatch(textContent(todayRow(selectedEventTree)), /High spirits.*Happiness/);
   assert.doesNotMatch(textContent(todayRow(selectedEventTree)), /White Handkerchief \/ nighttime crying/);
+  states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
+    feedingReport: { ...healthTimelineView.form.feedingReport, events: ["lost-chick"] },
+  } };
+  const lostChickSearch = tree => findElement(tree, element => element.props["aria-label"] === "Lost Chick clue search");
+  const lostChickOwnerTable = tree => findElement(tree, element => element.props["aria-label"] === "Lost Chick owner candidates");
+  const lostChickInput = (tree, label) => findElement(findElement(lostChickSearch(tree), element =>
+    element.type === "label" && textContent(element).startsWith(label)), element => element.type === "input");
+  assert.match(textContent(lostChickOwnerTable(render())), /25 of 25 possible owners match/);
+  lostChickInput(render(), "Owner's first letter").props.onChange({ target: { value: "G" } });
+  lostChickInput(render(), "Owner's race and gender").props.onChange({ target: { value: "Mithra" } });
+  assert.match(textContent(lostChickOwnerTable(render())), /2 of 25 possible owners match/);
+  assert.match(textContent(lostChickOwnerTable(render())), /Gioh Ajihri.*Gottah Maporushanoh/);
+  lostChickInput(render(), "Owner's occupation").props.onChange({ target: { value: "Hunter" } });
+  assert.match(textContent(lostChickOwnerTable(render())), /1 of 25 possible owners match/);
+  assert.match(textContent(lostChickOwnerTable(render())), /Gioh Ajihri/);
+  assert.doesNotMatch(textContent(lostChickOwnerTable(render())), /Gottah Maporushanoh/);
+  assert.deepEqual(parseSavedRaisingDaily(JSON.stringify(states[0])).form.lostChickClues,
+    { firstLetter: "G", raceGender: "Mithra", occupation: "Hunter" });
+  assert.throws(() => parseSavedRaisingDaily(JSON.stringify({ ...states[0], form: {
+    ...states[0].form, lostChickClues: { firstLetter: "GG" },
+  } })), /saved raising checklist is invalid/);
+  healthCheckbox(render(), "Found a lost chick on a walk").props.onChange({ target: { checked: false } });
+  assert.equal(lostChickSearch(render()), undefined, "clue inputs and candidate list require the checked Lost Chick event");
+  assert.deepEqual(states[0].form.lostChickClues, { firstLetter: "G", raceGender: "Mithra", occupation: "Hunter" },
+    "clues are preserved if the event checkbox is accidentally cleared");
   for (const [ailment, expected] of [["spoiled", /Scold.*20\+ energy/], ["bored", /not available until day 19/], ["lonely", /rebuild affection/]]) {
     states[0] = { ...healthTimelineView, form: { ...healthTimelineView.form,
       feedingReport: { ...healthTimelineView.form.feedingReport, ailments: [ailment] },

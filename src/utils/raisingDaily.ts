@@ -2,6 +2,7 @@ import { RAISING, STAT_KEYS, PROJECTION_FOODS, type RaisingStats } from "./choco
 import { LAST_RAISING_DAY, RAISING_ABILITIES, careAvailableDay, maxManualShortWalks, type RaisingGoalInput, type TrainingDay } from "./chocoboRaisingPlanner";
 import { BIRD_CONDITIONS, PLANNER_FEEDING_FOODS, validateFeedingReport, validHealthDetails, type FeedingReport } from "./chocoboFeeding";
 import { PARASITE_WORM_ID, type ColorGoal } from "./chocoboColor";
+import { validLostChickClues, type LostChickClues } from "./raisingEvents";
 
 export const RAISING_DAILY_KEY = "kupo.raising.daily.v1";
 export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "currentDay" | "today" | "colorGoal" | "tomorrowCareId"> & {
@@ -11,6 +12,7 @@ export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "current
   avoidYellow?: boolean;
   eggId?: string;
   wormsFed?: string;
+  lostChickClues?: LostChickClues;
 };
 export type DailyStep = Pick<TrainingDay, "day" | "foodId" | "foodCount" | "story" | "careId" | "feeding" | "manualShortWalks">;
 export type DailySchedule = {
@@ -42,7 +44,7 @@ export function feedingInputKey(form: PlannerForm, report: FeedingReport): strin
     STAT_KEYS.map(key => form.current[key]), STAT_KEYS.map(key => form.target[key]), form.useExactStats === true,
     form.desiredAbilities, form.knownAbilities, form.priority, report.affection, report.fullness, report.condition, report.day,
     form.avoidYellow === true, form.eggId ?? "", form.wormsFed ?? "0",
-    report.ailments ?? [], report.treatmentGiven === true, report.medicineId ?? null, report.events ?? [],
+    report.ailments ?? [], report.treatmentGiven === true, report.medicineId ?? null, report.events ?? [], form.lostChickClues ?? null,
   ]);
 }
 export function plannerColorGoal(form: PlannerForm): ColorGoal | undefined {
@@ -78,6 +80,7 @@ function isSavedDaily(value: unknown): value is SavedRaisingDaily {
     || (form.avoidYellow !== undefined && typeof form.avoidYellow !== "boolean")
     || (form.eggId !== undefined && typeof form.eggId !== "string")
     || (form.wormsFed !== undefined && typeof form.wormsFed !== "string")
+    || !validLostChickClues(form.lostChickClues)
     || (value.defaultsVersion !== undefined && typeof value.defaultsVersion !== "number")) return false;
   if (form.feedingReport !== undefined) {
     const report = form.feedingReport;

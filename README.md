@@ -59,6 +59,9 @@ Look ahead at estimated weather and elemental-ore opportunities, and set reminde
 ### Gardening
 Find Mog House gardening recipes by harvest item, pot, seed, or crystal, with yields and growth estimates from a pinned reference ruleset. Set one rolling timer per planting for feeding windows and harvest readiness, with optional actual feeding records to refine later estimates.
 
+### 🪑 Moghancement
+Plan Mog House furniture for a selected Moghancement and aura tier, compare storage, and browse the furniture’s listed crafting recipes.
+
 ### HELM
 Find mining, harvesting, excavation, and logging opportunities, with gathering maps and information about rewards and equipment.
 

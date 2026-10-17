@@ -53,6 +53,7 @@ const DropsTab = React.lazy(() => import("./DropsTab"));
 const NpcTab = React.lazy(() => import("./NpcTab"));
 const HelmTab = React.lazy(() => import("./HelmTab"));
 const GardeningTab = React.lazy(() => import("./GardeningTab"));
+const MoghancementTab = React.lazy(() => import("./MoghancementTab"));
 
 function clampInt(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.floor(n)));
@@ -201,7 +202,7 @@ function isValidTod(raw: string): boolean {
   );
 }
 
-type TabId = "home" | "timers" | "nm" | "presets" | "counters" | "luShang" | "fish" | "clam" | "chocobo" | "raising" | "helm" | "weather" | "gardening" | "bcnm" | "drops" | "npc" | "bestiary" | "skillchains" | "crafting" | "printing" | "quests" | "atlas" | "calibration";
+type TabId = "home" | "timers" | "nm" | "presets" | "counters" | "luShang" | "fish" | "clam" | "chocobo" | "raising" | "helm" | "weather" | "gardening" | "moghancement" | "bcnm" | "drops" | "npc" | "bestiary" | "skillchains" | "crafting" | "printing" | "quests" | "atlas" | "calibration";
 
 type TabDef = {
   id: TabId;
@@ -224,6 +225,7 @@ const TABS: TabDef[] = [
   { id: "raising", label: "Raising", icon: "🐣" },
   { id: "weather", label: "Weather", icon: "🌦️" },
   { id: "gardening", label: "Gardening", icon: "🌱" },
+  { id: "moghancement", label: "Moghancement", icon: "🪑" },
   { id: "helm", label: "HELM", icon: <Pickaxe size={18} /> },
   { id: "bcnm", label: "BCNM", icon: "⚔️" },
   { id: "skillchains", label: "Skillchains", icon: "🔗" },
@@ -2757,6 +2759,14 @@ export default function AppShell() {
         <div style={styles.tabContent}>
           <React.Suspense fallback={<div style={styles.card}>Loading gardening...</div>}>
             <GardeningTab timers={timers.filter((timer): timer is GardeningTimer => timer.kind === "GARDENING")} nowMs={nowMs} onSetTimer={addGardeningTimer} onRecordFeed={recordGardenFeed} />
+          </React.Suspense>
+        </div>
+      )}
+
+      {activeTab === "moghancement" && (
+        <div style={styles.tabContent}>
+          <React.Suspense fallback={<div style={styles.card}>Loading Moghancement data...</div>}>
+            <MoghancementTab />
           </React.Suspense>
         </div>
       )}

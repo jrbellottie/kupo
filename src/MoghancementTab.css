@@ -1,0 +1,243 @@
+.mogha-tab {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.mogha-card {
+  min-width: 0;
+  border: 1px solid #333;
+  border-radius: 12px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.02);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+}
+
+.mogha-heading,
+.mogha-section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.mogha-title,
+.mogha-section-heading h2 {
+  margin: 0;
+}
+
+.mogha-title {
+  font-size: 24px;
+}
+
+.mogha-section-heading h2 {
+  font-size: 18px;
+}
+
+.mogha-intro,
+.mogha-section-heading p {
+  margin: 5px 0 0;
+  color: #aaa;
+  font-size: 13px;
+}
+
+.mogha-controls {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.mogha-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: #d4d4d4;
+  font-size: 12px;
+}
+
+.mogha-field select,
+.mogha-field input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 0 9px;
+  background: #0c0c0c;
+  color: #eaeaea;
+  color-scheme: dark;
+}
+
+.mogha-count-field input {
+  max-width: 110px;
+}
+
+.mogha-effect-description {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  border-left: 3px solid #8ab4f8;
+  padding: 8px 10px;
+  background: rgba(138, 180, 248, 0.06);
+  color: #ccc;
+  font-size: 13px;
+}
+
+.mogha-effect-description strong {
+  color: #eaeaea;
+}
+
+.mogha-summary {
+  display: grid;
+  gap: 4px;
+  min-width: 220px;
+  color: #cfcfcf;
+  font-size: 13px;
+  text-align: right;
+}
+
+.mogha-summary strong {
+  color: #e8d47e;
+}
+
+.mogha-status,
+.mogha-empty {
+  margin-top: 12px;
+  border: 1px solid #424242;
+  border-radius: 8px;
+  padding: 9px 10px;
+  color: #d6d6d6;
+  font-size: 13px;
+}
+
+.mogha-status-good {
+  border-color: #386644;
+  background: rgba(60, 140, 82, 0.08);
+}
+
+.mogha-status-warn {
+  border-color: #8c682a;
+  background: rgba(251, 191, 36, 0.06);
+}
+
+.mogha-empty {
+  color: #bbb;
+}
+
+.mogha-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  margin-top: 12px;
+  border: 1px solid #333;
+  border-radius: 8px;
+}
+
+.mogha-table {
+  width: 100%;
+  min-width: 860px;
+  border-collapse: collapse;
+  text-align: left;
+  font-size: 12px;
+}
+
+.mogha-table th,
+.mogha-table td {
+  border-bottom: 1px solid #303030;
+  padding: 8px 9px;
+  vertical-align: top;
+}
+
+.mogha-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #171717;
+  color: #cfcfcf;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.mogha-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.mogha-table tbody tr:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.mogha-table td:nth-child(2),
+.mogha-table td:nth-child(4) {
+  white-space: nowrap;
+}
+
+.mogha-purpose,
+.mogha-ingredients {
+  display: block;
+  margin-top: 3px;
+  color: #aaa;
+  font-size: 11px;
+}
+
+.mogha-purpose {
+  color: #8ab4f8;
+}
+
+.mogha-catalog-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mogha-search-field {
+  width: min(290px, 50vw);
+}
+
+.mogha-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  color: #ccc;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.mogha-footnote {
+  margin: 0;
+  color: #999;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@media (max-width: 850px) {
+  .mogha-controls {
+    grid-template-columns: repeat(2, minmax(150px, 1fr));
+  }
+
+  .mogha-summary {
+    text-align: left;
+  }
+}
+
+@media (max-width: 480px) {
+  .mogha-controls {
+    grid-template-columns: 1fr;
+  }
+
+  .mogha-catalog-controls {
+    align-items: stretch;
+    width: 100%;
+  }
+
+  .mogha-catalog-controls .mogha-field {
+    flex: 1 1 140px;
+  }
+
+  .mogha-search-field {
+    width: 100%;
+  }
+}

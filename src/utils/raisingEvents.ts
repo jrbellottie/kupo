@@ -14,6 +14,59 @@ export const RAISING_EVENTS = [
   { id: "lost-chick", label: "Found a lost chick on a walk" },
 ] as const;
 export type RaisingEvent = typeof RAISING_EVENTS[number]["id"];
+export type LostChickClues = {
+  firstLetter?: string;
+  raceGender?: string;
+  occupation?: string;
+};
+
+export const LOST_CHICK_OWNERS = [
+  { name: "Abd-al-Raziq", raceGender: "Hume Male", occupation: "Guild Worker", area: "Bastok Mines", location: "L-7" },
+  { name: "Azima", raceGender: "Hume Female", occupation: "Guild Worker", area: "Bastok Mines", location: "L-6" },
+  { name: "Deegis", raceGender: "Galka", occupation: "Merchant", area: "Bastok Mines", location: "H-6" },
+  { name: "Drangord", raceGender: "Galka", occupation: "Miner", area: "Bastok Mines", location: "D-7" },
+  { name: "Galdeo", raceGender: "Galka", occupation: "Merchant", area: "Bastok Mines", location: "E-6" },
+  { name: "Gray Wolf", raceGender: "Galka", occupation: "Watchman", area: "Bastok Mines", location: "H-7" },
+  { name: "Gerbaum", raceGender: "Galka", occupation: "Miner", area: "Bastok Mines", location: "F-8" },
+  { name: "Griselda", raceGender: "Hume Female", occupation: "Merchant", area: "Bastok Mines", location: "H-5" },
+  { name: "Carautia", raceGender: "Elvaan Female", occupation: "Merchant", area: "Southern San d'Oria", location: "K-8" },
+  { name: "Cletae", raceGender: "Elvaan Female", occupation: "Merchant", area: "Southern San d'Oria", location: "D-8" },
+  { name: "Coderiant", raceGender: "Elvaan Male", occupation: "Information Guide", area: "Southern San d'Oria", location: "F-8" },
+  { name: "Cahaurme", raceGender: "Elvaan Male", occupation: "Watchman", area: "Southern San d'Oria", location: "J-9" },
+  { name: "Corua", raceGender: "Old Elvaan Woman", occupation: "Merchant", area: "Southern San d'Oria", location: "G-9" },
+  { name: "Luthiaque", raceGender: "Elvaan Male", occupation: "Town Information Guide", area: "Southern San d'Oria", location: "G-9" },
+  { name: "Lanqueron", raceGender: "Elvaan Male", occupation: "Package Deliverer", area: "Southern San d'Oria", location: "I-9" },
+  { name: "Violitte", raceGender: "Elvaan Female", occupation: "Merchant", area: "Southern San d'Oria", location: "G-10" },
+  { name: "Valderotaux", raceGender: "Old Elvaan Male", occupation: "Merchant", area: "Southern San d'Oria", location: "K-6" },
+  { name: "Gioh Ajihri", raceGender: "Mithra", occupation: "Hunter", area: "Windurst Woods", location: "K-5" },
+  { name: "Gottah Maporushanoh", raceGender: "Mithra", occupation: "Adventurer", area: "Windurst Woods", location: "H-10" },
+  { name: "Kyaa Taali", raceGender: "Mithra", occupation: "Guild Worker", area: "Windurst Woods", location: "H-13 (Bone Craft Guild)" },
+  { name: "Kapeh Myohrye", raceGender: "Mithra", occupation: "Hunter", area: "Windurst Woods", location: "K-7 (Vashai's Residence)" },
+  { name: "Kopuro-Popuro", raceGender: "Tarutaru Male", occupation: "Ministry Worker", area: "Windurst Woods", location: "H-10 (Manustery South)" },
+  { name: "Kororo", raceGender: "Tarutaru Female", occupation: "Ministry Worker", area: "Windurst Woods", location: "H-9 (Manustery North)" },
+  { name: "Ponono", raceGender: "Tarutaru Female", occupation: "Guild Worker", area: "Windurst Woods", location: "G-12 (Clothcraft Guild)" },
+  { name: "Peshi Yohnts", raceGender: "Mithra", occupation: "Guild Worker", area: "Windurst Woods", location: "H-13 (Bone Craft Guild)" },
+] as const;
+
+export function validLostChickClues(value: unknown): value is LostChickClues | undefined {
+  if (value === undefined) return true;
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const clues = value as Record<string, unknown>;
+  return Object.keys(clues).every(key => ["firstLetter", "raceGender", "occupation"].includes(key))
+    && (clues.firstLetter === undefined || typeof clues.firstLetter === "string" && clues.firstLetter.length <= 1)
+    && (clues.raceGender === undefined || typeof clues.raceGender === "string" && clues.raceGender.length <= 80)
+    && (clues.occupation === undefined || typeof clues.occupation === "string" && clues.occupation.length <= 80);
+}
+
+export function filterLostChickOwners(clues: LostChickClues = {}) {
+  const firstLetter = clues.firstLetter?.trim().toLocaleLowerCase() ?? "";
+  const raceGender = clues.raceGender?.trim().toLocaleLowerCase() ?? "";
+  const occupation = clues.occupation?.trim().toLocaleLowerCase() ?? "";
+  return LOST_CHICK_OWNERS.filter(owner =>
+    (!firstLetter || owner.name.toLocaleLowerCase().startsWith(firstLetter))
+    && (!raceGender || owner.raceGender.toLocaleLowerCase().includes(raceGender))
+    && (!occupation || owner.occupation.toLocaleLowerCase().includes(occupation)));
+}
 
 export function validRaisingEvents(value: unknown): value is RaisingEvent[] | undefined {
   return value === undefined || Array.isArray(value)
@@ -33,8 +86,9 @@ export function raisingMilestoneGuidance(day: number): string[] {
   return [];
 }
 
-export function raisingEventGuidance(report: FeedingReport, day: number): string[] {
+export function raisingEventGuidance(report: FeedingReport, day: number, lostChickClues?: LostChickClues): string[] {
   if (!validRaisingEvents(report.events)) throw new Error("Select valid raising report events.");
+  if (!validLostChickClues(lostChickClues)) throw new Error("Enter valid Lost Chick clues.");
   const selected = new Set(report.events ?? []);
   const messages: string[] = [];
   const ready = report.condition === "healthy" && !report.ailments?.length;
@@ -57,6 +111,6 @@ export function raisingEventGuidance(report: FeedingReport, day: number): string
       : `Whistle search: speak to Hantileon first if directed there. Use hands-on short, regular or long walks from the home stable and choose to search; try another distance if empty. The hiding distance stays fixed for this quest. This advances the riding quest, not training stats. ${activityGate}`);
   }
   if (selected.has("held-item")) messages.push(`Item from a walk: carrying it gives no stat bonus. Free an inventory slot, then choose Watch Over to collect it (requires ${RAISING.actionEnergy[48]["2"]}+ energy after hatching). ${activityGate}`);
-  if (selected.has("lost-chick")) messages.push("Lost chick: this is a short-walk mini-quest, not an ailment. Ask the stable clerk and gather the trainers' clues before choosing its owner. Returning it to the correct owner earns the Diligent Chocobo story; a wrong guess does not award the story, and a later short walk can give another chance. Do not guess an owner or feed a remedy.");
+  if (selected.has("lost-chick")) messages.push("Lost chick: choose “Take it home” when it appears on a short walk. On later walks of any length, trainer encounters reveal the owner's first initial, race/gender and occupation. Ask the VCS Chocoguy, Kiria-Romaria, for the Lost Chick option to review clues; this is a separate NPC from Pulonono, your raising trainer. Enter the clues above to filter the owner list, and gather all three before choosing. Ask the matching NPC if they own the chick; the correct answer earns the Diligent Chocobo story, while a wrong guess restarts the search. A later short walk can give another chance. This is not an ailment; do not feed a remedy.");
   return messages;
 }

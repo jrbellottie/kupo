@@ -18,7 +18,7 @@ import {
   feedingSummary, healthGuidance, needsHealthAttention, type FeedingReport,
 } from "./utils/chocoboFeeding";
 import type { RaisingPlannerResponse } from "./workers/chocoboRaisingPlanner.worker";
-import { RAISING_EVENTS, raisingEventGuidance, raisingMilestoneGuidance } from "./utils/raisingEvents";
+import { LOST_CHICK_OWNERS, RAISING_EVENTS, filterLostChickOwners, raisingEventGuidance, raisingMilestoneGuidance } from "./utils/raisingEvents";
 
 type StatInputs = Record<keyof RaisingStats, string>;
 type PlannerView = SavedRaisingDaily & {
@@ -290,8 +290,13 @@ export default function ChocoboRaisingPlanner() {
     setNow(Date.now());
     setDailyNotice(null);
     setView(previous => ({
-      form: clock.startedAt !== startedAt && previous.form.feedingReport
-        ? { ...previous.form, feedingReport: { ...previous.form.feedingReport, events: undefined } } : previous.form,
+      form: clock.startedAt !== startedAt
+        ? {
+          ...previous.form,
+          ...(previous.form.feedingReport ? { feedingReport: { ...previous.form.feedingReport, events: undefined } } : {}),
+          lostChickClues: undefined,
+        }
+        : previous.form,
       defaultsVersion: DEFAULTS_VERSION, calculatedDay: null,
       daily: previous.daily?.startedAt === startedAt ? previous.daily : undefined,
       progress: previous.progress?.startedAt === startedAt ? previous.progress : undefined,
@@ -389,7 +394,8 @@ export default function ChocoboRaisingPlanner() {
   const healthFirst = needsHealthAttention(report);
   const showAilmentGuidance = healthFirst || report.condition === "tired";
   const additionalHealthMessages = health.messages.filter(message => !health.treatmentAction.startsWith(message));
-  const reportEvents = raisingEventGuidance(report, currentDay);
+  const reportEvents = raisingEventGuidance(report, currentDay, form.lostChickClues);
+  const lostChickOwners = report.events?.includes("lost-chick") ? filterLostChickOwners(form.lostChickClues) : [];
   const handkerchiefGuidance = reportEvents.filter(message => message.startsWith("White Handkerchief"));
   const otherEventInstructions = reportEvents.filter(message => !message.startsWith("White Handkerchief"));
   const hasPositiveCondition = report.events?.some(event =>
@@ -639,6 +645,31 @@ export default function ChocoboRaisingPlanner() {
               {event.label}
             </label>)}
           </div>
+          {report.events?.includes("lost-chick") && <div aria-label="Lost Chick clue search">
+            <p>Enter any clues reported so far; the owner list filters as you type. Clues stay saved between raising days and clear when you start a different egg.</p>
+            <div className="raising-controls">
+              <label>Owner's first letter<input style={styles.input} type="text" maxLength={1}
+                value={form.lostChickClues?.firstLetter ?? ""}
+                onChange={change => update({ lostChickClues: { ...form.lostChickClues, firstLetter: change.target.value.slice(0, 1).toUpperCase() } })} /></label>
+              <label>Owner's race and gender<input style={styles.input} type="text" maxLength={80} placeholder="e.g. Mithra"
+                value={form.lostChickClues?.raceGender ?? ""}
+                onChange={change => update({ lostChickClues: { ...form.lostChickClues, raceGender: change.target.value } })} /></label>
+              <label>Owner's occupation<input style={styles.input} type="text" maxLength={80} placeholder="e.g. Hunter"
+                value={form.lostChickClues?.occupation ?? ""}
+                onChange={change => update({ lostChickClues: { ...form.lostChickClues, occupation: change.target.value } })} /></label>
+            </div>
+            <div className="raising-table-wrap" tabIndex={0} role="region" aria-label="Lost Chick owner candidates">
+              <table>
+                <caption>{lostChickOwners.length} of {LOST_CHICK_OWNERS.length} possible owners match</caption>
+                <thead><tr><th scope="col">Owner</th><th scope="col">Race / gender</th><th scope="col">Occupation</th><th scope="col">Area</th><th scope="col">Location</th></tr></thead>
+                <tbody>{lostChickOwners.map(owner => <tr key={`${owner.area}:${owner.name}`}>
+                  <th scope="row">{owner.name}</th><td>{owner.raceGender}</td><td>{owner.occupation}</td><td>{owner.area}</td><td>{owner.location}</td>
+                </tr>)}</tbody>
+              </table>
+              {!lostChickOwners.length && <p role="status">No owners match these clues. Check the clues with the stable clerk.</p>}
+            </div>
+            <p className="raising-small">Owner list reference: <a href="https://ffxi.gamerescape.com/wiki/Lost_Chick" target="_blank" rel="noreferrer">Lost Chick owner guide</a>. Check the NPC's dialogue before confirming; a wrong guess restarts the search.</p>
+          </div>}
           {handkerchiefGuidance.length > 0 && <ul className="raising-report-guidance" aria-label="White Handkerchief guidance">
             {handkerchiefGuidance.map(message => <li key={message}>{message}</li>)}
           </ul>}
