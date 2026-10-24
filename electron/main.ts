@@ -20,8 +20,12 @@ let notifications: DesktopNotifications | null = null;
 app.commandLine.appendSwitch("disable-background-timer-throttling");
 app.commandLine.appendSwitch("disable-renderer-backgrounding");
 app.commandLine.appendSwitch("disable-backgrounding-occluded-windows");
-// Native Wayland does not allow restoring arbitrary top-level window positions.
-if (process.platform === "linux") app.commandLine.appendSwitch("ozone-platform", "x11");
+if (process.platform === "linux") {
+  // XWayland supports popup positioning and stacking requests on Wayland desktops.
+  app.commandLine.appendSwitch("ozone-platform", "x11");
+  // Avoid GPU-process crashes on Linux graphics drivers; Kupo does not need 3D rendering.
+  app.disableHardwareAcceleration();
+}
 
 // Keep the OS from suspending the app ONLY while timers are enabled (renderer-controlled)
 let keepAwakeId: number | null = null;

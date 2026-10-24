@@ -292,6 +292,9 @@ export class DesktopNotifications {
       if (!this.popup.isVisible()) {
         this.reposition();
         this.popup.showInactive();
+        if (process.platform === "linux") this.popup.moveTop();
+      } else if (sound && process.platform === "linux") {
+        this.popup.moveTop();
       }
     } else {
       if (this.moveTimeout) this.rememberPosition();

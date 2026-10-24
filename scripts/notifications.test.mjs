@@ -1,7 +1,10 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
+import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { runInNewContext } from "node:vm";
 import { buildSync } from "esbuild";
 
 const bundle = buildSync({
@@ -211,3 +214,131 @@ test("bundled original chime is a short, non-clipping mono PCM sound with silent
   assert.equal(wav.readInt16LE(44), 0);
   assert.equal(wav.readInt16LE(wav.length - 2), 0);
 });
+
+const desktopBundle = buildSync({
+  stdin: {
+    contents: 'import "./electron/main"; export { DesktopNotifications } from "./electron/notifications";',
+    resolveDir: fileURLToPath(new URL("../", import.meta.url)),
+    loader: "ts",
+  },
+  define: { "import.meta.url": JSON.stringify(new URL("../electron/main.ts", import.meta.url).href) },
+  bundle: true, write: false, platform: "node", format: "cjs", external: ["electron"],
+}).outputFiles[0].text;
+const require = createRequire(import.meta.url);
+
+function desktopHarness(platform) {
+  const calls = [];
+  const windows = [];
+  const handlers = new Map();
+  const ipcMain = new EventEmitter();
+  ipcMain.handle = (channel, handler) => handlers.set(channel, handler);
+  ipcMain.removeHandler = channel => handlers.delete(channel);
+  const app = new EventEmitter();
+  app.commandLine = { appendSwitch: (...args) => calls.push(["switch", ...args]) };
+  app.disableHardwareAcceleration = () => calls.push(["software-rendering"]);
+  app.whenReady = () => {
+    calls.push(["whenReady"]);
+    return { then() {} };
+  };
+  const screen = new EventEmitter();
+  screen.getAllDisplays = () => [primary];
+  screen.getPrimaryDisplay = () => primary;
+  screen.getDisplayMatching = () => primary;
+  class Window extends EventEmitter {
+    constructor(options) {
+      super();
+      this.options = options;
+      this.visible = false;
+      this.webContents = new EventEmitter();
+      this.webContents.send = () => {};
+      this.webContents.setWindowOpenHandler = () => {};
+      windows.push(this);
+    }
+    setAlwaysOnTop(...args) { calls.push(["alwaysOnTop", ...args]); }
+    setVisibleOnAllWorkspaces(...args) { calls.push(["workspaces", ...args]); }
+    setMinimumSize() {}
+    setBounds(bounds) { this.bounds = bounds; }
+    getBounds() { return this.bounds; }
+    isVisible() { return this.visible; }
+    isDestroyed() { return false; }
+    showInactive() { this.visible = true; calls.push(["showInactive"]); }
+    moveTop() { calls.push(["moveTop"]); }
+    hide() { this.visible = false; calls.push(["hide"]); }
+    destroy() { this.emit("closed"); }
+    loadFile() { return Promise.resolve(); }
+  }
+  const mainWindow = { webContents: { send() {} } };
+  const electron = { app, BrowserWindow: Window, ipcMain, screen };
+  const module = { exports: {} };
+  runInNewContext(desktopBundle, {
+    module, exports: module.exports,
+    require: name => {
+      if (name === "electron") return electron;
+      if (name === "node:fs") return { ...require(name), existsSync: () => false };
+      return require(name);
+    },
+    process: { platform, env: {} },
+    console,
+    setInterval: () => 1, clearInterval() {},
+    setTimeout, clearTimeout,
+  });
+  return {
+    calls, windows, handlers, ipcMain, mainWindow,
+    createNotifications: () => new module.exports.DesktopNotifications({
+      mainWindow: () => mainWindow,
+      userData: "unused", preload: "preload.cjs", rendererDirectory: "dist",
+    }),
+  };
+}
+
+for (const platform of ["linux", "win32", "darwin"]) {
+  test(`${platform}: startup selects Linux rendering defaults before app readiness only on Linux`, () => {
+    const { calls } = desktopHarness(platform);
+    const software = calls.findIndex(([name]) => name === "software-rendering");
+    const ozone = calls.findIndex(([name, flag]) => name === "switch" && flag === "ozone-platform");
+    const ready = calls.findIndex(([name]) => name === "whenReady");
+    if (platform === "linux") {
+      assert.ok(software >= 0 && software < ready);
+      assert.ok(ozone >= 0 && ozone < ready);
+      assert.deepEqual(calls[ozone], ["switch", "ozone-platform", "x11"]);
+    } else {
+      assert.equal(software, -1);
+      assert.equal(ozone, -1);
+    }
+  });
+
+  test(`${platform}: popup uses platform stacking without focus, preserves updates and reopens`, () => {
+    const { calls, windows, handlers, ipcMain, mainWindow, createNotifications } = desktopHarness(platform);
+    const notifications = createNotifications();
+    try {
+      handlers.get("kupo:notification-open")({ sender: mainWindow.webContents });
+      const popup = windows[0];
+      assert.equal(popup.options.type, undefined, "keep a normal managed window; KDE disallows resizing notification windows");
+      assert.equal(popup.options.alwaysOnTop, true);
+      assert.equal(popup.options.resizable, true);
+      assert.notEqual(popup.options.focusable, false, "retain keyboard interaction and window-manager resizing");
+      assert.equal(popup.options.webPreferences.sandbox, true);
+      assert.equal(popup.isVisible(), false, "wait for the popup renderer before showing");
+      const popupEvent = { sender: popup.webContents };
+      handlers.get("kupo:notification-state")(popupEvent);
+      assert.equal(popup.isVisible(), true);
+      assert.deepEqual(calls.filter(([name]) => ["showInactive", "moveTop"].includes(name)),
+        platform === "linux" ? [["showInactive"], ["moveTop"]] : [["showInactive"]]);
+      const raises = () => calls.filter(([name]) => name === "moveTop").length;
+      const before = raises();
+      ipcMain.emit("kupo:notification-timers", { sender: mainWindow.webContents },
+        [{ id: "timer", label: "Timer", targetEarthMs: 1000 }]);
+      assert.equal(raises(), before, "ordinary countdown updates must not repeatedly raise the popup");
+      ipcMain.emit("kupo:notify", { sender: mainWindow.webContents }, alert("new-alert"));
+      assert.equal(raises(), before + (platform === "linux" ? 1 : 0));
+      ipcMain.emit("kupo:notification-dismiss-all", popupEvent);
+      assert.equal(popup.isVisible(), false);
+      handlers.get("kupo:notification-preview")({ sender: mainWindow.webContents });
+      assert.equal(popup.isVisible(), true);
+      assert.equal(windows.length, 1, "reuse the popup after dismissal");
+      assert.equal(raises(), before + (platform === "linux" ? 2 : 0));
+    } finally {
+      notifications.dispose();
+    }
+  });
+}

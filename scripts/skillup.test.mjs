@@ -407,13 +407,15 @@ test("lures cancel bad warnings, including false alarms, while bait completes sn
   assert.deepEqual(safeLure, safeBait);
   assert.equal(lureNeeded, 1);
   assert.ok(baitNeeded > 1);
-  const epic = { ...fish, size: "L" };
-  assert.deepEqual(fishing.calculateFishingFight(100, epic, rod, "Lure"), { attemptedPct: 0, landPct: 0, skillupResolvePct: 0 });
-  assert.equal(fishing.calculatePoolSession({ ...settings, fish: [epic], baitKind: "Lure" }).skillGain, null);
-  const mixed = fishing.calculatePoolSession({ ...settings, fish: [fish, { ...epic, fish: "Epic competitor" }], baitKind: "Lure" });
-  assert.equal(mixed.catches[1], 0);
-  assert.equal(mixed.gains[1], 0);
-  assert.ok(mixed.skillGain > 0);
+  const largeFish = { ...fish, size: "L" };
+  const largeLureFight = fishing.calculateFishingFight(100, largeFish, rod, "Lure");
+  const largeBaitFight = fishing.calculateFishingFight(100, largeFish, rod, "Bait");
+  assert.ok(largeLureFight.attemptedPct > 0);
+  assert.ok(largeLureFight.landPct > 0);
+  assert.ok(largeLureFight.landPct <= largeBaitFight.landPct);
+  const largeLureSession = fishing.calculatePoolSession({ ...settings, fish: [largeFish], baitKind: "Lure" });
+  assert.ok(largeLureSession.catchTimeSeconds > 0);
+  assert.ok(largeLureSession.catches[0] > 0);
 });
 
 test("expanded fishing pools retain prerequisite fish without enabling disabled catches", () => {
@@ -447,21 +449,93 @@ test("fish gutting rewards retain the pinned public quest rates and item names",
   }
 });
 
-test("general catch planning can complete Lik epic fights with lures", () => {
+test("lures can catch large and epic fish without opting into all catchable fish", () => {
   const rod = fishingSnapshot.rods.find(row => row.rod === "Ebisu Fishing Rod");
   const fish = { ...fishingSnapshot.fish.Lik, hookBonus: 75 };
   const settings = { baseSkill: 110, bonusSkill: 0, zone: "Lufaise Meadows", rod, fish: [fish], baitKind: "Lure",
     options: { city: false, hasItems: false, hasMobs: false, difficulty: 0 } };
-  assert.equal(fishing.calculatePoolSession(settings).catchTimeSeconds, null);
-  const plan = fishing.calculatePoolSession({ ...settings, allowEpicLures: true });
+  const plan = fishing.calculatePoolSession(settings);
   assert.ok(plan.catchTimeSeconds > 0);
   assert.ok(plan.catches[0] > 0 && plan.catches[0] < 31);
   assert.ok(Math.abs(plan.fatigueUsed - 20000) < 1e-8);
   assert.equal(plan.baitNeeded, 1);
-  assert.deepEqual(fishing.calculateFishingFight(110, fish, rod, "Lure", true), fishing.calculateFishingFight(110, fish, rod, "Bait"));
-  const capped = fishing.calculatePoolSession({ ...settings, baseSkill: 140, allowEpicLures: true });
+  const lureFight = fishing.calculateFishingFight(110, fish, rod, "Lure");
+  assert.ok(lureFight.attemptedPct > 0);
+  assert.ok(lureFight.landPct > 0);
+  const capped = fishing.calculatePoolSession({ ...settings, baseSkill: 140 });
   assert.equal(capped.skillGain, 0);
   assert.ok(capped.catches[0] > 0);
+});
+
+test("skill-up planner can catch Jungle Catfish with Sinking Minnow at skill 71", () => {
+  const area = fishingSnapshot.areas["yhoatorjungle|frontoftempleeastside"];
+  const bait = fishingSnapshot.baits["Sinking Minnow"];
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Ebisu Fishing Rod");
+  const fish = area.members.map(name => fishingSnapshot.fish[name])
+    .filter(member => member && !member.item && bait.fish[member.fish] !== undefined)
+    .map(member => ({ ...member, hookBonus: bait.fish[member.fish] }));
+  const targetIndex = fish.findIndex(member => member.fish === "Jungle Catfish");
+  assert.ok(targetIndex >= 0);
+  const plan = fishing.calculatePoolSession({
+    baseSkill: 71, bonusSkill: 0, zone: "Yhoator Jungle", rod, fish, baitKind: "Lure",
+    options: {
+      city: false, hasItems: area.members.some(name => fishingSnapshot.fish[name]?.item),
+      hasMobs: area.hasMobs, difficulty: area.difficulty, poorFish: bait.poorFish, shellfishBait: bait.shellfishBait,
+    },
+  });
+  assert.ok(plan.catchTimeSeconds > 0);
+  assert.ok(plan.catches[targetIndex] > 0);
+
+  const fixedSkillPlan = fishing.calculatePoolSession({
+    baseSkill: 71, bonusSkill: 0, zone: "Yhoator Jungle", rod, fish, baitKind: "Lure",
+    options: {
+      city: false, hasItems: area.members.some(name => fishingSnapshot.fish[name]?.item),
+      hasMobs: area.hasMobs, difficulty: area.difficulty, poorFish: bait.poorFish, shellfishBait: bait.shellfishBait,
+    },
+    trackSkillProgress: false,
+  });
+  assert.equal(fixedSkillPlan.skillGain, 0);
+  assert.ok(fixedSkillPlan.catchTimeSeconds > 0);
+  assert.ok(fixedSkillPlan.catches[targetIndex] > 0);
+  assert.ok(fixedSkillPlan.gains.every(gain => gain === 0));
+});
+
+test("fixed-skill sessions cancel excluded pool fish and recalculate daily catch estimates", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Carbon Fishing Rod");
+  const fish = { ...fishingSnapshot.fish["Black Eel"], skillCap: 100, ranking: 1, hookBonus: 80 };
+  const pool = [fish, { ...fish, fish: "Canceled competitor" }];
+  const settings = {
+    baseSkill: 100, bonusSkill: 0, zone: "Zeruhn Mines", rod, fish: pool, trackSkillProgress: false,
+    options: { city: false, hasItems: false, hasMobs: false, difficulty: 0 },
+  };
+  const keepingBoth = fishing.calculatePoolSession(settings);
+  const cancelingCompetitor = fishing.calculatePoolSession({ ...settings, excludedFish: ["Canceled competitor"] });
+
+  assert.equal(cancelingCompetitor.catches[1], 0);
+  assert.ok(cancelingCompetitor.catches[0] > keepingBoth.catches[0]);
+  assert.ok(cancelingCompetitor.catchTimeSeconds > 0);
+  assert.equal(cancelingCompetitor.skillGain, 0);
+});
+
+test("under-cap target fish shows no skill gain even when its pool has skill-ups", () => {
+  const area = fishingSnapshot.areas["qufimisland|southwestseaside"];
+  const bait = fishingSnapshot.baits.Minnow;
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Composite Fishing Rod");
+  const fish = area.members.map(name => fishingSnapshot.fish[name])
+    .filter(member => member && !member.item && bait.fish[member.fish] !== undefined)
+    .map(member => ({ ...member, hookBonus: bait.fish[member.fish] }));
+  const targetIndex = fish.findIndex(member => member.fish === "Bluetail");
+  assert.ok(targetIndex >= 0);
+  const plan = fishing.calculatePoolSession({
+    baseSkill: 71, bonusSkill: 4, zone: "Qufim Island", rod, fish, baitKind: "Lure",
+    options: {
+      city: false, hasItems: area.members.some(name => fishingSnapshot.fish[name]?.item),
+      hasMobs: area.hasMobs, difficulty: area.difficulty, poorFish: bait.poorFish, shellfishBait: bait.shellfishBait,
+    },
+  });
+  assert.equal(fishing.calculateSkillup(71, fishingSnapshot.fish.Bluetail.skillCap, "Qufim Island", rod.rod).expectedGainPerTargetHook, 0);
+  assert.equal(plan.gains[targetIndex], 0);
+  assert.ok(plan.skillGain > 0);
 });
 
 test("daily bait counts landings and canceled bites but excludes no bites", () => {
@@ -605,10 +679,10 @@ test("planner groups equivalent zone rows while retaining every sublocation and 
   const first = {
     zone: "East Sarutabaruta", fish: "Moat Carp", rod: "Carbon Fishing Rod",
     targetGain: 2.454, targetPct: 57.1, fishPct: 60, landPct: 97, escapePct: 3, snapPct: 0,
-    breakPct: 0, effectiveSkill: 0, area: "Lake", bait: "Insect Paste", itemHazards: "", catchTimeSeconds: 10000, targetFishPer200: 180, skillGainPer200: 3,
+    breakPct: 0, effectiveSkill: 0, area: "Lake", bait: "Insect Paste", itemHazards: "", catchTimeSeconds: 10000, targetFishPer200: 180, skillGainPer200: 3, poolSkillGainPer200: 5,
   };
   const alternate = { ...first, area: "River", bait: "Other bait", itemHazards: "Rusty Bucket" };
-  const changes = { zone: "West Sarutabaruta", fish: "Other fish", rod: "Other rod", targetGain: 2.45401, targetPct: 57.11, fishPct: 70, landPct: 96, escapePct: 4, snapPct: 1, breakPct: 1, effectiveSkill: 1, catchTimeSeconds: 12000, targetFishPer200: 160, skillGainPer200: 4 };
+  const changes = { zone: "West Sarutabaruta", fish: "Other fish", rod: "Other rod", targetGain: 2.45401, targetPct: 57.11, fishPct: 70, landPct: 96, escapePct: 4, snapPct: 1, breakPct: 1, effectiveSkill: 1, catchTimeSeconds: 12000, targetFishPer200: 160, skillGainPer200: 4, poolSkillGainPer200: 6 };
   const separate = Object.entries(changes).map(([key, value]) => ({ ...first, [key]: value }));
   const groups = fishing.groupSkillupRows([first, ...separate, alternate]);
   assert.equal(groups.length, separate.length + 1);

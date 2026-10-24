@@ -1,4 +1,5 @@
 import { RAISING } from "./chocoboRaising";
+import { RAISING_ABILITIES } from "./chocoboRaisingPlanner";
 import type { FeedingReport } from "./chocoboFeeding";
 
 export const RAISING_EVENTS = [
@@ -14,11 +15,36 @@ export const RAISING_EVENTS = [
   { id: "lost-chick", label: "Found a lost chick on a walk" },
 ] as const;
 export type RaisingEvent = typeof RAISING_EVENTS[number]["id"];
+export const RAISING_STORY_KEY_ITEMS = [
+  { id: "gallop", keyItem: "Story of an Impatient Chocobo", ability: "Gallop" },
+  { id: "canter", keyItem: "Story of a Curious Chocobo", ability: "Canter" },
+  { id: "burrow", keyItem: "Story of a Worrisome Chocobo", ability: "Burrow" },
+  { id: "bore", keyItem: "Story of a Youthful Chocobo", ability: "Bore" },
+  { id: "auto-regen", keyItem: "Story of a Happy Chocobo", ability: "Auto-Regen" },
+  { id: "treasure-finder", keyItem: "Story of a Diligent Chocobo", ability: "Treasure Finder" },
+] as const;
+export type RaisingStoryKeyItem = typeof RAISING_STORY_KEY_ITEMS[number]["id"];
 export type LostChickClues = {
   firstLetter?: string;
   raceGender?: string;
   occupation?: string;
 };
+
+export function validRaisingStoryKeyItems(value: unknown): value is RaisingStoryKeyItem[] | undefined {
+  return value === undefined || Array.isArray(value)
+    && value.every(id => RAISING_STORY_KEY_ITEMS.some(item => item.id === id))
+    && new Set(value).size === value.length;
+}
+
+export function raisingStoryKeyItemGuidance(value: unknown): string[] {
+  if (!validRaisingStoryKeyItems(value)) throw new Error("Select valid chocobo story key items.");
+  const selected = new Set(value ?? []);
+  return RAISING_STORY_KEY_ITEMS.filter(item => selected.has(item.id)).map(item => {
+    const ability = RAISING_ABILITIES.find(entry => entry.name === item.ability);
+    if (!ability) throw new Error(`Missing raising reference for ${item.ability}.`);
+    return `${item.keyItem} teaches ${ability.name}. ${ability.effect} How to get it: ${ability.obtain} To use it, from adolescence (day ${RAISING.settings.daysToAdolescent}) choose Tell a Story at your home stable and select ${ability.story}. It needs ${ability.discernment} DSC after the story's +1, at least ${RAISING.actionEnergy[50]["2"]} energy and a free ability slot. Each daily attempt has a ${RAISING.learnChance}% learning chance. A failed roll leaves the key item available for another day; learning or inspiration consumes it. If ${ability.name} is already known or both slots are full, it is consumed for inspiration instead.`;
+  });
+}
 
 export const LOST_CHICK_OWNERS = [
   { name: "Abd-al-Raziq", raceGender: "Hume Male", occupation: "Guild Worker", area: "Bastok Mines", location: "L-7" },

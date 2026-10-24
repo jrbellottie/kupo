@@ -238,11 +238,10 @@ export function formatCatchTime(seconds: number | null): string {
   return `${Math.floor(minutes / 60)}h ${String(minutes % 60).padStart(2, "0")}m`;
 }
 
-export function calculateFishingFight(skill: number, fish: SkillupFish, rod: SkillupRod, baitKind = "Bait", allowEpicLures = false) {
+export function calculateFishingFight(skill: number, fish: SkillupFish, rod: SkillupRod, baitKind = "Bait") {
   const risk = calculateRodRisk(skill, fish, rod);
   const warning = fishingWarningOdds(risk);
-  const cancelBad = baitKind === "Lure" && !(allowEpicLures && fish.size === "L");
-  if (cancelBad && fish.size === "L") return { attemptedPct: 0, landPct: 0, skillupResolvePct: 0 };
+  const cancelBad = baitKind === "Lure";
   return {
     attemptedPct: cancelBad ? 100 * (1 - warning.bad) : 100,
     landPct: cancelBad ? risk.landPct - 100 * warning.badLand : risk.landPct,
@@ -250,9 +249,9 @@ export function calculateFishingFight(skill: number, fish: SkillupFish, rod: Ski
   };
 }
 
-export function calculatePoolSession({ baseSkill, bonusSkill, zone, rod, fish, options, baitKind = "Bait", allowEpicLures = false, excludedFish = [], timing = DEFAULT_FISHING_TIMING }: {
+export function calculatePoolSession({ baseSkill, bonusSkill, zone, rod, fish, options, baitKind = "Bait", excludedFish = [], timing = DEFAULT_FISHING_TIMING, trackSkillProgress = true }: {
   baseSkill: number; bonusSkill: number; zone: string; rod: SkillupRod; fish: HookFish[];
-  options: Parameters<typeof calculateCastOdds>[3]; baitKind?: string; allowEpicLures?: boolean; excludedFish?: string[]; timing?: FishingTiming;
+  options: Parameters<typeof calculateCastOdds>[3]; baitKind?: string; excludedFish?: string[]; timing?: FishingTiming; trackSkillProgress?: boolean;
 }) {
   const excluded = new Set(excludedFish);
   const retained = fish.map(member => !excluded.has(member.fish));
@@ -271,13 +270,13 @@ export function calculatePoolSession({ baseSkill, bonusSkill, zone, rod, fish, o
     const currentSkill = Math.floor(skill + 1e-9);
     const effectiveSkill = currentSkill + bonusSkill + getRodHiddenSuccessBonus(rod.rod);
     const odds = calculateCastOdds(effectiveSkill, rod, fish, options);
-    const poolGains = calculatePoolSkillup(currentSkill, effectiveSkill, zone, rod, fish, odds.targetPct, baitKind, allowEpicLures);
-    const fights = fish.map(member => calculateFishingFight(effectiveSkill, member, rod, baitKind, allowEpicLures));
+    const poolGains = calculatePoolSkillup(currentSkill, effectiveSkill, zone, rod, fish, odds.targetPct, baitKind);
+    const fights = fish.map(member => calculateFishingFight(effectiveSkill, member, rod, baitKind));
     const attempted = fish.map((_member, index) => retained[index]
       ? odds.targetPct[index] / 100 * fights[index].attemptedPct / 100 : 0);
     const landed = fish.map((_member, index) => retained[index]
       ? odds.targetPct[index] / 100 * fights[index].landPct / 100 : 0);
-    const perCastGains = poolGains.gains.map((gain, index) => retained[index] ? gain / 100 : 0);
+    const perCastGains = poolGains.gains.map((gain, index) => retained[index] && trackSkillProgress ? gain / 100 : 0);
     const landedPerCast = landed.reduce((sum, value) => sum + value, 0);
     const gainPerCast = perCastGains.reduce((sum, value) => sum + value, 0);
     const fatiguePerCast = fish.reduce((sum, member, index) => {
@@ -289,7 +288,7 @@ export function calculatePoolSession({ baseSkill, bonusSkill, zone, rod, fish, o
     if (landedPerCast <= 0) return unavailable;
     const castsToFinish = remaining / landedPerCast;
     const castsToFatigue = fatiguePerCast > 0 ? (20000 - fatigueUsed) / fatiguePerCast : Infinity;
-    const castsToNextSkill = gainPerCast > 0 ? (currentSkill + 1 - skill) / gainPerCast : Infinity;
+    const castsToNextSkill = trackSkillProgress && gainPerCast > 0 ? (currentSkill + 1 - skill) / gainPerCast : Infinity;
     const stageCasts = Math.min(castsToFinish, castsToFatigue, castsToNextSkill);
     const attemptedFishPct = 100 * attempted.reduce((sum, value) => sum + value, 0);
     seconds += stageCasts * (timing.fishSeconds * attemptedFishPct / 100 + timing.otherSeconds * (1 - attemptedFishPct / 100));
@@ -305,7 +304,9 @@ export function calculatePoolSession({ baseSkill, bonusSkill, zone, rod, fish, o
     }
     remaining -= landedPerCast * stageCasts;
     fatigueUsed += fatiguePerCast * stageCasts;
-    skill = stageCasts === castsToNextSkill ? currentSkill + 1 : skill + gainPerCast * stageCasts;
+    if (trackSkillProgress) {
+      skill = stageCasts === castsToNextSkill ? currentSkill + 1 : skill + gainPerCast * stageCasts;
+    }
   }
   if (remaining > 1e-8 && fatigueUsed < 20000 - 1e-8) return unavailable;
   return { skillGain: skill - baseSkill, catchTimeSeconds: seconds, casts, fatigueUsed, baitNeeded, catches, gains };
@@ -326,6 +327,7 @@ type SkillupGroupRow = {
   catchTimeSeconds?: number | null;
   targetFishPer200?: number | null;
   skillGainPer200?: number | null;
+  poolSkillGainPer200?: number | null;
 };
 
 export function groupSkillupRows<Row extends SkillupGroupRow>(rows: Row[]) {
@@ -334,7 +336,7 @@ export function groupSkillupRows<Row extends SkillupGroupRow>(rows: Row[]) {
     const key = JSON.stringify([
       row.zone, row.fish, row.rod, row.targetGain, row.targetPct,
       row.fishPct, row.landPct, row.escapePct, row.snapPct, row.breakPct, row.effectiveSkill,
-      row.catchTimeSeconds, row.targetFishPer200, row.skillGainPer200,
+      row.catchTimeSeconds, row.targetFishPer200, row.skillGainPer200, row.poolSkillGainPer200,
     ]);
     const group = groups.get(key);
     if (group) group.rows.push(row);
@@ -345,11 +347,11 @@ export function groupSkillupRows<Row extends SkillupGroupRow>(rows: Row[]) {
 
 export function calculatePoolSkillup(
   baseSkill: number, effectiveSkill: number, zone: string, rod: SkillupRod,
-  fish: HookFish[], targetPct: number[], baitKind = "Bait", allowEpicLures = false,
+  fish: HookFish[], targetPct: number[], baitKind = "Bait",
 ) {
   const gains = fish.map((member, index) => {
     const skillup = calculateSkillup(baseSkill, member.skillCap, zone, rod.rod);
-    const risk = calculateFishingFight(effectiveSkill, member, rod, baitKind, allowEpicLures);
+    const risk = calculateFishingFight(effectiveSkill, member, rod, baitKind);
     return skillup.expectedGainPerTargetHook * targetPct[index] * risk.skillupResolvePct / 100;
   });
   return { gains, totalGain: gains.reduce((sum, gain) => sum + gain, 0) };

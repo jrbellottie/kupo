@@ -18,7 +18,10 @@ import {
   feedingSummary, healthGuidance, needsHealthAttention, type FeedingReport,
 } from "./utils/chocoboFeeding";
 import type { RaisingPlannerResponse } from "./workers/chocoboRaisingPlanner.worker";
-import { LOST_CHICK_OWNERS, RAISING_EVENTS, filterLostChickOwners, raisingEventGuidance, raisingMilestoneGuidance } from "./utils/raisingEvents";
+import {
+  LOST_CHICK_OWNERS, RAISING_EVENTS, RAISING_STORY_KEY_ITEMS, filterLostChickOwners,
+  raisingEventGuidance, raisingMilestoneGuidance, raisingStoryKeyItemGuidance,
+} from "./utils/raisingEvents";
 
 type StatInputs = Record<keyof RaisingStats, string>;
 type PlannerView = SavedRaisingDaily & {
@@ -39,7 +42,7 @@ const defaultForm: PlannerForm = {
   current: { strength: "0", endurance: "0", discernment: "0", receptivity: "0" },
   target: statInputs(defaultPreset.target),
   desiredAbilities: [...defaultPreset.desiredAbilities], knownAbilities: [], priority: defaultPreset.priority,
-  useExactStats: false,
+  useExactStats: false, storyKeyItems: [],
 };
 function restorePlannerView(restored?: PlannerView): PlannerView {
   if (!restored) return { form: defaultForm, defaultsVersion: DEFAULTS_VERSION, calculatedDay: null };
@@ -294,7 +297,7 @@ export default function ChocoboRaisingPlanner() {
         ? {
           ...previous.form,
           ...(previous.form.feedingReport ? { feedingReport: { ...previous.form.feedingReport, events: undefined } } : {}),
-          lostChickClues: undefined,
+          lostChickClues: undefined, storyKeyItems: [],
         }
         : previous.form,
       defaultsVersion: DEFAULTS_VERSION, calculatedDay: null,
@@ -395,6 +398,7 @@ export default function ChocoboRaisingPlanner() {
   const showAilmentGuidance = healthFirst || report.condition === "tired";
   const additionalHealthMessages = health.messages.filter(message => !health.treatmentAction.startsWith(message));
   const reportEvents = raisingEventGuidance(report, currentDay, form.lostChickClues);
+  const storyKeyItemMessages = raisingStoryKeyItemGuidance(form.storyKeyItems ?? []);
   const lostChickOwners = report.events?.includes("lost-chick") ? filterLostChickOwners(form.lostChickClues) : [];
   const handkerchiefGuidance = reportEvents.filter(message => message.startsWith("White Handkerchief"));
   const otherEventInstructions = reportEvents.filter(message => !message.startsWith("White Handkerchief"));
@@ -634,7 +638,7 @@ export default function ChocoboRaisingPlanner() {
             <li>Rest gives a 50% cure roll per bad condition and induces sleep. New care starts two days later, not immediately. Do not use extra walks to force hunger in an ill bird. Live settings may differ.</li>
           </ul>}
         </fieldset>
-        <fieldset className="raising-report-area"><legend>Other events in the trainer's report (select all that apply)</legend>
+        <fieldset className="raising-report-area"><legend>Other events in the trainer's report and story key items</legend>
           <div className="raising-report-options">
             {RAISING_EVENTS.map(event => <label key={event.id}>
               <input type="checkbox" checked={report.events?.includes(event.id) ?? false}
@@ -644,6 +648,22 @@ export default function ChocoboRaisingPlanner() {
                   : (report.events ?? []).filter(id => id !== event.id) })} />
               {event.label}
             </label>)}
+          </div>
+          <div aria-label="Ability story key items">
+            <h5>Ability story key items</h5>
+            <p>Check the story key items you currently have. These marks stay with this chocobo when daily reports reset; uncheck a story after it is consumed.</p>
+            <div className="raising-report-options">
+              {RAISING_STORY_KEY_ITEMS.map(item => <label key={item.id}>
+                <input type="checkbox" checked={form.storyKeyItems?.includes(item.id) ?? false}
+                  onChange={change => update({ storyKeyItems: change.target.checked
+                    ? [...new Set([...(form.storyKeyItems ?? []), item.id])]
+                    : (form.storyKeyItems ?? []).filter(id => id !== item.id) })} />
+                {item.keyItem}
+              </label>)}
+            </div>
+            {storyKeyItemMessages.length > 0 && <ul className="raising-report-guidance" aria-label="Ability story key item guidance">
+              {storyKeyItemMessages.map(message => <li key={message}>{message}</li>)}
+            </ul>}
           </div>
           {report.events?.includes("lost-chick") && <div aria-label="Lost Chick clue search">
             <p>Enter any clues reported so far; the owner list filters as you type. Clues stay saved between raising days and clear when you start a different egg.</p>

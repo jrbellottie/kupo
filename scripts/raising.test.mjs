@@ -15,7 +15,7 @@ const { CHOCOBO_COLORS, PARASITE_WORM_ID, geneColor, eggGeneDistribution, chocob
 const feedingBundle = buildSync({ entryPoints: ["src/utils/chocoboFeeding.ts"], bundle: true, write: false, platform: "node", format: "esm" });
 const { AFFECTION_TARGET, AFFECTION_REPORTS, HUNGER_REPORTS, FEEDING_FOODS, BIRD_AILMENTS, healthGuidance, needsHealthAttention, treatmentFoods, recordMedicineEaten, validateFeedingReport, feedingOptions, feedingFood, feedingSummary, careSuccessChance } = await import(`data:text/javascript;base64,${Buffer.from(feedingBundle.outputFiles[0].text).toString("base64")}`);
 const eventsBundle = buildSync({ entryPoints: ["src/utils/raisingEvents.ts"], bundle: true, write: false, platform: "node", format: "esm" });
-const { LOST_CHICK_OWNERS, RAISING_EVENTS, filterLostChickOwners, raisingEventGuidance, raisingMilestoneGuidance, validLostChickClues, validRaisingEvents } = await import(`data:text/javascript;base64,${Buffer.from(eventsBundle.outputFiles[0].text).toString("base64")}`);
+const { LOST_CHICK_OWNERS, RAISING_EVENTS, RAISING_STORY_KEY_ITEMS, filterLostChickOwners, raisingEventGuidance, raisingMilestoneGuidance, raisingStoryKeyItemGuidance, validLostChickClues, validRaisingEvents, validRaisingStoryKeyItems } = await import(`data:text/javascript;base64,${Buffer.from(eventsBundle.outputFiles[0].text).toString("base64")}`);
 const food = name => {
   const found = RAISING.foods.find(entry => entry.name === name);
   assert.ok(found, `Missing ${name}`);
@@ -427,6 +427,7 @@ test("daily checklist persists valid reports and resets completion only for a di
     current: { strength: "32", endurance: "64", discernment: "160", receptivity: "96" },
     target: { strength: "224", endurance: "128", discernment: "160", receptivity: "96" },
     desiredAbilities: ["Gallop", "Canter"], knownAbilities: ["Gallop"], priority: "strength", useExactStats: false,
+    storyKeyItems: ["bore"],
   };
   const schedule = { startedAt, plannedDay: 120, days: Array.from({ length: 9 }, (_, index) => ({
     day: 120 + index, foodId: null, foodCount: 0, story: null, careId: index < 2 ? 0 : 3,
@@ -444,6 +445,8 @@ test("daily checklist persists valid reports and resets completion only for a di
   assert.equal(todayCare(schedule, 0), null);
   for (const invalid of [
     null, {}, { ...saved, form: {} }, { ...saved, progress: { ...progress, feedingDone: "yes" } },
+    { ...saved, form: { ...form, storyKeyItems: ["unknown"] } },
+    { ...saved, form: { ...form, storyKeyItems: ["bore", "bore"] } },
     { ...saved, daily: { ...schedule, days: [{ ...schedule.days[0], foodId: -100 }] } },
     { ...saved, daily: { ...schedule, startedAt: "yesterday" } },
   ]) assert.throws(() => parseSavedRaisingDaily(JSON.stringify(invalid)), /invalid/);
@@ -671,6 +674,30 @@ test("reported raising events give source-specific next steps without inventing 
     feedingReport: { ...report, day: 128 } });
   assert.deepEqual(planRaisingGoal({ ...input, feedingReport: { ...input.feedingReport, events: ["high-spirits"] } }),
     planRaisingGoal(input), "positive event reports do not silently change the numeric model");
+});
+
+test("story key item checklist covers each ability with its acquisition, effect and use", () => {
+  assert.equal(RAISING_STORY_KEY_ITEMS.length, RAISING_ABILITIES.length);
+  for (const item of RAISING_STORY_KEY_ITEMS) {
+    const ability = RAISING_ABILITIES.find(entry => entry.name === item.ability);
+    assert.ok(ability, `Missing ability reference for ${item.ability}`);
+    assert.equal(validRaisingStoryKeyItems([item.id]), true);
+    const [guidance] = raisingStoryKeyItemGuidance([item.id]);
+    assert.match(guidance, new RegExp(item.keyItem));
+    assert.match(guidance, new RegExp(`teaches ${ability.name}`));
+    assert.ok(guidance.includes(ability.obtain), `${ability.name} acquisition guidance`);
+    assert.ok(guidance.includes(ability.effect), `${ability.name} effect guidance`);
+    assert.match(guidance, /Tell a Story/);
+    assert.match(guidance, new RegExp(`${ability.discernment} DSC after the story's \\+1`));
+    assert.match(guidance, /energy and a free ability slot/);
+    assert.match(guidance, /daily attempt has a 25% learning chance/);
+    assert.match(guidance, /failed roll leaves the key item available for another day/);
+  }
+  assert.equal(validRaisingStoryKeyItems(undefined), true);
+  for (const invalid of [["unknown"], ["bore", "bore"], "bore", null, [1]]) {
+    assert.equal(validRaisingStoryKeyItems(invalid), false);
+    assert.throws(() => raisingStoryKeyItemGuidance(invalid), /valid chocobo story key items/);
+  }
 });
 
 test("age reminders stay on exact timeline days and event selections persist with validated reports", () => {
@@ -1543,6 +1570,11 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     && textContent(element).includes("Ailments reported by the trainer"));
   const healthCheckbox = (tree, label) => findElement(findElement(tree, element => element.type === "label"
     && React.Children.toArray(element.props.children).includes(label)), element => element.type === "input");
+  const storyKeyItemCheckbox = (tree, keyItem) => {
+    const group = findElement(tree, element => element.props["aria-label"] === "Ability story key items");
+    const label = findElement(group, element => element.type === "label" && textContent(element).includes(keyItem));
+    return findElement(label, element => element.type === "input");
+  };
   assert.ok(findElement(ailmentBox(render()), element => element.props["aria-label"] === "Ailment guidance"),
     "ailment guidance is inside the ailments box");
   assert.equal(ailmentGuidance(render()).type, "ul", "ailment advice is a bulleted list");
@@ -1581,6 +1613,17 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   assert.equal(healthCheckbox(render(), "Crying at night / holding White Handkerchief").props.checked, false, "event selections reset on a new raising day");
   assert.equal(handkerchiefGuidance(render()), undefined, "handkerchief guidance stays with its checked event");
   assert.doesNotMatch(textContent(eventGuidance(render())), /White Handkerchief/, "handkerchief guidance requires the event checkbox");
+  const boreKeyItem = "Story of a Youthful Chocobo";
+  storyKeyItemCheckbox(render(), boreKeyItem).props.onChange({ target: { checked: true } });
+  assert.deepEqual(states[0].form.storyKeyItems, ["bore"]);
+  const storyKeyGuidance = tree => findElement(tree, element => element.props["aria-label"] === "Ability story key item guidance");
+  assert.match(textContent(storyKeyGuidance(render())), /Story of a Youthful Chocobo teaches Bore/);
+  assert.match(textContent(storyKeyGuidance(render())), /Third meeting with Pulonono/);
+  assert.match(textContent(storyKeyGuidance(render())), /Tell a Story.*Youthful Chocobo/);
+  states[4] = start + 8 * day;
+  assert.equal(storyKeyItemCheckbox(render(), boreKeyItem).props.checked, true,
+    "story key item checks persist when daily trainer report events reset");
+  assert.match(textContent(storyKeyGuidance(render())), /teaches Bore/);
 
   states[4] = start + 6 * day;
   clickTime = states[4];
@@ -1860,6 +1903,11 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.ok(statHelp);
   assert.match(statHelp, /224 END corresponds to \+112 digs/);
   assert.match(statHelp, /A-grade DSC \(160-191\) corresponds to a 20% chance/);
+  assert.match(statHelp, /Story of a Youthful Chocobo key item.*teaches Bore/);
+  assert.match(statHelp, /select <strong>Youthful Chocobo<\/strong>/);
+  assert.match(statHelp, /160 DSC after the story&#x27;s \+1.*free ability slot/);
+  assert.match(statHelp, /Each daily attempt has a 25% learning chance/);
+  assert.match(statHelp, /If Bore is already known or both slots are full, the story is consumed for inspiration instead/);
   assert.match(statHelp, /SS-grade RCP \(224-255\) corresponds to a 35% increase, not a flat 35% chance/);
   assert.match(statHelp, /do not list a direct Strength bonus to finds/);
   assert.match(statHelp, /source-derived digging guide/);

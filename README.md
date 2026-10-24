@@ -17,7 +17,7 @@ Vana'diel time is global, so Kupo works in any time zone.
 
 Use **Clock & Timers → Timer popups → Open timer window** to watch live countdowns, soonest first, with flashing due alerts at the top and an adjustable soft chime. Drag the header to move it or its edges to resize; Kupo remembers the monitor, position, and size. Dismissing an alert leaves the window open while other alerts are pending; dismissing the last alert closes it, even if future countdowns remain. **Dismiss all alerts** or the close button clears all alerts and closes the window. Recurring timers stay enabled. Keep Kupo running; native system-notification permissions are not needed.
 
-Linux uses X11 (or XWayland on Wayland desktops) to support saved window positions. XWayland must be installed when using a Wayland session. Window managers and exclusive-fullscreen games can still hide other windows; use borderless/windowed mode if needed. **Reset to primary monitor** recovers an inconvenient popup position.
+Linux uses software rendering and X11 (or XWayland on Wayland desktops) for graphics-driver compatibility and saved popup positions. XWayland must be installed when using a Wayland session. Popups request always-on-top stacking without taking focus, but the desktop controls whether they appear above games. **Reset to primary monitor** recovers an inconvenient popup position.
 
 ---
 
@@ -42,7 +42,7 @@ Keep manual tallies of session results, including success rates and synthesis ou
 Track progress toward the 10,000 moat carp needed for Lu Shang's Fishing Rod.
 
 ### 🐟 Fish
-Explore fish, bait, rods, and fishing locations, plan skill-ups or daily fishing sessions, and compare fishing-guild selling prices, stock capacity, and opening countdowns with reminders using the pinned reference ruleset.
+Explore fish, bait, rods, and locations, plan fishing skill-ups, and compare estimated fishing time and direct-vendor returns across spots, with fish prices and crafting options using the pinned reference ruleset.
 
 ### 🪣 Clam
 Browse clamming locations and possible rewards, with information to help manage bucket weight and equipment choices.
@@ -109,8 +109,9 @@ Kupo uses bundled source snapshots and cached wiki references, not live game dat
 ## Troubleshooting
 
 - **No popup or sound:** keep Kupo running, use **Clock & Timers → Timer popups → Test / position popup**, check its volume and your system audio output, and try **Reset to primary monitor**.
-- **Popup hidden while gaming:** try borderless/windowed mode; exclusive fullscreen and desktop window-manager rules can hide always-on-top windows.
+- **Popup hidden while gaming:** try windowed mode; desktop window-manager rules can hide always-on-top windows. On KDE/Wayland, a game labeled borderless can still be treated as fullscreen. If windowed mode fixes it, check the game's KDE window settings or add a rule for that game with **Fullscreen** forced to **No**; Kupo cannot override the compositor's fullscreen stacking policy.
 - **Linux window positioning:** use an X11 session or install/enable XWayland in your Wayland desktop.
+- **Older AppImage crashes during GPU startup:** launch it with `--ozone-platform=x11 --disable-gpu`. New builds select X11/XWayland and disable hardware acceleration automatically on Linux; Windows is unchanged. Software rendering uses the CPU and may make graphics-heavy views slower.
 - **Alerts only appear when Kupo regains focus:** the OS can suspend background apps; Kupo catches up when it becomes active.
 - **Moon percentage differs slightly from the game:** the in-game display is rounded, while Kupo uses the calculated moon phase.
 

@@ -2,7 +2,7 @@ import { RAISING, STAT_KEYS, PROJECTION_FOODS, type RaisingStats } from "./choco
 import { LAST_RAISING_DAY, RAISING_ABILITIES, careAvailableDay, maxManualShortWalks, type RaisingGoalInput, type TrainingDay } from "./chocoboRaisingPlanner";
 import { BIRD_CONDITIONS, PLANNER_FEEDING_FOODS, validateFeedingReport, validHealthDetails, type FeedingReport } from "./chocoboFeeding";
 import { PARASITE_WORM_ID, type ColorGoal } from "./chocoboColor";
-import { validLostChickClues, type LostChickClues } from "./raisingEvents";
+import { validLostChickClues, validRaisingStoryKeyItems, type LostChickClues, type RaisingStoryKeyItem } from "./raisingEvents";
 
 export const RAISING_DAILY_KEY = "kupo.raising.daily.v1";
 export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "currentDay" | "today" | "colorGoal" | "tomorrowCareId"> & {
@@ -13,6 +13,7 @@ export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "current
   eggId?: string;
   wormsFed?: string;
   lostChickClues?: LostChickClues;
+  storyKeyItems?: RaisingStoryKeyItem[];
 };
 export type DailyStep = Pick<TrainingDay, "day" | "foodId" | "foodCount" | "story" | "careId" | "feeding" | "manualShortWalks">;
 export type DailySchedule = {
@@ -81,6 +82,7 @@ function isSavedDaily(value: unknown): value is SavedRaisingDaily {
     || (form.eggId !== undefined && typeof form.eggId !== "string")
     || (form.wormsFed !== undefined && typeof form.wormsFed !== "string")
     || !validLostChickClues(form.lostChickClues)
+    || !validRaisingStoryKeyItems(form.storyKeyItems)
     || (value.defaultsVersion !== undefined && typeof value.defaultsVersion !== "number")) return false;
   if (form.feedingReport !== undefined) {
     const report = form.feedingReport;

@@ -149,7 +149,7 @@ const POOLS: PoolEntry[] = buildSpots();
 type Mode = "affinity" | "spots" | "skillup";
 
 type AffinityKey = "fish" | "lvl" | "size" | "bait" | "kind" | "bite" | "hookBonus" | "vendorPriceEach" | "best" | "note";
-type SpotKey = "zone" | "area" | "fish" | "lvl" | "bait" | "kind" | "bite" | "hookBonus" | "vendorPriceEach" | "sharePct" | "competingCount";
+type SpotKey = "netGilPerHour" | "netGilPerDay" | "catchTimeSeconds" | "targetFishPer200" | "fish" | "vendorPriceEach" | "baitNeeded" | "rod" | "zone" | "area" | "bait" | "sharePct";
 type SkillupKey =
   | "catchTimeSeconds"
   | "targetFishPer200"
@@ -173,12 +173,16 @@ type SkillupKey =
   | "bait";
 type SortDir = "asc" | "desc";
 type RodAccess = "ebisu" | "luShang" | "standard";
+type FishingSaleOverride =
+  | { type: "ah"; price: string }
+  | { type: "recipe"; recipeId: number; tier: string };
 
 type SkillupRow = PoolEntry & {
   catchTimeSeconds: number | null;
   targetFishPer200: number | null;
   catchBreakdown: { fish: string; size: string; level: number; catches: number | null; skillGain: number | null; included: boolean }[];
   skillGainPer200: number | null;
+  poolSkillGainPer200: number | null;
   sessionCasts: number | null;
   fatigueUsed: number | null;
   baitNeeded: number | null;
@@ -204,6 +208,63 @@ type SkillupRow = PoolEntry & {
   itemHazards: string;
 };
 
+type ProfitSpotRow = PoolEntry & {
+  rod: string;
+  effectiveSkill: number;
+  salePrice: number | null;
+  saleLabel: string;
+  catchTimeSeconds: number | null;
+  targetFishPer200: number | null;
+  grossGilPerDay: number | null;
+  baitCostPerDay: number | null;
+  netGilPerDay: number | null;
+  netGilPerHour: number | null;
+  sessionCasts: number | null;
+  fatigueUsed: number | null;
+  baitNeeded: number | null;
+  fishPct: number;
+  itemPct: number;
+  mobPct: number;
+  nothingPct: number;
+  targetPct: number;
+  fight: ReturnType<typeof calculateFishingFight>;
+  risk: ReturnType<typeof calculateRodRisk>;
+  catchBreakdown: { fish: string; size: string; level: number; catches: number | null; salePrice: number | null; saleLabel: string; grossGil: number | null; included: boolean }[];
+};
+
+function getFishingSaleOption(fish: string, override?: FishingSaleOverride) {
+  const vendor = getFishingVendorOptions(fish);
+  if (!override) return { price: vendor.rawPrice, label: "Direct NPC" };
+  if (override.type === "ah") {
+    const price = override.price.trim() === "" ? null : Number(override.price);
+    return {
+      price: price !== null && Number.isFinite(price) && price >= 0 ? price : null,
+      label: "AH estimate",
+    };
+  }
+  const recipe = vendor.recipes.find((entry) => entry.recipe.id === override.recipeId);
+  const outcome = recipe?.outcomes.find((entry) => entry.tier === override.tier);
+  return outcome
+    ? { price: outcome.perFish, label: `${outcome.tier} ${outcome.n} (NPC / fish)` }
+    : { price: null, label: "Selected recipe unavailable" };
+}
+
+function isFishingSaleOverride(value: unknown): value is FishingSaleOverride {
+  if (typeof value !== "object" || value === null || Array.isArray(value) || !("type" in value)) return false;
+  if (value.type === "ah") return "price" in value && typeof value.price === "string";
+  return value.type === "recipe" && "recipeId" in value && typeof value.recipeId === "number" && Number.isInteger(value.recipeId)
+    && "tier" in value && typeof value.tier === "string";
+}
+
+function readFishingSaleOverrides(value: unknown): Record<string, FishingSaleOverride> {
+  const overrides: Record<string, FishingSaleOverride> = {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return overrides;
+  for (const [fish, override] of Object.entries(value)) {
+    if (isFishingSaleOverride(override)) overrides[fish] = override;
+  }
+  return overrides;
+}
+
 const AFFINITY_COLUMNS: { key: AffinityKey; label: string }[] = [
   { key: "fish", label: "Fish" },
   { key: "lvl", label: "Lvl" },
@@ -218,21 +279,22 @@ const AFFINITY_COLUMNS: { key: AffinityKey; label: string }[] = [
 ];
 
 const SPOT_COLUMNS: { key: SpotKey; label: string }[] = [
+  { key: "netGilPerHour", label: "Net gil / hour" },
+  { key: "netGilPerDay", label: "Net gil / day" },
+  { key: "catchTimeSeconds", label: "Time / day" },
+  { key: "targetFishPer200", label: "Target fish / day" },
+  { key: "fish", label: "Fish" },
+  { key: "sharePct", label: "Pool Share" },
+  { key: "vendorPriceEach", label: "Direct NPC / fish" },
+  { key: "baitNeeded", label: "Bait / day" },
   { key: "zone", label: "Zone" },
   { key: "area", label: "Area" },
-  { key: "fish", label: "Target Fish" },
-  { key: "lvl", label: "Lvl" },
   { key: "bait", label: "Bait" },
-  { key: "kind", label: "Kind" },
-  { key: "bite", label: "Bite" },
-  { key: "hookBonus", label: "Hook Bonus" },
-  { key: "vendorPriceEach", label: "Vendor Price" },
-  { key: "sharePct", label: "Pool Share" },
-  { key: "competingCount", label: "Competing" },
+  { key: "rod", label: "Rod" },
 ];
 
 const SKILLUP_COLUMNS: { key: SkillupKey; label: string }[] = [
-  { key: "skillGainPer200", label: "Est. skill gain / day" },
+  { key: "skillGainPer200", label: "Est. fish skill gain / day" },
   { key: "catchTimeSeconds", label: "Time / day" },
   { key: "targetFishPer200", label: "Target fish / day" },
   { key: "bestVendorPrice", label: "Max NPC gross / fish" },
@@ -256,7 +318,7 @@ const SKILLUP_COLUMNS: { key: SkillupKey; label: string }[] = [
 
 const MAX_VISIBLE_ROWS = 300;
 const COMPACT_SKILLUP_COLUMNS: { key: SkillupKey; label: string; width: string }[] = [
-  { key: "skillGainPer200", label: "Est. skill gain / day", width: "8%" },
+  { key: "skillGainPer200", label: "Est. fish skill gain / day", width: "8%" },
   { key: "fish", label: "Fish", width: "10%" },
   { key: "bestVendorPrice", label: "Max NPC gross / fish", width: "12%" },
   { key: "catchTimeSeconds", label: "Time / day", width: "10%" },
@@ -267,7 +329,7 @@ const COMPACT_SKILLUP_COLUMNS: { key: SkillupKey; label: string; width: string }
   { key: "zone", label: "Location", width: "13%" },
   { key: "bait", label: "Bait", width: "11%" },
 ];
-const DAILY_LIMIT_ASSUMPTIONS = "Assumes a fresh day: 200 retained fish or 20,000 fatigue, whichever comes first. Landings and completed failures spend fatigue, including skill-gap penalties and rod discounts. Lures cancel bad feelings (including false alarms). Epic fights hide warnings: the skill-up view cancels them with lures, while Include all catchable fish completes them and can lose lures. Consumable bait completes these fights, including natural snaps. Cancellations cost time but give no catches, skill or fatigue. Expanded catch planning assumes all key-item and quest prerequisites are met.";
+const DAILY_LIMIT_ASSUMPTIONS = "Assumes a fresh day: 200 retained fish or 20,000 fatigue, whichever comes first. Landings and completed failures spend fatigue, including skill-gap penalties and rod discounts. Lures cancel bad feelings (including false alarms) but complete other fish fights, including epic catches; lures can be lost. Consumable bait completes fish fights, including natural snaps. Cancellations cost time but give no catches, skill or fatigue. Expanded catch planning assumes all key-item and quest prerequisites are met.";
 const CATCH_TIME_ASSUMPTIONS = `Estimated active fishing time until the daily limit at this spot and bait, rounded up to a minute. ${DAILY_LIMIT_ASSUMPTIONS} Unchecked fish still bite but are canceled, as are items and monsters. Uses approximate expected skill progression. Excludes guild rank caps, travel, waiting for fishing windows, and repair / resupply downtime.`;
 const TARGET_COUNT_ASSUMPTIONS = `Estimated target fish per day, weighted by bite and landing chances over approximate skill progression. ${DAILY_LIMIT_ASSUMPTIONS} Fish selections apply across the entire planner table, including every location, bait and rod. Unchecked species still bite but contribute no catches, skill or fatigue. Capped retained competitors still count. Assumes you can identify the fish you intend to cancel; estimates are not guarantees.`;
 const SESSION_SKILL_ASSUMPTIONS = `Estimated fishing skill points gained across the pool before the daily limit. ${DAILY_LIMIT_ASSUMPTIONS} Updates skill-up rates, bite odds, landing odds and fatigue costs at expected skill-level boundaries; a mean-progression approximation, not an exact stochastic forecast. Includes eligible completed failures; canceled fish give no skill. Ignores guild rank caps and downtime.`;
@@ -353,6 +415,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
   const resultsHeight = useTableViewportHeight(resultsRef);
   const [expandedSkillupKey, setExpandedSkillupKey] = useState<string | null>(null);
   const [expandedVendorKey, setExpandedVendorKey] = useState<string | null>(null);
+  const [expandedSpotKey, setExpandedSpotKey] = useState<string | null>(null);
   const [expandedSkillupGroups, setExpandedSkillupGroups] = useState<Set<string>>(() => new Set());
   function toggleSkillupGroup(key: string, expanded: boolean) {
     if (expanded) setExpandedSkillupKey(null);
@@ -386,6 +449,15 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     sBite: string;
     sMinShare: string;
     sSoloOnly: boolean;
+    sSkill: string;
+    sBonusSkill: string;
+    sSelectedRods: string[];
+    sFishSeconds: string;
+    sOtherSeconds: string;
+    sIncludeCop: boolean;
+    sIncludeToau: boolean;
+    sExcludedFish: string[];
+    sSaleOverrides: Record<string, FishingSaleOverride>;
     sSortKey: SpotKey;
     sSortDir: SortDir;
     uSkill: string;
@@ -428,7 +500,16 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     sBite: "",
     sMinShare: "",
     sSoloOnly: false,
-    sSortKey: "sharePct",
+    sSkill: "1",
+    sBonusSkill: "0",
+    sSelectedRods: SKILLUP_ROD_NAMES,
+    sFishSeconds: String(DEFAULT_FISHING_TIMING.fishSeconds),
+    sOtherSeconds: String(DEFAULT_FISHING_TIMING.otherSeconds),
+    sIncludeCop: true,
+    sIncludeToau: true,
+    sExcludedFish: [],
+    sSaleOverrides: {},
+    sSortKey: "netGilPerHour",
     sSortDir: "desc",
     uSkill: "1",
     uFishSeconds: String(DEFAULT_FISHING_TIMING.fishSeconds),
@@ -477,6 +558,11 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
       ? (loaded.sSortKey as SpotKey)
       : defaultUi.sSortKey,
     sSortDir: loaded.sSortDir === "asc" ? "asc" : "desc",
+    sExcludedFish: Array.isArray(loaded.sExcludedFish) ? loaded.sExcludedFish : defaultUi.sExcludedFish,
+    sSaleOverrides: readFishingSaleOverrides(loaded.sSaleOverrides),
+    sSelectedRods: Array.isArray(loaded.sSelectedRods)
+      ? loaded.sSelectedRods.filter((rod) => SKILLUP_ROD_NAMES.includes(rod))
+      : defaultUi.sSelectedRods,
     uSelectedRods: Array.isArray(loaded.uSelectedRods)
       ? loaded.uSelectedRods.filter((rod) => SKILLUP_ROD_NAMES.includes(rod))
       : legacySelectedRods,
@@ -515,6 +601,22 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
   const [sBite, setSBite] = useState(initialUi.sBite);
   const [sMinShare, setSMinShare] = useState(initialUi.sMinShare);
   const [sSoloOnly, setSSoloOnly] = useState(initialUi.sSoloOnly);
+  const [sSkill, setSSkill] = useState(initialUi.sSkill);
+  const [sBonusSkill, setSBonusSkill] = useState(initialUi.sBonusSkill);
+  const [sSelectedRods, setSSelectedRods] = useState(initialUi.sSelectedRods);
+  const [sFishSeconds, setSFishSeconds] = useState(initialUi.sFishSeconds);
+  const [sOtherSeconds, setSOtherSeconds] = useState(initialUi.sOtherSeconds);
+  const [sIncludeCop, setSIncludeCop] = useState(initialUi.sIncludeCop);
+  const [sIncludeToau, setSIncludeToau] = useState(initialUi.sIncludeToau);
+  const [sExcludedFish, setSExcludedFish] = useState(initialUi.sExcludedFish);
+  const [sSaleOverrides, setSSaleOverrides] = useState(initialUi.sSaleOverrides);
+  const [sAhPriceDrafts, setSAhPriceDrafts] = useState<Record<string, string>>({});
+  const spotFishSeconds = Number(sFishSeconds) > 0 && Number.isFinite(Number(sFishSeconds)) ? Number(sFishSeconds) : DEFAULT_FISHING_TIMING.fishSeconds;
+  const spotOtherSeconds = Number(sOtherSeconds) > 0 && Number.isFinite(Number(sOtherSeconds)) ? Number(sOtherSeconds) : DEFAULT_FISHING_TIMING.otherSeconds;
+  const spotTiming = useMemo(
+    () => ({ fishSeconds: spotFishSeconds, otherSeconds: spotOtherSeconds }),
+    [spotFishSeconds, spotOtherSeconds]
+  );
   const [sSortKey, setSSortKey] = useState<SpotKey>(initialUi.sSortKey);
   const [sSortDir, setSSortDir] = useState<SortDir>(initialUi.sSortDir);
 
@@ -556,8 +658,9 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     setSelectedRowKey(null);
     setExpandedSkillupKey(null);
     setExpandedVendorKey(null);
+    setExpandedSpotKey(null);
     setExpandedSkillupGroups(new Set());
-  }, [mode, activeSearch, uMaxTimeHours]);
+  }, [mode, activeSearch, uMaxTimeHours, sSkill, sBonusSkill, sSelectedRods, sFishSeconds, sOtherSeconds, sIncludeCop, sIncludeToau]);
 
   useEffect(() => {
     function onDocumentPointerDown(event: PointerEvent) {
@@ -594,6 +697,15 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
       sBite,
       sMinShare,
       sSoloOnly,
+      sSkill,
+      sBonusSkill,
+      sSelectedRods,
+      sFishSeconds,
+      sOtherSeconds,
+      sIncludeCop,
+      sIncludeToau,
+      sExcludedFish,
+      sSaleOverrides,
       sSortKey,
       sSortDir,
       uSkill,
@@ -635,6 +747,15 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     sBite,
     sMinShare,
     sSoloOnly,
+    sSkill,
+    sBonusSkill,
+    sSelectedRods,
+    sFishSeconds,
+    sOtherSeconds,
+    sIncludeCop,
+    sIncludeToau,
+    sExcludedFish,
+    sSaleOverrides,
     sSortKey,
     sSortDir,
     uSkill,
@@ -668,7 +789,12 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     if (key === sSortKey) setSSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else {
       setSSortKey(key);
-      setSSortDir(key === "sharePct" || key === "hookBonus" || key === "vendorPriceEach" ? "desc" : "asc");
+      setSSortDir(
+        key === "netGilPerHour" || key === "netGilPerDay" || key === "targetFishPer200" ||
+        key === "vendorPriceEach" || key === "baitNeeded" || key === "sharePct"
+          ? "desc"
+          : "asc"
+      );
     }
   }
 
@@ -714,6 +840,10 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     setSBite("");
     setSMinShare("");
     setSSoloOnly(false);
+    setSIncludeCop(true);
+    setSIncludeToau(true);
+    setSSortKey("netGilPerHour");
+    setSSortDir("desc");
   }
 
   function clearSkillupFilters() {
@@ -737,6 +867,52 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     );
   }
 
+  function toggleSpotRod(rodName: string) {
+    setSSelectedRods((selected) =>
+      selected.includes(rodName)
+        ? selected.filter((name) => name !== rodName)
+        : [...selected, rodName]
+    );
+  }
+
+  function toggleSpotPoolFish(fish: string) {
+    setSExcludedFish((excluded) =>
+      excluded.includes(fish)
+        ? excluded.filter((name) => name !== fish)
+        : [...excluded, fish]
+    );
+  }
+
+  function clearSpotSaleDraft(fish: string) {
+    setSAhPriceDrafts((previous) => {
+      const next = { ...previous };
+      delete next[fish];
+      return next;
+    });
+  }
+
+  function resetSpotDirectPrice(fish: string) {
+    setSSaleOverrides((previous) => {
+      const next = { ...previous };
+      delete next[fish];
+      return next;
+    });
+    clearSpotSaleDraft(fish);
+  }
+
+  function applySpotAhPrice(fish: string) {
+    const current = sSaleOverrides[fish];
+    const priceText = sAhPriceDrafts[fish] ?? (current?.type === "ah" ? current.price : "");
+    const price = Number(priceText);
+    if (priceText.trim() === "" || !Number.isFinite(price) || price < 0) return;
+    setSSaleOverrides((previous) => ({ ...previous, [fish]: { type: "ah", price: priceText } }));
+  }
+
+  function selectSpotRecipePrice(fish: string, recipeId: number, tier: string) {
+    setSSaleOverrides((previous) => ({ ...previous, [fish]: { type: "recipe", recipeId, tier } }));
+    clearSpotSaleDraft(fish);
+  }
+
   /** Carry current affinity filters into the best-spot finder and switch views. */
   function findBestSpots() {
     setSFish(aFish.trim() !== "" ? aFish : aGlobal);
@@ -748,7 +924,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     setSGlobal("");
     setSMinShare("");
     setSSoloOnly(false);
-    setSSortKey("sharePct");
+    setSSortKey("netGilPerHour");
     setSSortDir("desc");
     setMode("spots");
   }
@@ -772,7 +948,9 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     sKind !== "" ||
     sBite !== "" ||
     sMinShare.trim() !== "" ||
-    sSoloOnly;
+    sSoloOnly ||
+    !sIncludeCop ||
+    !sIncludeToau;
 
   const skillupFilterActive =
     uGlobal.trim() !== "" ||
@@ -845,75 +1023,201 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
   }, [aGlobal, aFish, aBait, aKind, aBite, aBestOnly, aLvlMin, aLvlMax, aSortKey, aSortDir]);
 
   const spotResults = useMemo(() => {
+    const baseSkill = Number(sSkill);
+    const bonusSkill = Math.max(0, Math.min(8, Math.floor(Number(sBonusSkill) || 0)));
+    if (!Number.isFinite(baseSkill) || baseSkill < 0 || baseSkill > 200) return [];
+
     const g = sGlobal.trim().toLowerCase();
     const fq = sFish.trim().toLowerCase();
     const aq = sArea.trim().toLowerCase();
     const bq = sBait.trim().toLowerCase();
     const minShare = sMinShare.trim() === "" ? null : Number(sMinShare);
+    const selectedRodNames = new Set(sSelectedRods);
+    const availableRods = SKILLUP_RODS.filter((rod) => selectedRodNames.has(rod.rod));
+    const estimates = new Map<string, {
+      names: string[];
+      odds: ReturnType<typeof calculateCastOdds>;
+      session: ReturnType<typeof calculatePoolSession>;
+      effectiveSkill: number;
+    }>();
+    const rows: ProfitSpotRow[] = [];
 
-    const filtered = POOLS.filter((p) => {
-      if (sZone && p.zone !== sZone) return false;
-      if (sKind && p.kind !== sKind) return false;
-      if (sBite && p.bite !== sBite) return false;
-      if (sSoloOnly && p.sharePct < 100) return false;
-      if (fq && !p.fish.toLowerCase().includes(fq)) return false;
-      if (aq && !p.area.toLowerCase().includes(aq)) return false;
-      if (bq && !p.bait.toLowerCase().includes(bq)) return false;
-      if (minShare !== null && Number.isFinite(minShare) && p.sharePct < minShare) return false;
+    for (const pool of POOLS) {
+      if (pool.lvl === null) continue;
+      if (sZone && pool.zone !== sZone) continue;
+      if (sKind && pool.kind !== sKind) continue;
+      if (sBite && pool.bite !== sBite) continue;
+      if (fq && !pool.fish.toLowerCase().includes(fq)) continue;
+      if (aq && !pool.area.toLowerCase().includes(aq)) continue;
+      if (bq && !pool.bait.toLowerCase().includes(bq)) continue;
+      if (!sIncludeCop && COP_LOCKED_ZONES.has(pool.zone)) continue;
+      if (!sIncludeToau && TOAU_LOCKED_ZONES.has(pool.zone)) continue;
 
-      if (g) {
-        const hay = [
-          p.zone,
-          p.area,
-          p.fish,
-          p.lvl === null ? "" : String(p.lvl),
-          p.bait,
-          p.kind,
-          p.bite,
-          `${p.sharePct}%`,
-          p.competing.join(", "),
-        ]
-          .join(" | ")
-          .toLowerCase();
-        if (!hay.includes(g)) return false;
+      const areaKey = `${normalizeFishingName(pool.zone)}|${normalizeFishingName(pool.area)}`;
+      const area = PLANNER_AREAS[areaKey];
+      const bait = PLANNER_BAITS[pool.bait];
+      const fish = PLANNER_FISH[pool.fish];
+      if (!area || !bait || !fish) continue;
+
+      for (const rod of availableRods) {
+        const effectiveSkill = Math.floor(baseSkill) + bonusSkill + getRodHiddenSuccessBonus(rod.rod);
+        const estimateKey = `${areaKey}|${pool.bait}|${pool.kind}|${rod.rod}|${effectiveSkill}`;
+        let estimate = estimates.get(estimateKey);
+        if (!estimate) {
+          const members = area.allMembers
+            .map((name) => PLANNER_FISH[name])
+            .filter((member) => member && !member.item && !phoenixFish[member.fish]?.disabled && bait.fish[member.fish] !== undefined)
+            .map((member) => ({ ...member, hookBonus: bait.fish[member.fish] }));
+          const items = area.allMembers
+            .map((name) => PLANNER_FISH[name])
+            .filter((member) => member?.item);
+          if (members.length === 0) continue;
+
+          const options = {
+            city: isCityFishingZone(pool.zone),
+            hasItems: items.length > 0,
+            hasMobs: area.hasMobs,
+            difficulty: area.difficulty,
+            poorFish: bait.poorFish,
+            shellfishBait: bait.shellfishBait,
+            moonPhase,
+          };
+          const odds = calculateCastOdds(effectiveSkill, rod, members, options);
+          const session = calculatePoolSession({
+            baseSkill,
+            bonusSkill,
+            zone: pool.zone,
+            rod,
+            fish: members,
+            options,
+            baitKind: pool.kind,
+            excludedFish: sExcludedFish,
+            timing: spotTiming,
+            trackSkillProgress: false,
+          });
+          estimate = { names: members.map((member) => member.fish), odds, session, effectiveSkill };
+          estimates.set(estimateKey, estimate);
+        }
+
+        const targetIndex = estimate.names.indexOf(pool.fish);
+        if (targetIndex < 0) continue;
+        const targetCatches = estimate.session.catches[targetIndex];
+        if (targetCatches === null || targetCatches === undefined || targetCatches <= 0) continue;
+        const targetPct = estimate.odds.targetPct[targetIndex];
+        const fishPct = estimate.odds.fishPct;
+        const sharePct = fishPct > 0 ? (100 * targetPct) / fishPct : 0;
+        if (sSoloOnly && sharePct < 100) continue;
+        if (minShare !== null && Number.isFinite(minShare) && sharePct < minShare) continue;
+
+        const catchBreakdown = estimate.names.map((name, index) => {
+          const catches = estimate.session.catches[index];
+          const sale = getFishingSaleOption(name, sSaleOverrides[name]);
+          return {
+            fish: name,
+            size: PLANNER_FISH[name]?.size ?? "-",
+            level: PLANNER_FISH[name]?.skillCap ?? 0,
+            catches,
+            salePrice: sale.price,
+            saleLabel: sale.label,
+            grossGil: catches === 0 ? 0 : catches === null || sale.price === null ? null : catches * sale.price,
+            included: !sExcludedFish.includes(name),
+          };
+        });
+        const grossGilPerDay = catchBreakdown.every((entry) => entry.catches === 0 || entry.grossGil !== null)
+          ? catchBreakdown.reduce((total, entry) => total + (entry.grossGil ?? 0), 0)
+          : null;
+        const baitNeeded = estimate.session.baitNeeded;
+        const baitCostPerDay = pool.kind === "Lure"
+          ? 0
+          : baitNeeded === null
+            ? null
+            : (() => {
+                const price = getFishingVendorOptions(pool.bait).rawPrice;
+                return price === null ? null : baitNeeded * price;
+              })();
+        const netGilPerDay = grossGilPerDay === null || baitCostPerDay === null
+          ? null
+          : grossGilPerDay - baitCostPerDay;
+        const catchTimeSeconds = estimate.session.catchTimeSeconds;
+        const sale = getFishingSaleOption(pool.fish, sSaleOverrides[pool.fish]);
+        const risk = calculateRodRisk(estimate.effectiveSkill, fish, rod);
+        const candidate: ProfitSpotRow = {
+          ...pool,
+          rod: rod.rod,
+          effectiveSkill: estimate.effectiveSkill,
+          salePrice: sale.price,
+          saleLabel: sale.label,
+          catchTimeSeconds,
+          targetFishPer200: targetCatches,
+          grossGilPerDay,
+          baitCostPerDay,
+          netGilPerDay,
+          netGilPerHour: netGilPerDay === null || catchTimeSeconds === null || catchTimeSeconds <= 0
+            ? null
+            : (netGilPerDay * 3600) / catchTimeSeconds,
+          sessionCasts: estimate.session.casts,
+          fatigueUsed: estimate.session.fatigueUsed,
+          baitNeeded,
+          fishPct,
+          itemPct: estimate.odds.itemPct,
+          mobPct: estimate.odds.mobPct,
+          nothingPct: estimate.odds.nothingPct,
+          targetPct,
+          fight: calculateFishingFight(estimate.effectiveSkill, fish, rod, pool.kind),
+          risk,
+          catchBreakdown,
+        };
+
+        if (g) {
+          const haystack = [
+            candidate.fish, candidate.zone, candidate.area, candidate.bait, candidate.rod,
+            candidate.kind, candidate.bite, candidate.competing.join(", "),
+          ].join(" | ").toLowerCase();
+          if (!haystack.includes(g)) continue;
+        }
+        rows.push(candidate);
       }
-      return true;
-    });
+    }
 
-    return filtered.sort((x, y) => {
-      let cmp = 0;
-      if (sSortKey === "lvl") {
-        const xv = x.lvl;
-        const yv = y.lvl;
-        if (xv === null && yv === null) cmp = 0;
-        else if (xv === null) return 1;
-        else if (yv === null) return -1;
-        else cmp = xv - yv;
-      } else if (sSortKey === "sharePct" || sSortKey === "hookBonus") {
-        cmp = x[sSortKey] - y[sSortKey];
-      } else if (sSortKey === "vendorPriceEach") {
-        const xv = getVendorPriceEach(x.fish);
-        const yv = getVendorPriceEach(y.fish);
-        if (xv === null && yv === null) cmp = 0;
-        else if (xv === null) return 1;
-        else if (yv === null) return -1;
-        else cmp = xv - yv;
-      } else if (sSortKey === "competingCount") {
-        cmp = x.competing.length - y.competing.length;
+    const numericKeys: SpotKey[] = [
+      "netGilPerHour", "netGilPerDay", "catchTimeSeconds", "targetFishPer200",
+      "vendorPriceEach", "baitNeeded", "sharePct",
+    ];
+    const numericValue = (row: ProfitSpotRow): number | null => {
+      switch (sSortKey) {
+        case "netGilPerHour": return row.netGilPerHour;
+        case "netGilPerDay": return row.netGilPerDay;
+        case "catchTimeSeconds": return row.catchTimeSeconds;
+        case "targetFishPer200": return row.targetFishPer200;
+        case "vendorPriceEach": return row.salePrice;
+        case "baitNeeded": return row.baitNeeded;
+        case "sharePct": return row.sharePct;
+        default: return null;
+      }
+    };
+    return rows.sort((first, second) => {
+      let comparison = 0;
+      if (numericKeys.includes(sSortKey)) {
+        const firstValue = numericValue(first);
+        const secondValue = numericValue(second);
+        if (firstValue === null && secondValue !== null) return 1;
+        if (secondValue === null && firstValue !== null) return -1;
+        comparison = Number(firstValue ?? 0) - Number(secondValue ?? 0);
       } else {
-        cmp = x[sSortKey].localeCompare(y[sSortKey]);
+        const textValue = (row: ProfitSpotRow) => sSortKey === "zone" ? row.zone
+          : sSortKey === "area" ? row.area
+            : sSortKey === "fish" ? row.fish
+              : sSortKey === "bait" ? row.bait
+                : row.rod;
+        comparison = textValue(first).localeCompare(textValue(second));
       }
-      if (cmp === 0) {
-        // Tie-break: higher share first, then higher hook bonus, then fewer competitors.
-        cmp = y.sharePct - x.sharePct;
-        if (cmp !== 0) return cmp;
-        cmp = y.hookBonus - x.hookBonus;
-        if (cmp !== 0) return cmp;
-        return x.competing.length - y.competing.length;
-      }
-      return sSortDir === "asc" ? cmp : -cmp;
+      if (comparison === 0) comparison = (second.netGilPerHour ?? 0) - (first.netGilPerHour ?? 0);
+      return sSortDir === "asc" ? comparison : -comparison;
     });
-  }, [sGlobal, sFish, sZone, sArea, sBait, sKind, sBite, sMinShare, sSoloOnly, sSortKey, sSortDir]);
+  }, [
+    moonPhase, sSkill, sBonusSkill, sSelectedRods, sExcludedFish, sSaleOverrides, spotTiming, sIncludeCop, sIncludeToau,
+    sGlobal, sFish, sZone, sArea, sBait, sKind, sBite, sMinShare, sSoloOnly, sSortKey, sSortDir,
+  ]);
 
   const skillupResults = useMemo(() => {
     const baseSkill = Number(uSkill);
@@ -972,14 +1276,14 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
             moonPhase,
           };
           const odds = calculateCastOdds(effectiveSkill, rod, members, options);
-          const gains = calculatePoolSkillup(baseSkill, effectiveSkill, pool.zone, rod, members, odds.targetPct, pool.kind, uIncludeAllFish);
-          const session = calculatePoolSession({ baseSkill, bonusSkill, zone: pool.zone, rod, fish: members, options, baitKind: pool.kind, allowEpicLures: uIncludeAllFish, excludedFish, timing: { fishSeconds, otherSeconds } });
+          const gains = calculatePoolSkillup(baseSkill, effectiveSkill, pool.zone, rod, members, odds.targetPct, pool.kind);
+          const session = calculatePoolSession({ baseSkill, bonusSkill, zone: pool.zone, rod, fish: members, options, baitKind: pool.kind, excludedFish, timing: { fishSeconds, otherSeconds } });
           const retainedGains = gains.gains.map((gain, index) => excludedFish.includes(members[index].fish) ? 0 : gain);
           const itemHazards = items.filter(item => calculateRodRisk(effectiveSkill, item, rod).breakPct > 0).map(item => item.fish).join(", ");
           estimate = {
             ...odds, ...session, gains: retainedGains, totalGain: retainedGains.reduce((sum, gain) => sum + gain, 0), names: members.map(member => member.fish), itemHazards,
             attemptedFishPct: odds.targetPct.reduce((sum, value, index) => sum + (excludedFish.includes(members[index].fish) ? 0
-              : value * calculateFishingFight(effectiveSkill, members[index], rod, pool.kind, uIncludeAllFish).attemptedPct / 100), 0),
+              : value * calculateFishingFight(effectiveSkill, members[index], rod, pool.kind).attemptedPct / 100), 0),
             catchBreakdown: members.map((member, index) => ({
               fish: member.fish, size: member.size, level: member.skillCap, included: !excludedFish.includes(member.fish),
               catches: excludedFish.includes(member.fish) ? 0 : session.catches[index],
@@ -1002,12 +1306,13 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
           catchTimeSeconds: estimate.catchTimeSeconds,
           targetFishPer200: excludedFish.includes(pool.fish) ? 0 : estimate.catches[targetIndex],
           catchBreakdown: estimate.catchBreakdown,
-          skillGainPer200: estimate.skillGain,
+          skillGainPer200: estimate.catchBreakdown.find(member => member.fish === pool.fish)?.skillGain ?? null,
+          poolSkillGainPer200: estimate.skillGain,
           sessionCasts: estimate.casts,
           fatigueUsed: estimate.fatigueUsed,
           baitNeeded: estimate.baitNeeded,
           attemptedFishPct: estimate.attemptedFishPct,
-          fight: calculateFishingFight(effectiveSkill, fish, rod, pool.kind, uIncludeAllFish),
+          fight: calculateFishingFight(effectiveSkill, fish, rod, pool.kind),
           sharePct,
           fishPct: estimate.fishPct,
           itemPct: estimate.itemPct,
@@ -1168,13 +1473,15 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
           {mode === "affinity"
             ? "Bait Affinity (Fish × Bait)"
             : mode === "spots"
-              ? "Best Fishing Spots (Pool Share)"
+              ? "Best Fishing Spots (Gil & Time)"
               : "Fishing Skill-up Planner"}
         </h3>
         <div style={styles.sub}>
           {mode === "skillup"
             ? `${skillupGroups.length.toLocaleString()} location groups / ${skillupResults.length.toLocaleString()} combinations`
-            : `${results.length.toLocaleString()} of ${(mode === "affinity" ? BAIT.length : POOLS.length).toLocaleString()} entries`}
+            : mode === "spots"
+              ? `${spotResults.length.toLocaleString()} calculated fishing combinations`
+              : `${results.length.toLocaleString()} of ${BAIT.length.toLocaleString()} entries`}
           {results.length > MAX_VISIBLE_ROWS ? ` (showing first ${MAX_VISIBLE_ROWS} — refine filters)` : ""}
         </div>
       </div>
@@ -1276,18 +1583,70 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
         ) : mode === "spots" ? (
           <div style={styles.subCard}>
             <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-              {textFilter("Search everything", sGlobal, setSGlobal, "e.g. moat carp", 240)}
-              {textFilter("Target fish", sFish, setSFish, "e.g. carp")}
-              {selectFilter("Zone", sZone, setSZone, POOL_ZONES, 200)}
-              {textFilter("Area", sArea, setSArea, "e.g. whole zone", 160)}
-              {textFilter("Bait", sBait, setSBait, "e.g. lugworm", 160)}
-              {selectFilter("Kind", sKind, setSKind, KINDS, 120)}
-              {selectFilter("Bite", sBite, setSBite, POOL_BITES, 140)}
+              <div style={{ ...styles.field, width: 115 }}>
+                <div style={styles.label}>Fishing skill</div>
+                <input style={styles.inputCompact} type="number" min={0} max={200} step={1} value={sSkill}
+                  onChange={(event) => setSSkill(event.target.value)} placeholder="e.g. 75" />
+              </div>
+              <div style={{ ...styles.field, width: 150 }}>
+                <div style={styles.label}>Gear/support +skill (0–8)</div>
+                <input style={styles.inputCompact} type="number" min={0} max={8} step={1} value={sBonusSkill}
+                  onChange={(event) => setSBonusSkill(event.target.value)} placeholder="0" />
+              </div>
+              <div style={{ ...styles.field, width: 230, position: "relative" }}>
+                <div style={styles.label}>Rods to compare</div>
+                <details ref={rodsDropdownRef} style={{ position: "relative" }}>
+                  <summary style={{ ...styles.selectCompact, boxSizing: "border-box", cursor: "pointer", listStyle: "none", display: "flex", alignItems: "center" }}>
+                    {sSelectedRods.length === 0 ? "No rods selected" : `${sSelectedRods.length} rod${sSelectedRods.length === 1 ? "" : "s"} selected`}
+                  </summary>
+                  <div style={{ position: "absolute", zIndex: 20, top: "calc(100% + 4px)", left: 0, width: 280, maxHeight: 330,
+                    overflowY: "auto", padding: 10, border: "1px solid rgba(255,255,255,0.22)", borderRadius: 8,
+                    background: "#111", boxShadow: "0 10px 30px rgba(0,0,0,0.55)" }}>
+                    <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                      <button type="button" style={styles.buttonCompact} onClick={() => setSSelectedRods(SKILLUP_ROD_NAMES)}>Select all</button>
+                      <button type="button" style={styles.buttonCompact} onClick={() => setSSelectedRods([])}>None</button>
+                    </div>
+                    <div style={{ display: "grid", gap: 7 }}>
+                      {SKILLUP_RODS.map((rod) => <label key={rod.rodId} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 13 }}>
+                        <input type="checkbox" checked={sSelectedRods.includes(rod.rod)} onChange={() => toggleSpotRod(rod.rod)} />
+                        <span>{rod.rod}</span>
+                      </label>)}
+                    </div>
+                  </div>
+                </details>
+              </div>
+              <label style={{ ...styles.field, width: 145 }} title="Estimated full cycle from starting a fish cast to starting the next cast, including waiting, fighting, reeling and recasting.">
+                <span style={styles.label}>Fish cast cycle (s)</span>
+                <input aria-label="Fish cast cycle (s)" style={styles.inputCompact} type="number" min={1} step={1} value={sFishSeconds}
+                  onChange={(event) => setSFishSeconds(event.target.value)} onBlur={() => setSFishSeconds(String(spotFishSeconds))} />
+              </label>
+              <label style={{ ...styles.field, width: 155 }} title="Estimated full cycle for canceled fish, items, monsters or no bites, including waiting, canceling and recasting.">
+                <span style={styles.label}>Other cast cycle (s)</span>
+                <input aria-label="Other cast cycle (s)" style={styles.inputCompact} type="number" min={1} step={1} value={sOtherSeconds}
+                  onChange={(event) => setSOtherSeconds(event.target.value)} onBlur={() => setSOtherSeconds(String(spotOtherSeconds))} />
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={sIncludeCop} onChange={(event) => setSIncludeCop(event.target.checked)} /> CoP areas
+              </label>
+              <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, cursor: "pointer" }}>
+                <input type="checkbox" checked={sIncludeToau} onChange={(event) => setSIncludeToau(event.target.checked)} /> ToAU areas
+              </label>
+            </div>
+            {(sSkill.trim() === "" || !Number.isFinite(Number(sSkill)) || Number(sSkill) < 0 || Number(sSkill) > 200) &&
+              <div role="alert" style={{ color: "#ff9c7a", fontSize: 13, marginTop: 8 }}>Enter a fishing skill from 0 to 200 to calculate spot estimates.</div>}
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+              {textFilter("Search everything", sGlobal, setSGlobal, "fish, rod, zone, bait", 230)}
+              {textFilter("Fish", sFish, setSFish, "any fish, any level", 180)}
+              {selectFilter("Zone", sZone, setSZone, POOL_ZONES, 190)}
+              {textFilter("Area", sArea, setSArea, "e.g. whole zone", 150)}
+              {textFilter("Bait / lure", sBait, setSBait, "e.g. lugworm", 150)}
+              {selectFilter("Kind", sKind, setSKind, KINDS, 115)}
+              {selectFilter("Bite", sBite, setSBite, POOL_BITES, 130)}
             </div>
 
             <div style={{ marginTop: 10, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
               <div style={{ ...styles.field, width: 120 }}>
-                <div style={styles.label}>Min share %</div>
+                <div style={styles.label}>Min pool share %</div>
                 <input
                   style={styles.inputCompact}
                   type="number"
@@ -1310,7 +1669,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
                 }}
               >
                 <input type="checkbox" checked={sSoloOnly} onChange={(e) => setSSoloOnly(e.target.checked)} />
-                100% pools only (no competition)
+                100% target bites
               </label>
 
               <button
@@ -1323,12 +1682,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
             </div>
 
             <div style={{ marginTop: 8, ...styles.sub }}>
-              Lists every zone/area/bait combination for each fish. Pool Share = your target&apos;s estimated share of
-              bites on that bait in that spot (neutral time/moon, adequate skill).{" "}
-              <span style={shareColor(100)}>100%</span> = only your target bites it there;{" "}
-              <span style={shareColor(70)}>60–99%</span> = minor competition; <span style={shareColor(30)}>&lt;60%</span>{" "}
-              = crowded pool. A lower-share bait can still be the practical pick if it&apos;s cheaper or easier to get
-              (e.g. Meatball vs Drill Calamary for Gugrusaurus).
+              Sort by net gil per hour or day to compare money; sort by time or target catches for speed. Daily estimates stop at 200 landed fish or 20,000 fatigue, whichever comes first, using your entered skill without skill progression. Direct NPC prices are the default; AH prices can be entered and recipe output values selected per fish. Net estimates subtract consumable bait costs but do not include auction fees or recipe ingredients and synthesis failures. One reusable lure is counted, with replacement after loss excluded. All fishing prerequisites are assumed met.
             </div>
           </div>
         ) : (
@@ -1435,7 +1789,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
               </label>
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", minHeight: 32 }}>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, cursor: "pointer" }}
-                  title="General catch planning, including legendary, capped and prerequisite-gated fish. Assumes all fishing prerequisites are met; disabled fish remain excluded. Lures complete epic fights in this mode and can be lost. Existing search, rod and area filters still apply.">
+                  title="General catch planning, including legendary, capped and prerequisite-gated fish. Assumes all fishing prerequisites are met; disabled fish remain excluded. Lures complete fish fights, including epic catches, in either mode and can be lost. Existing search, rod and area filters still apply.">
                   <input type="checkbox" checked={uIncludeAllFish} onChange={event => {
                     setUIncludeAllFish(event.target.checked);
                     setUSortKey(event.target.checked ? "targetFishPer200" : "skillGainPer200");
@@ -1520,7 +1874,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
         )}
         </CollapsibleSection>
 
-        {mode === "skillup" && <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, fontSize: 13 }}>
+        {(mode === "skillup" || mode === "spots") && <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 12, fontSize: 13 }}>
           <span>Moon snapshot: {moonDirectionFromStep(moonSnapshot.moonStep)} {moonSnapshot.moonPercent}% ({moonSnapshot.moonPhaseName})</span>
           <button type="button" style={styles.buttonCompact} onClick={() => setMoonSnapshot(getVanaNow(Date.now(), cal))}>Recalculate with current moon</button>
         </div>}
@@ -1601,9 +1955,10 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
               </tbody>
             </table>
           ) : mode === "spots" ? (
-            <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 1330 }}>
               <thead>
                 <tr>
+                  <th style={{ ...thStyle, cursor: "default", padding: 4 }} aria-label="Details" />
                   {SPOT_COLUMNS.map((col) => {
                     const active = col.key === sSortKey;
                     return (
@@ -1613,47 +1968,215 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
                         onClick={() => onSpotHeader(col.key)}
                         title={`Sort by ${col.label}`}
                       >
-                        {col.label}
+                        {col.key === "vendorPriceEach" && Object.keys(sSaleOverrides).length > 0 ? "Selected sale / fish" : col.label}
                         {active ? (sSortDir === "asc" ? " ▲" : " ▼") : ""}
                       </th>
                     );
                   })}
-                  <th style={{ ...thStyle, cursor: "default" }}>Competing Fish</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleCount === 0 ? (
                   <tr>
                     <td style={{ ...tdStyle, opacity: 0.7 }} colSpan={SPOT_COLUMNS.length + 1}>
-                      No matches. Try clearing some filters.
+                      No estimates. Choose at least one rod, enter a valid skill, or broaden the filters.
                     </td>
                   </tr>
                 ) : (
                   spotResults.slice(0, MAX_VISIBLE_ROWS).map((p, i) => {
-                    const rowKey = `spots|${p.zone}|${p.area}|${p.fish}|${p.bait}|${i}`;
+                    const rowKey = `spots|${p.zone}|${p.area}|${p.fish}|${p.bait}|${p.rod}|${i}`;
                     const selected = selectedRowKey === rowKey;
+                    const expanded = expandedSpotKey === rowKey;
+                    const vendorExpanded = expandedVendorKey === rowKey;
+                    const vendor = getFishingVendorOptions(p.fish);
+                    const saleOverride = sSaleOverrides[p.fish];
+                    const saleDraft = sAhPriceDrafts[p.fish] ?? (saleOverride?.type === "ah" ? saleOverride.price : "");
+                    const saleDraftNumber = Number(saleDraft);
+                    const validAhDraft = saleDraft.trim() !== "" && Number.isFinite(saleDraftNumber) && saleDraftNumber >= 0;
+                    const gutting = GUTTING_REWARDS[p.fish];
+                    const snapOutcomePct = ((100 - p.risk.escapePct) * p.risk.snapPct) / 100;
+                    const breakOutcomePct = ((100 - p.risk.escapePct) * (100 - p.risk.snapPct) * p.risk.breakPct) / 10000;
                     return (
-                    <tr
-                      key={rowKey}
-                      onClick={() => setSelectedRowKey(rowKey)}
-                      style={{ ...clickableRowStyle, ...(selected ? selectedRowStyle : {}) }}
-                      title="Click to highlight this row"
-                    >
-                      <td style={tdStyle}>{p.zone}</td>
-                      <td style={tdStyle}>{p.area}</td>
-                      <td style={{ ...tdStyle, fontWeight: 700 }}>{p.fish}</td>
-                      <td style={tdStyle}>{p.lvl ?? "-"}</td>
-                      <td style={tdStyle}>{p.bait}</td>
-                      <td style={tdStyle}>{p.kind}</td>
-                      <td style={tdStyle}>{p.bite}</td>
-                      <td style={tdStyle}>+{p.hookBonus}</td>
-                      <td style={tdStyle}>{formatVendorPrice(getVendorPriceEach(p.fish))}</td>
-                      <td style={{ ...tdStyle, ...shareColor(p.sharePct) }}>{p.sharePct}%</td>
-                      <td style={{ ...tdStyle, textAlign: "center" }}>{p.competing.length}</td>
-                      <td style={{ ...tdStyle, opacity: 0.85, whiteSpace: "normal", minWidth: 200 }}>
-                        {p.competing.length > 0 ? p.competing.join(", ") : "—"}
-                      </td>
-                    </tr>
+                      <React.Fragment key={rowKey}>
+                        <tr onClick={() => setSelectedRowKey(rowKey)} style={{ ...clickableRowStyle, ...(selected ? selectedRowStyle : {}) }}>
+                          <td style={{ ...tdStyle, padding: 4 }}>
+                            <button type="button" aria-label={`${expanded ? "Hide" : "Show"} money and catch details for ${p.fish}`}
+                              aria-expanded={expanded} aria-controls={`spot-details-${i}`}
+                              onClick={(event) => { event.stopPropagation(); setExpandedSpotKey(expanded ? null : rowKey); }}
+                              style={{ ...styles.buttonCompact, display: "grid", placeItems: "center", width: 28, height: 28, padding: 0 }}>
+                              {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                            </button>
+                          </td>
+                          {SPOT_COLUMNS.map((column) => {
+                            if (column.key === "netGilPerHour" || column.key === "netGilPerDay") {
+                              const value = column.key === "netGilPerHour" ? p.netGilPerHour : p.netGilPerDay;
+                              return <td key={column.key} style={{ ...tdStyle, fontWeight: 800, color: value !== null && value >= 0 ? "#8af6b0" : undefined }}>
+                                {value === null ? "Unknown" : `${formatVendorPrice(Math.round(value))} gil`}
+                              </td>;
+                            }
+                            if (column.key === "catchTimeSeconds") return <td key={column.key} style={{ ...tdStyle, fontWeight: 700 }}>{formatCatchTime(p.catchTimeSeconds)}</td>;
+                            if (column.key === "targetFishPer200") return <td key={column.key} style={tdStyle}>{p.targetFishPer200?.toFixed(1) ?? "Not catchable"}</td>;
+                            if (column.key === "vendorPriceEach") return <td key={column.key} style={tdStyle}>
+                              <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                                <button type="button" aria-label={`${vendorExpanded ? "Hide" : "Show"} sale price options and recipes for ${p.fish}`}
+                                  aria-expanded={vendorExpanded} aria-controls={`spot-vendor-${i}`}
+                                  onClick={(event) => { event.stopPropagation(); setExpandedVendorKey(vendorExpanded ? null : rowKey); }}
+                                  style={{ ...styles.buttonCompact, display: "grid", placeItems: "center", flexShrink: 0, width: 26, height: 26, padding: 0 }}>
+                                  {vendorExpanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                                </button>
+                                <div><strong>{p.salePrice === null ? "Unknown" : `${formatVendorPrice(Math.round(p.salePrice))} gil`}</strong>
+                                  <div style={{ opacity: 0.65, fontSize: 12 }}>{p.saleLabel}</div></div>
+                              </div>
+                            </td>;
+                            if (column.key === "baitNeeded") return <td key={column.key} style={tdStyle}>
+                              {p.baitNeeded === null ? "Unknown" : p.kind === "Lure" ? "1 reusable lure" : `${p.baitNeeded.toFixed(1)} ${p.bait}`}
+                              <div style={{ opacity: 0.65, fontSize: 12 }}>{p.kind === "Lure" ? "loss not estimated" : p.baitCostPerDay === null ? "cost unknown" : `${formatVendorPrice(Math.round(p.baitCostPerDay))} gil/day`}</div>
+                            </td>;
+                            if (column.key === "fish") return <td key={column.key} style={tdStyle}>
+                              <strong>{p.fish}</strong><div style={{ opacity: 0.65, fontSize: 12 }}>Lvl {p.lvl ?? "-"}</div>
+                              {PLANNER_FISH[p.fish]?.restricted && <div style={{ color: "#ffc77d", fontSize: 12 }}>Prerequisites required</div>}
+                            </td>;
+                            if (column.key === "sharePct") return <td key={column.key} style={{ ...tdStyle, ...shareColor(p.sharePct) }}>{p.sharePct.toFixed(1)}%</td>;
+                            if (column.key === "zone") return <td key={column.key} style={tdStyle}>{p.zone}</td>;
+                            return <td key={column.key} style={tdStyle}>{p[column.key]}</td>;
+                          })}
+                        </tr>
+                        {vendorExpanded && <tr id={`spot-vendor-${i}`}>
+                          <td colSpan={SPOT_COLUMNS.length + 1} style={{ ...skillupCellStyle, padding: "12px 16px", background: "rgba(255,255,255,0.035)" }}>
+                            <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", gap: 8 }}>
+                              <strong>{p.fish}: direct NPC sale {vendor.rawPrice === null ? "unknown" : `${formatVendorPrice(vendor.rawPrice)} gil each`}</strong>
+                              <span style={{ opacity: 0.7, fontSize: 12 }}>Direct NPC is the default. AH values are estimates; recipe values use NPC output sales before ingredient costs and synthesis failures.</span>
+                            </div>
+                            <div style={{ display: "flex", alignItems: "flex-end", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+                              <label style={{ ...styles.field, width: 190 }}>
+                                <span style={styles.label}>AH price / fish (gil)</span>
+                                <input aria-label={`AH price per fish for ${p.fish}`} style={styles.inputCompact} type="number" min={0} step="any"
+                                  value={saleDraft}
+                                  placeholder="Enter AH price"
+                                  aria-invalid={saleDraft !== "" && !validAhDraft}
+                                  onChange={(event) => setSAhPriceDrafts((previous) => ({ ...previous, [p.fish]: event.target.value }))} />
+                              </label>
+                              <button type="button" style={styles.buttonCompact} disabled={!validAhDraft} onClick={() => applySpotAhPrice(p.fish)}>
+                                Use AH price
+                              </button>
+                              <button type="button" style={styles.buttonCompact} disabled={!saleOverride} onClick={() => resetSpotDirectPrice(p.fish)}>
+                                Use direct NPC price
+                              </button>
+                              <span style={{ fontSize: 13 }}>Selected: <strong>{p.saleLabel}</strong> — {p.salePrice === null ? "Unknown" : `${formatVendorPrice(Math.round(p.salePrice))} gil / fish`}</span>
+                              {((sAhPriceDrafts[p.fish] !== undefined && !validAhDraft) || (saleOverride?.type === "ah" && p.salePrice === null)) &&
+                                <span role="alert" style={{ color: "#ff9c7a", fontSize: 12 }}>Enter a valid non-negative AH price per fish.</span>}
+                            </div>
+                            {gutting && <div style={{ marginTop: 12 }}>
+                              <strong>Zaldon trade rewards / fish (not included in estimates)</strong>
+                              <div style={{ marginTop: 4, fontSize: 13 }}>Selbina / Inside the Belly / {formatVendorPrice(gutting.gil)} gil</div>
+                              <table style={{ width: "100%", maxWidth: 620, borderCollapse: "collapse", marginTop: 8 }} aria-label={`Zaldon rewards for ${p.fish}`}>
+                                <thead><tr>{["Item", "Quantity", "Chance / trade"].map((label) => <th key={label} scope="col" style={skillupCellStyle}>{label}</th>)}</tr></thead>
+                                <tbody>{gutting.items.map((item, rewardIndex) => <tr key={`${item.itemId}-${rewardIndex}`}>
+                                  <td style={skillupCellStyle}>{item.name}</td>
+                                  <td style={skillupCellStyle}>{item.min === item.max ? item.min : `${item.min}-${item.max}`}</td>
+                                  <td style={skillupCellStyle}>{item.chancePct}%</td>
+                                </tr>)}</tbody>
+                              </table>
+                            </div>}
+                            {vendor.recipes.length === 0 ? <div style={{ marginTop: 10, opacity: 0.7 }}>No direct synthesis recipes.</div> :
+                              <div style={{ overflowX: "auto", marginTop: 12 }}>
+                                <table style={{ width: "100%", minWidth: 700, borderCollapse: "collapse" }} aria-label={`NPC recipe prices for ${p.fish}`}>
+                                  <thead><tr>{["Recipe / requirements", "Ingredients", "Output", "NPC / item", "NPC / synth", "NPC / fish", "Use in estimate"].map((label) =>
+                                    <th key={label} scope="col" style={{ ...thStyle, cursor: "default", whiteSpace: "normal" }}>{label}</th>)}</tr></thead>
+                                  <tbody>{vendor.recipes.flatMap(({ recipe, outcomes }) => outcomes.map((outcome, outcomeIndex) => <tr key={`${recipe.id}-${outcome.tier}`}>
+                                    {outcomeIndex === 0 && <td rowSpan={outcomes.length} style={skillupCellStyle}><strong>{recipe.res.n}</strong><div>{recipe.craft} {recipe.lvl}</div>
+                                      {recipe.subs?.map((sub) => <div key={sub.c}>{sub.c} {sub.l}</div>)}
+                                      {recipe.ki && <div>Key item required</div>}
+                                      {recipe.era && <div>{recipe.era}{recipe.era === "WotG" ? " (out of era)" : ""}</div>}
+                                    </td>}
+                                    {outcomeIndex === 0 && <td rowSpan={outcomes.length} style={skillupCellStyle}><div>1 x {recipe.crystal} Crystal</div>{recipe.ing.map((item, itemIndex) => <div key={itemIndex}>{item.q} x {item.n}</div>)}</td>}
+                                    <td style={skillupCellStyle}>{outcome.tier}: {outcome.q} x {outcome.n}</td>
+                                    {[outcome.price, outcome.total, outcome.perFish].map((price, priceIndex) =>
+                                      <td key={priceIndex} style={skillupCellStyle}>{price === null ? "Unknown" : `${formatVendorPrice(Math.round(price))} gil`}</td>)}
+                                    <td style={skillupCellStyle}>
+                                      <button type="button" style={styles.buttonCompact} disabled={outcome.perFish === null}
+                                        aria-pressed={saleOverride?.type === "recipe" && saleOverride.recipeId === recipe.id && saleOverride.tier === outcome.tier}
+                                        onClick={() => selectSpotRecipePrice(p.fish, recipe.id, outcome.tier)}>
+                                        {saleOverride?.type === "recipe" && saleOverride.recipeId === recipe.id && saleOverride.tier === outcome.tier
+                                          ? "Selected" : "Use price"}
+                                      </button>
+                                    </td>
+                                  </tr>))}</tbody>
+                                </table>
+                              </div>}
+                          </td>
+                        </tr>}
+                        {expanded && <tr id={`spot-details-${i}`}>
+                          <td colSpan={SPOT_COLUMNS.length + 1} style={{ ...skillupCellStyle, padding: "12px 16px", background: "rgba(255,255,255,0.035)" }}>
+                            <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "12px 20px", margin: "0 0 12px" }}>
+                              {[
+                                ["Fishing skill", String(sSkill)],
+                                ["Effective success skill", String(p.effectiveSkill)],
+                                ["Fight policy", p.kind === "Lure" ? "Cancel bad feelings; complete other fights" : "Complete fights, including snaps"],
+                                ["Fish / cast", `${p.fishPct.toFixed(1)}%`],
+                                ["Item / cast", `${p.itemPct.toFixed(1)}%`],
+                                ["Monster / cast", `${p.mobPct.toFixed(1)}%`],
+                                ["Nothing / cast", `${p.nothingPct.toFixed(1)}%`],
+                                ["Target / cast", `${p.targetPct.toFixed(1)}%`],
+                                ["Share of fish bites", `${p.sharePct.toFixed(1)}%`],
+                                ["Canceled / target hook", `${(100 - p.fight.attemptedPct).toFixed(1)}%`],
+                                ["Planned land / target hook", `${p.fight.landPct.toFixed(1)}%`],
+                                ["Casts / day", p.sessionCasts?.toFixed(1) ?? "Unknown"],
+                                ["Fatigue / day", p.fatigueUsed?.toFixed(0) ?? "Unknown"],
+                                ["Time / day", formatCatchTime(p.catchTimeSeconds)],
+                                ["Target fish / day", p.targetFishPer200?.toFixed(1) ?? "Unknown"],
+                                ["Bait cost / day", p.baitCostPerDay === null ? "Unknown" : `${formatVendorPrice(Math.round(p.baitCostPerDay))} gil`],
+                                ["Gross sale value / day", p.grossGilPerDay === null ? "Unknown" : `${formatVendorPrice(Math.round(p.grossGilPerDay))} gil`],
+                                ["Net gil / day", p.netGilPerDay === null ? "Unknown" : `${formatVendorPrice(Math.round(p.netGilPerDay))} gil`],
+                              ].map(([label, value]) => <div key={label}><dt style={{ opacity: 0.65, fontSize: 12 }}>{label}</dt><dd style={{ margin: "3px 0 0", fontWeight: 700 }}>{value}</dd></div>)}
+                            </dl>
+                            <strong>Outcomes before cancellations / target hook</strong>
+                            <dl style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: "12px 20px", margin: "8px 0 14px" }}>
+                              {[
+                                ["Landed", `${p.risk.landPct.toFixed(1)}%`],
+                                ["Escape", `${p.risk.escapePct.toFixed(1)}%`],
+                                ["Line snap", `${snapOutcomePct.toFixed(1)}%`],
+                                ["Rod break", `${breakOutcomePct.toFixed(1)}%`],
+                              ].map(([label, value]) => <div key={label}><dt style={{ opacity: 0.65, fontSize: 12 }}>{label}</dt><dd style={{ margin: "3px 0 0", fontWeight: 700 }}>{value}</dd></div>)}
+                            </dl>
+                            <strong>Expected catch breakdown / day</strong>
+                            <div style={{ overflowX: "auto" }}>
+                              <table style={{ width: "100%", maxWidth: 900, borderCollapse: "collapse", marginTop: 6 }}>
+                                <thead><tr>{["Fish", "Size", "Fish level", "Expected catches", "Sale / fish", "Expected proceeds"].map((label) =>
+                                  <th key={label} scope="col" style={{ ...thStyle, cursor: "default" }}>{label}</th>)}</tr></thead>
+                                <tbody>{p.catchBreakdown.map((entry) => <tr key={entry.fish}>
+                                  <td style={skillupCellStyle}>
+                                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                                      <input type="checkbox" aria-label={`Retain ${entry.fish}`} checked={entry.included}
+                                        onChange={() => toggleSpotPoolFish(entry.fish)} />
+                                      <span style={{ textDecoration: entry.included ? undefined : "line-through", opacity: entry.included ? 1 : 0.6 }}>
+                                        {entry.fish}{entry.fish === p.fish ? " (target)" : ""}
+                                      </span>
+                                    </label>
+                                  </td>
+                                  <td style={skillupCellStyle}>{entry.size}</td>
+                                  <td style={skillupCellStyle}>{entry.level}</td>
+                                  <td style={skillupCellStyle}>{entry.catches?.toFixed(1) ?? "Unknown"}</td>
+                                  <td style={skillupCellStyle}>
+                                    {entry.salePrice === null ? "Unknown" : `${formatVendorPrice(Math.round(entry.salePrice))} gil`}
+                                    <div style={{ opacity: 0.65, fontSize: 12 }}>{entry.saleLabel}</div>
+                                  </td>
+                                  <td style={skillupCellStyle}>{entry.grossGil === null ? "Unknown" : `${formatVendorPrice(Math.round(entry.grossGil))} gil`}</td>
+                                </tr>)}</tbody>
+                                <tfoot><tr>
+                                  <th scope="row" colSpan={3} style={{ ...skillupCellStyle, textAlign: "left" }}>Total</th>
+                                  <td style={{ ...skillupCellStyle, fontWeight: 700 }}>{p.catchBreakdown.reduce((total, entry) => total + (entry.catches ?? 0), 0).toFixed(1)}</td>
+                                  <td style={skillupCellStyle}>—</td>
+                                  <td style={{ ...skillupCellStyle, fontWeight: 700 }}>{p.grossGilPerDay === null ? "Unknown" : `${formatVendorPrice(Math.round(p.grossGilPerDay))} gil`}</td>
+                                </tr></tfoot>
+                              </table>
+                            </div>
+                            <div style={{ marginTop: 6, fontSize: 12, opacity: 0.7 }}>
+                              Unchecked fish still take bites and are canceled; they add no catches, fatigue, or sale value. Their bait use and cancellation time are still estimated.
+                            </div>
+                          </td>
+                        </tr>}
+                      </React.Fragment>
                     );
                   })
                 )}
@@ -1802,12 +2325,13 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
                               ["Share of fish bites", `${row.sharePct.toFixed(1)}%`],
                               ["Skill-up chance", `${row.skillupChancePct.toFixed(1)}%`],
                               ["Success skill", String(row.effectiveSkill)],
-                              ["Fight policy", row.kind === "Lure" ? uIncludeAllFish ? "Cancel bad feelings; complete epic fights" : "Cancel bad + epic feelings" : "Complete fights, including snaps"],
+                              ["Fight policy", row.kind === "Lure" ? "Cancel bad feelings; complete all other fights" : "Complete fights, including snaps"],
                               ["Fishing prerequisites", PLANNER_FISH[row.fish]?.restricted ? "Key item / quest required; assumed met" : "None in snapshot"],
                               ["Canceled / target hook", `${(100 - row.fight.attemptedPct).toFixed(1)}%`],
                               ["Planned land / target hook", `${row.fight.landPct.toFixed(1)}%`],
-                              ["Est. skill gain / day", row.skillGainPer200 === null ? "Not catchable" : `+${row.skillGainPer200.toFixed(2)}`],
-                              ["Est. ending skill", row.skillGainPer200 === null ? "Not catchable" : (Number(uSkill) + row.skillGainPer200).toFixed(2)],
+                              ["Est. fish skill gain / day", row.skillGainPer200 === null ? "Not catchable" : `+${row.skillGainPer200.toFixed(2)}`],
+                              ["Pool skill gain / day", row.poolSkillGainPer200 === null ? "Not catchable" : `+${row.poolSkillGainPer200.toFixed(2)}`],
+                              ["Est. ending skill (pool)", row.poolSkillGainPer200 === null ? "Not catchable" : (Number(uSkill) + row.poolSkillGainPer200).toFixed(2)],
                               ["Time / day", formatCatchTime(row.catchTimeSeconds)],
                               ["Target fish / day", row.targetFishPer200 === null ? "Not catchable" : row.targetFishPer200.toFixed(1)],
                               ["Est. fatigue / 20,000", row.fatigueUsed === null ? "Not catchable" : Math.round(row.fatigueUsed).toLocaleString()],
@@ -1853,7 +2377,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
                               <tfoot><tr>
                                 <th scope="row" colSpan={3} style={{ ...skillupCellStyle, textAlign: "left" }}>Total</th>
                                 <td style={{ ...skillupCellStyle, textAlign: "right", fontWeight: 700 }}>{row.skillGainPer200 === null ? "Not catchable" : row.catchBreakdown.reduce((sum, member) => sum + (member.catches ?? 0), 0).toFixed(1)}</td>
-                                <td style={{ ...skillupCellStyle, textAlign: "right", fontWeight: 700 }}>{row.skillGainPer200 === null ? "Not catchable" : `+${row.skillGainPer200.toFixed(2)}`}</td>
+                                <td style={{ ...skillupCellStyle, textAlign: "right", fontWeight: 700 }}>{row.poolSkillGainPer200 === null ? "Not catchable" : `+${row.poolSkillGainPer200.toFixed(2)}`}</td>
                               </tr></tfoot>
                             </table>
                           </div>
