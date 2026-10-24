@@ -1,7 +1,7 @@
 {
   "name": "Kupo",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "An independent desktop companion for Final Fantasy XI timers, planning tools, and offline references.",
   "author": "Kupo contributors",
   "desktopName": "com.jrbellottie.kupo",
