@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { ChevronLeft, ChevronRight, Search, X } from "lucide-react";
 import PriceInput from "./PriceInput";
 import { itemPrices, useItemPrices } from "./utils/itemPrices";
@@ -24,11 +24,11 @@ export default function PricesTab() {
   const update = (patch: Partial<View>) => { setView((previous) => ({ ...previous, ...patch })); setPage(1); setEditing(null); };
   const query = normalizeItemName(useDeferredValue(view.query));
   const items = useMemo(() => priceCatalogItems(prices), [prices]);
-  const hasPrice = (key: string) => prices.market[key] !== undefined || prices.buy[key] !== undefined || prices.sell[key] !== undefined || (prices.sellMode[key] !== undefined && prices.sellMode[key] !== "auto");
+  const hasPrice = useCallback((key: string) => prices.market[key] !== undefined || prices.buy[key] !== undefined || prices.sell[key] !== undefined || prices.vendor[key] !== undefined || (prices.sellMode[key] !== undefined && prices.sellMode[key] !== "auto"), [prices]);
   const filtered = useMemo(() => items.filter((item) =>
     (view.scope === "all" || (view.scope === "used" ? item.crafting || item.digging || hasPrice(item.key) : item[view.scope])) &&
     (!query || item.search.includes(query)) &&
-    (item.key === editing || view.status === "all" || (view.status === "saved" ? hasPrice(item.key) : view.status === "missing" ? prices.market[item.key] === undefined : prices.buy[item.key] !== undefined || prices.sell[item.key] !== undefined))), [items, view.scope, view.status, query, editing, prices]);
+    (item.key === editing || view.status === "all" || (view.status === "saved" ? hasPrice(item.key) : view.status === "missing" ? prices.market[item.key] === undefined : prices.buy[item.key] !== undefined || prices.sell[item.key] !== undefined || prices.vendor[item.key] !== undefined))), [items, view.scope, view.status, query, editing, prices, hasPrice]);
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const current = Math.min(page, pages);
   const visible = filtered.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE);
@@ -59,7 +59,7 @@ export default function PricesTab() {
         <td><PriceInput key={view.unit} label={`Market ${item.name} gil ${unit}`} value={prices.market[item.key]} baseline={null} quantity={quantity} onChange={(value) => itemPrices.setPrice("market", item.name, value)} /></td>
         <td><PriceInput key={view.unit} label={`Buy ${item.name} gil ${unit}`} value={prices.buy[item.key]} baseline={buy} quantity={quantity} onChange={(value) => itemPrices.setPrice("buy", item.name, value)} /><small>Applied {gil(buy === null ? null : buy * quantity)}</small></td>
         <td><PriceInput key={view.unit} label={`Sell ${item.name} gil ${unit}`} value={prices.sell[item.key]} baseline={sell} quantity={quantity} onChange={(value) => itemPrices.setPrice("sell", item.name, value)} /><small>Applied {gil(sell === null ? null : sell * quantity)}</small></td>
-        <td className="prices-reference">Buy {gil(npcBuy === null ? null : npcBuy * quantity)}<small>Sell {gil(npcSell === null ? null : npcSell * quantity)}</small></td>
+        <td className="prices-reference"><PriceInput key={view.unit} label={`Vendor sale ${item.name} gil ${unit}`} value={prices.vendor[item.key]} baseline={npcSell} quantity={quantity} onChange={(value) => itemPrices.setPrice("vendor", item.name, value)} /><small>NPC sell base {gil(npcSell === null ? null : npcSell * quantity)}</small><small>NPC buy {gil(npcBuy === null ? null : npcBuy * quantity)}</small></td>
         <td>{prices.updated[item.key] ? <time dateTime={prices.updated[item.key]} title={new Date(prices.updated[item.key]).toLocaleString()}>{new Date(prices.updated[item.key]).toLocaleDateString()}</time> : hasPrice(item.key) ? "Imported" : "Not set"}</td>
       </tr>;
     })}</tbody></table></div>

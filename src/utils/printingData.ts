@@ -7,6 +7,7 @@ import { validPrice, type PrintRecipe } from "./printing";
 type Item = { name: string; sell: number; stack: number; flags: number };
 const catalog = catalogData as unknown as { names: Record<string, number>; items: Record<string, Item>; source: { revision: string } };
 export const PRINT_RECIPES = (recipeData as PrintRecipe[]).filter((recipe) => recipe.d !== 1 && printItemKey(recipe.res.n) !== printItemKey("Distilled Water"));
+export const DESYNTH_RECIPES = (recipeData as PrintRecipe[]).filter((recipe) => recipe.d === 1);
 export const PRINT_PRICE_REVISION = PHOENIX_SOURCE.revision;
 export type PrintOffer = { price: number; npc?: string; zone?: string; guild?: string; rank?: string };
 export type PriceBook = Record<string, number>;

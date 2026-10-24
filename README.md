@@ -84,7 +84,7 @@ Find two- and three-step skillchain combinations for your chosen weapons and wea
 Browse era-appropriate recipes and guild-point items, plan a crafting skill-up path, or compare selling prices, locations, stock capacity, and opening countdowns with reminders across all nine guilds.
 
 ### Profits
-Compare crafting costs and estimated returns from NPC or auction-house sales with a nested recipe breakdown, alternative recipes, and ingredient or finished-item cost overrides, alongside a local price book shared with Chocobo Digging.
+Plan expandable crafting chains using your main and subcraft levels, compare crafting and desynthesis costs and estimated returns from NPC or auction-house sales, and manage a local price book shared with Chocobo Digging.
 
 ### 📜 Quests
 Browse era-focused quests and missions with requirements, rewards, and available walkthroughs, supported by linked maps.
@@ -183,7 +183,7 @@ npm run test:data
 npm run test:routes
 ```
 
-Auditing checks data references, map assets, and source fingerprints without writing files. Git is required for checkout comparisons. After reviewing differences and confirming the target revision, use `npm run recipes:update -- --lsb C:\path\to\server` to refresh recipes and their provenance sidecar. Without `--lsb`, generation uses the saved SQL snapshots, whose original revision is unknown. Keep the checkout unchanged during a refresh, review generated changes, rerun checks, and build the app.
+Auditing checks data references, map assets, and source fingerprints without writing files. Git is required for checkout comparisons. After reviewing differences and confirming the target revision, use `npm run recipes:update -- --lsb C:\path\to\server --revision <commit>` to refresh recipes and their provenance sidecar from that exact commit, including desynthesis result IDs rather than recipe labels. Omit `--revision` to read the checkout's SQL files. Without `--lsb`, generation uses the saved SQL snapshots, whose original revision is unknown. Keep the checkout unchanged during a refresh, review generated changes, rerun checks, and build the app.
 
 Refresh quests, maps, and NPC profiles:
 

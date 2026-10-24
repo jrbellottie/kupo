@@ -23,7 +23,10 @@ export function createPrintingPlanner(recipes: PrintRecipe[], itemKey: (name: st
     }
     const configuration = JSON.stringify([state.settings, sources, state.vendors, state.modernGuilds, state.wotg, state.keyItems]);
     const buy = (name: string) => buyPrice(name, buyBook, state.vendors, state.modernGuilds);
-    const sell = (name: string) => sellPrice(name, state.sell);
+    const sell = (name: string) => {
+      const price = sellPrice(name, state.sell);
+      return price !== null && state.sell[itemKey(name)] !== undefined ? { unitPrice: price } : price;
+    };
     if (!cached || cached.configuration !== configuration) {
       const available = recipes.filter((recipe) => (state.wotg || recipe.era !== "WotG") && (state.keyItems || !recipe.ki));
       cached = { configuration, buy: buyBook, sell: state.sell, available, chain: createPrintingChain(available, state.settings, buy, sell, itemKey, sources) };

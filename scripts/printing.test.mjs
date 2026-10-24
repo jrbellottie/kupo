@@ -7,7 +7,7 @@ import { createRequire } from "node:module";
 const { outputFiles } = buildSync({ entryPoints: [fileURLToPath(new URL("../src/utils/printing.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "esm" });
 const { printingChances, printingEstimate, restorePrintSettings, DEFAULT_PRINT_SETTINGS } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].text).toString("base64")}`);
 const recipe = { id: 1, craft: "Woodworking", lvl: 20, crystal: "Wind", era: "", ing: [{ n: "Elm Log", q: 2 }], res: { n: "Output", q: 1 }, hq: [{ n: "Output", q: 2 }, { n: "Output", q: 3 }, { n: "Output", q: 4 }] };
-const settings = { ...DEFAULT_PRINT_SETTINGS, lossPct: 100, skills: { Woodworking: 71 } };
+const settings = { ...DEFAULT_PRINT_SETTINGS, lossMode: "fixed", lossPct: 100, skills: { Woodworking: 71 } };
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`);
 const chainBundle = buildSync({ entryPoints: [fileURLToPath(new URL("../src/utils/printingChain.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "esm" });
 const { createPrintingChain, chainTierCosts, chainBatchAllocation } = await import(`data:text/javascript;base64,${Buffer.from(chainBundle.outputFiles[0].text).toString("base64")}`);
@@ -25,7 +25,7 @@ test("HQ selection uses best gil/hour within 106, honors manual tiers, and refre
   }
   assert.deepEqual(reachablePrintTiers({ ...recipe, subs: [{ c: "Alchemy", l: 96 }] }), [0]);
   const target = { ...recipe, lvl: 19, hq: [2, 3, 4].map((q) => ({ n: "HQ Output", q })) };
-  const chain = createPrintingChain([target], restorePrintSettings(), () => 10, () => 100, key);
+  const chain = createPrintingChain([target], restorePrintSettings({ skillMode: "at-cap" }), () => 10, () => 100, key);
   const rows = printTierComparisons(chain, target);
   assert.strictEqual(printTierComparisons(chain, target), rows);
   assert.equal(selectPrintTier(rows).tier, 3);
@@ -48,11 +48,11 @@ test("default break loss is 50%, old defaults migrate once, and custom overrides
   const migrated = restorePrintSettings({ lossPct: 100, overhead: 10 });
   assert.equal(migrated.overhead, 10);
   assert.equal(restorePrintSettings({ ...migrated, lossPct: 100 }).lossPct, 100);
-  const result = printingEstimate(recipe, restorePrintSettings(), (name) => name === "Wind Crystal" ? 100 : 3000, () => 5000);
+  const result = printingEstimate(recipe, restorePrintSettings({ skillMode: "at-cap" }), (name) => name === "Wind Crystal" ? 100 : 3000, () => 5000);
   close(result.success, 0.95);
   close(result.consumption, 0.975);
   close(result.cost, 6000 * 0.975 + 100);
-  const chain = createPrintingChain([lumber, pole], restorePrintSettings(), () => 100, () => 1000, key);
+  const chain = createPrintingChain([lumber, pole], restorePrintSettings({ skillMode: "at-cap" }), () => 100, () => 1000, key);
   const chained = chain.estimate(pole);
   close(chained.sources[0].quantity, 2 * 0.975);
   close(chained.sources[0].node.children.find((child) => child.node.name === "Log").quantity, 0.975);
@@ -449,7 +449,7 @@ test("Shihei exposes all nine Black Ink recipes and honors raw or intermediate c
   const shihei = data.PRINT_RECIPES.find((entry) => entry.res.n === "Shihei");
   const recipes = [shihei, ...inkRecipes];
   const planner = createPrintingPlanner(recipes, data.printItemKey, data.printBuyPrice, data.printSellPrice);
-  const state = { settings: restorePrintSettings(), buy: {}, sell: {}, sources: {}, vendors: false, modernGuilds: false, wotg: false, keyItems: false };
+  const state = { settings: restorePrintSettings({ skillMode: "at-cap" }), buy: {}, sell: {}, sources: {}, vendors: false, modernGuilds: false, wotg: false, keyItems: false };
   for (const entry of recipes) for (const input of [...entry.ing, { n: `${entry.crystal} Crystal` }]) state.buy[data.printItemKey(input.n)] = 10;
   const ink = (result) => result.sources.find((source) => source.node.key === inkKey).node;
   for (const entry of inkRecipes) {
@@ -473,13 +473,13 @@ test("Shihei exposes all nine Black Ink recipes and honors raw or intermediate c
   assert.deepEqual(planner(chosen).chain.estimate(shihei), squid);
 });
 
-test("Profits renders recipe alternatives, nested groups and unit/total cost fields from saved state", () => {
+test("Profits renders recipe alternatives, nested groups and per-item/per-stack costs from saved state", () => {
   const require = createRequire(import.meta.url);
   const React = require("react");
   const storage = new Map();
   const localStorage = { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) };
   const bundle = buildSync({
-    stdin: { contents: 'import React from "react"; import { renderToStaticMarkup } from "react-dom/server"; import Printing from "./src/PrintingTab"; export { printItemKey } from "./src/utils/printingData"; export const render = () => renderToStaticMarkup(<Printing />);', resolveDir: process.cwd(), loader: "tsx" },
+    stdin: { contents: 'import React from "react"; import { renderToStaticMarkup } from "react-dom/server"; import Printing from "./src/PrintingTab"; import { ProfitCostField, ProfitDualPriceField } from "./src/ProfitControls"; export { printItemKey } from "./src/utils/printingData"; export { CraftingLevels, NumberField, ProfitCostField, ProfitDualPriceField } from "./src/ProfitControls"; export const render = () => renderToStaticMarkup(<Printing />); export const renderCostField = (props) => renderToStaticMarkup(<ProfitCostField {...props} onChange={() => {}} />); export const renderDualPriceField = (props) => renderToStaticMarkup(<ProfitDualPriceField {...props} onChange={() => {}} />);', resolveDir: process.cwd(), loader: "tsx" },
     bundle: true, write: false, platform: "node", format: "cjs", external: ["react", "react-dom/server"],
     loader: { ".css": "empty" }, define: { "import.meta.env.BASE_URL": '"/"' }, logOverride: { "empty-import-meta": "silent" },
   });
@@ -487,34 +487,202 @@ test("Profits renders recipe alternatives, nested groups and unit/total cost fie
   new Function("require", "module", "exports", "localStorage", bundle.outputFiles[0].text)(
     (name) => name === "react" ? { ...React, useLayoutEffect: () => {} } : require(name),
     module, module.exports, localStorage);
-  const { render, printItemKey } = module.exports;
+  const { render, renderCostField, renderDualPriceField, printItemKey, CraftingLevels, NumberField } = module.exports;
+  const calculatedEach = renderCostField({ name: "Sheet of Bast Parchment", value: undefined, baseline: 123.99 });
+  const unknownCost = renderCostField({ name: "Sheet of Bast Parchment", value: undefined, baseline: null });
+  assert.match(calculatedEach, /aria-label="Cost Sheet of Bast Parchment gil each"[^>]*value="123"/);
+  assert.match(calculatedEach, /aria-label="Cost Sheet of Bast Parchment gil stack of 12"[^>]*value="1487"/);
+  assert.match(unknownCost, /aria-label="Cost Sheet of Bast Parchment gil stack of 12"[^>]*placeholder="Unknown"/);
+  assert.doesNotMatch(unknownCost, /No calculated cost; enter either amount|Changing either amount updates both/);
+  const sellPrices = renderDualPriceField({ name: "Shihei", kind: "Sell", value: undefined, baseline: 25 });
+  assert.match(sellPrices, /aria-label="Sell Shihei gil each"[^>]*placeholder="25"/);
+  assert.match(sellPrices, /aria-label="Sell Shihei gil stack of 99"[^>]*placeholder="2475"/);
+  assert.match(sellPrices, /aria-label="Reset sell price for Shihei"/);
+  const vendorSale = renderDualPriceField({ name: "Spool of Wool Thread", kind: "Sale", value: undefined, baseline: 600, useBaseline: true, resetText: "Reset to vendor price", resetLabel: "Reset sale price to vendor value for Spool of Wool Thread" });
+  assert.match(vendorSale, /aria-label="Sale Spool of Wool Thread gil each"[^>]*value="600"/);
+  assert.match(vendorSale, /aria-label="Sale Spool of Wool Thread gil stack of 12"[^>]*value="7200"/);
+  assert.match(vendorSale, /Reset to vendor price/);
+  let currentSettings = restorePrintSettings();
+  const fields = [];
+  const visit = (node) => React.Children.forEach(node, (child) => {
+    if (!React.isValidElement(child)) return;
+    if (child.type === NumberField) fields.push(child);
+    visit(child.props.children);
+  });
+  visit(CraftingLevels({ settings: currentSettings, onChange: (patch) => {
+    currentSettings = { ...currentSettings, ...(typeof patch === "function" ? patch(currentSettings) : patch) };
+  } }));
+  fields.find((field) => field.props.label === "Woodworking level").props.onChange(80);
+  fields.find((field) => field.props.label === "Alchemy level").props.onChange(60);
+  fields.find((field) => field.props.label === "Woodworking bonus").props.onChange(3);
+  fields.find((field) => field.props.label === "Alchemy bonus").props.onChange(2);
+  assert.deepEqual(currentSettings.skills, { Woodworking: 80, Alchemy: 60 }, "rapid edits from one render must preserve every craft level");
+  assert.deepEqual(currentSettings.bonuses, { Woodworking: 3, Alchemy: 2 });
   const inkKey = printItemKey("Black Ink");
   const parchmentKey = printItemKey("Bast Parchment");
   const state = { query: "Shihei", selected: 1033, sources: { [inkKey]: 60037 }, costOverrides: {} };
   storage.set("kupo.printing.v1", JSON.stringify(state));
   const html = render();
-  assert.match(html, /Recipe cost tree/);
-  assert.ok(html.indexOf("Recipe cost tree") < html.indexOf("Combined shopping list"));
+  assert.doesNotMatch(html, /Recipe cost tree|Each group makes the item above it|Auto expands craftable ingredients/);
+  assert.match(html, /Ingredients &amp; crafting tree/);
+  assert.ok(html.indexOf("Ingredients &amp; crafting tree") < html.indexOf("Combined shopping list"));
+  assert.match(html, /Cost per synth/);
+  assert.match(html, /Profit per 100 synths/);
+  assert.match(html, /Profit \/ gil per hour/);
+  assert.doesNotMatch(html, /Output price unit/);
+  assert.match(html, /aria-label="Sell Shihei gil each"/);
+  assert.match(html, /aria-label="Sell Shihei gil stack of 99"/);
+  assert.match(html, /aria-label="Woodworking level"/);
+  assert.match(html, /aria-label="Alchemy level"/);
+  assert.match(html, /<details class="print-ingredient print-crafted-ingredient print-ingredient-color-1" data-item="Jar of Black Ink"><summary/);
+  assert.match(html, /<details class="print-ingredient print-ingredient-color-1" data-item="Clump of Windurstian Tea Leaves"><summary/);
+  assert.match(html, /<details class="print-ingredient print-crafted-ingredient print-ingredient-color-2" data-item="Sheet of Bast Parchment"><summary/);
+  assert.match(html, /<details class="print-ingredient print-ingredient-color-3" data-item="Wind Crystal"><summary/);
   assert.match(html, /role="group" aria-label="Ingredients to make Shihei"/);
   assert.match(html, /role="group" aria-label="Ingredients to make Jar of Black Ink"/);
   assert.match(html, /role="group" aria-label="Ingredients to make Sheet of Bast Parchment"/);
   assert.match(html, /All 9 recipes for Jar of Black Ink/);
   for (const id of [60007, 60008, 60009, 60010, 60011, 60012, 60013, 60014, 60037]) {
-    assert.ok(html.includes(`aria-label="Use recipe ${id} for Jar of Black Ink"`));
+    assert.ok(html.includes(`value="${id}"`), "saved recipe choices retain their internal IDs");
+    assert.ok(!html.includes(`#${id}`), "recipe reference numbers must not be displayed");
   }
+  assert.match(html, /aria-label="Use Alchemy 4 recipe for Jar of Black Ink:/);
   for (const name of ["Nebimonite", "Cone Calamary", "Kalamar", "Grimmonite", "Ahtapot", "Gigant Squid"]) assert.ok(html.includes(name));
-  assert.match(html, /aria-label="Cost per item for Gigant Squid"/);
-  assert.match(html, /aria-label="Total cost for 2 x Sheet of Bast Parchment"/);
+  assert.match(html, /aria-label="Cost Gigant Squid gil each"/);
+  assert.doesNotMatch(html, /Total cost for 2 x Sheet of Bast Parchment/);
   storage.set("kupo.printing.v1", JSON.stringify({ ...state, costOverrides: { [inkKey]: 100, [parchmentKey]: 123.5 } }));
   const overridden = render();
-  assert.match(overridden, /Cost override active: ingredients and crafting time below this item are excluded/);
-  assert.doesNotMatch(overridden, /aria-label="Cost per item for Gigant Squid"/);
+  assert.match(overridden, /Using your entered cost; the breakdown below is excluded from the estimate/);
+  assert.doesNotMatch(overridden, /aria-label="Cost Gigant Squid gil each"/);
   assert.doesNotMatch(overridden, /aria-label="Ingredients to make Jar of Black Ink"/);
-  assert.match(overridden, /aria-label="Cost per item for Sheet of Bast Parchment"[^>]*value="123.5"/);
-  assert.match(overridden, /aria-label="Total cost for 2 x Sheet of Bast Parchment"[^>]*value="247"/);
+  assert.match(overridden, /aria-label="Cost Sheet of Bast Parchment gil each"[^>]*value="123"/);
+  assert.match(overridden, /aria-label="Cost Sheet of Bast Parchment gil stack of 12"[^>]*value="1482"/);
+  assert.doesNotMatch(overridden, /123 gil each \/ 1,482 gil per stack of 12/);
+  assert.match(overridden, /aria-label="Use calculated cost for Sheet of Bast Parchment"/);
   assert.match(overridden, /All 9 recipes for Jar of Black Ink/);
   storage.set("kupo.printing.v1", JSON.stringify(state));
   assert.equal(render(), html, "clearing overrides restores the original hierarchy and saved recipe");
+  storage.set("kupo.profits.price-unit.v1", JSON.stringify("stack"));
+  storage.set("kupo.printing.v1", JSON.stringify({ ...state, costOverrides: { [inkKey]: 100, [parchmentKey]: 123.5 } }));
+  const stacked = render();
+  assert.match(stacked, /aria-label="Sell Shihei gil stack of 99"/);
+  assert.doesNotMatch(stacked, /Sell Shihei gil stack of (33|66)/);
+  assert.match(stacked, /aria-label="Cost Sheet of Bast Parchment gil each"[^>]*value="123"/);
+  assert.match(stacked, /aria-label="Cost Sheet of Bast Parchment gil stack of 12"[^>]*value="1482"/);
+  assert.doesNotMatch(stacked, /Total cost for 2 x Sheet of Bast Parchment/);
+  storage.set("kupo.profits.price-unit.v1", JSON.stringify("each"));
+  storage.set("kupo.profits.view.v1", JSON.stringify("desynthesis"));
+  storage.set("kupo.desynthesis.v1", JSON.stringify({ query: "Gigas Socks", selected: 60510, saleMode: "vendor", batchMode: "input-count", batchCount: 100 }));
+  storage.set("kupo.profits.settings.v1", JSON.stringify({ ...DEFAULT_PRINT_SETTINGS, skills: { Alchemy: 15 } }));
+  const desynth = render();
+  assert.match(desynth, /What you recover/);
+  assert.match(desynth, /Pinch of Poison Dust/);
+  assert.doesNotMatch(desynth, /Gigas Socks \(desynth\)|#60510/);
+  assert.match(desynth, /<option value="input-count" selected="">Input items/);
+  assert.match(desynth, /aria-label="Items to desynthesize"[^>]*value="100"/);
+  assert.match(desynth, /Expected Pinch of Poison Dust: <strong>160<\/strong>/);
+  assert.match(desynth, /aria-label="Sale Pinch of Poison Dust gil each"/);
+  assert.match(desynth, /aria-label="Sale Pinch of Poison Dust gil stack of 12"/);
+  assert.match(desynth, /Reset sale price to vendor value for Pinch of Poison Dust/);
+  assert.match(desynth, /<th>Input<\/th><th>Per attempt<\/th><th>Cost<\/th><th>Applied cost each<\/th>/);
+  assert.match(desynth, /aria-label="Cost Fire Crystal gil each"/);
+  assert.match(desynth, /aria-label="Cost Fire Crystal gil stack of 12"/);
+  assert.doesNotMatch(desynth, /<th>AH \/ market price<\/th>|<th>Buy quote<\/th>|aria-label="Market [^"]+ gil|aria-label="Buy [^"]+ gil/);
+  assert.doesNotMatch(desynth, /AH sale price|Vendor sale price|AH vs vendor returns|Sell recovered materials via|Output price unit|Price entry/);
+  assert.match(desynth, /aria-label="Alchemy level"[^>]*value="15"/);
+  const fireKey = printItemKey("Fire Crystal");
+  storage.set("kupo.desynthesis.v1", JSON.stringify({ query: "Gigas Socks", selected: 60510, costOverrides: { [fireKey]: 200 } }));
+  const costOverride = render();
+  assert.match(costOverride, /aria-label="Cost Fire Crystal gil each"[^>]*value="200"/);
+  assert.match(costOverride, /aria-label="Cost Fire Crystal gil stack of 12"[^>]*value="2400"/);
+  assert.match(costOverride, /aria-label="Use calculated cost for Fire Crystal"/);
+  assert.match(costOverride, /<td>Fire Crystal<\/td><td>1<\/td><td>[\s\S]*?<\/td><td>200<\/td>/);
+  storage.set("kupo.desynthesis.v1", JSON.stringify({ query: "Gigas Socks", selected: 60510, costOverrides: { [fireKey]: 200 }, batchMode: "target-output", batchCount: 24, targetOutput: printItemKey("Pinch of Poison Dust") }));
+  const targetBatch = render();
+  assert.match(targetBatch, /<option value="target-output" selected="">Desired recovered amount/);
+  assert.match(targetBatch, /aria-label="Desired Pinch of Poison Dust count"[^>]*value="24"/);
+  assert.match(targetBatch, /Inputs needed: <strong>15 x Gigas Socks<\/strong>/);
+  assert.match(targetBatch, /Expected Pinch of Poison Dust: <strong>24<\/strong>/);
+  storage.set("kupo.desynthesis.v1", JSON.stringify({ query: "Gigas Socks", selected: 60510, costOverrides: { [fireKey]: 200 }, batchMode: "input-count", batchCount: 100 }));
+  storage.set("kupo.profits.price-unit.v1", JSON.stringify("stack"));
+  const desynthStacks = render();
+  assert.match(desynthStacks, /aria-label="Sale Pinch of Poison Dust gil stack of 12"/);
+  assert.match(desynthStacks, /aria-label="Cost Fire Crystal gil stack of 12"[^>]*value="2400"/);
+  assert.doesNotMatch(desynthStacks, /aria-label="Market [^"]+ gil|aria-label="Buy [^"]+ gil/);
+});
+
+test("personal skills survive restore and govern final and ingredient stages, including subcrafts", () => {
+  assert.equal(restorePrintSettings().skillMode, "character");
+  assert.equal(restorePrintSettings().lossMode, "skill");
+  assert.equal(restorePrintSettings({ lossPct: 75 }).lossMode, "fixed");
+  const personal = restorePrintSettings({ skills: { Woodworking: 60, Alchemy: 10 } });
+  const subRecipe = { ...pole, subs: [{ c: "Alchemy", l: 12 }] };
+  const chain = createPrintingChain([lumber, subRecipe], personal, () => 100, () => 2000, key);
+  const estimate = chain.estimate(subRecipe);
+  assert.equal(estimate.tier, -1, "below-cap subcraft prevents HQ despite main craft skill");
+  close(estimate.success, 0.95 * 0.85);
+  assert.equal(estimate.sources[0].node.tier, 3, "ingredient crafts use personal skills too");
+  const improved = createPrintingChain([lumber, subRecipe], { ...personal, skills: { Woodworking: 71, Alchemy: 23 } }, () => 100, () => 2000, key).estimate(subRecipe);
+  assert.equal(improved.tier, 1);
+  close(improved.success, 0.95 ** 2);
+  assert.notEqual(improved.cost, estimate.cost);
+  const unavailable = createPrintingChain([lumber, subRecipe], { ...personal, skills: { Woodworking: 40 } }, () => 100, () => 2000, key).estimate(subRecipe);
+  assert.equal(unavailable.eligible, false);
+  assert.equal(restorePrintSettings({ skillMode: "at-cap" }).skillMode, "at-cap", "explicit legacy planning mode remains available");
+});
+
+test("skill-based losses use the first failed craft in server order and never refund crystals", () => {
+  const mixed = { ...recipe, craft: "Alchemy", lvl: 20, subs: [{ c: "Woodworking", l: 10 }] };
+  const personal = restorePrintSettings({ skills: { Woodworking: 6, Alchemy: 20 } });
+  const estimate = printingEstimate(mixed, personal, () => 100, () => 2000);
+  close(estimate.success, 0.7 * 0.95);
+  close(estimate.consumption, 0.7 * 0.95 + 0.3 * 0.7 + 0.7 * 0.05 * 0.5);
+  close(estimate.cost, 200 * estimate.consumption + 100);
+  const custom = printingEstimate(mixed, { ...personal, lossMode: "fixed", lossPct: 0 }, () => 100, () => 2000);
+  close(custom.cost, 200 * estimate.success + 100);
+  const noLoss = printingEstimate({ ...mixed, d: 2 }, personal, () => 100, () => 2000);
+  close(noLoss.cost, custom.cost);
+});
+
+test("desynthesis recovers actual outputs and calculates one selected sale price without synthesizing the input", async () => {
+  const bundle = buildSync({ stdin: { contents: 'export * from "./src/utils/desynthesis"; export { DESYNTH_RECIPES } from "./src/utils/printingData";', resolveDir: process.cwd(), loader: "ts" }, bundle: true, write: false, platform: "node", format: "esm" });
+  const { desynthesisBatchEstimate, desynthesisEstimate, DESYNTH_RECIPES } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+  const socks = DESYNTH_RECIPES.find((recipe) => recipe.id === 60510);
+  assert.equal(socks.ing[0].n, "Gigas Socks");
+  assert.equal(socks.res.n, "Pinch of Poison Dust");
+  assert.deepEqual([socks.res, ...socks.hq].map((item) => item.q), [2, 4, 6, 8]);
+  assert.ok(DESYNTH_RECIPES.every((recipe) => [recipe.res, ...recipe.hq].every((item) => !item.n.includes("(desynth)"))));
+  const personal = restorePrintSettings({ skills: { Alchemy: 15 } });
+  const buy = (name) => name === "Fire Crystal" ? 10 : 1000;
+  const result = desynthesisEstimate(socks, personal, buy, () => 1000);
+  close(result.success, 0.4);
+  result.outcomes.forEach((outcome, index) => close(outcome.probability, [0.16, 0.12, 0.08, 0.04][index]));
+  close(result.cost, 710);
+  close(result.revenue, 1600);
+  close(result.profit * 100, 89000);
+  close(result.gilPerHour, 890 * 3600 / 21);
+  const inputBatch = desynthesisBatchEstimate(socks, result.outcomes, "Pinch of Poison Dust", 100, "input-count");
+  assert.equal(inputBatch.attempts, 100);
+  close(inputBatch.expectedOutput, 160);
+  const targetBatch = desynthesisBatchEstimate(socks, result.outcomes, "Pinch of Poison Dust", 24, "target-output");
+  assert.equal(targetBatch.inputsNeeded, 15);
+  close(targetBatch.expectedOutput, 24);
+  const linenRecipe = DESYNTH_RECIPES.find((recipe) => recipe.id === 31007);
+  const linenResult = desynthesisEstimate(linenRecipe, restorePrintSettings({ skills: { Clothcraft: 22 } }), buy, () => 100);
+  const linenInputBatch = desynthesisBatchEstimate(linenRecipe, linenResult.outcomes, "Square of Linen Cloth", 100, "input-count");
+  close(linenInputBatch.expectedOutput, 64);
+  const linenTargetBatch = desynthesisBatchEstimate(linenRecipe, linenResult.outcomes, "Square of Linen Cloth", 24, "target-output");
+  assert.equal(linenTargetBatch.inputsNeeded, 38);
+  close(linenTargetBatch.expectedOutput, 24.32);
+  const missing = desynthesisEstimate(socks, personal, buy, () => null);
+  assert.equal(missing.profit, null);
+  assert.equal(desynthesisEstimate(socks, personal, () => null, () => 100).cost, null);
+  close(desynthesisEstimate(socks, personal, buy, () => 100).profit, -550);
+  close(desynthesisEstimate(socks, { ...personal, skills: { Alchemy: 14 } }, buy, () => 100).cost, 740);
+  const sub = { ...socks, subs: [{ c: "Woodworking", l: 10 }] };
+  close(desynthesisEstimate(sub, { ...personal, skills: { Alchemy: 15, Woodworking: 10 } }, buy, () => 100).success, 0.16);
+  assert.equal(desynthesisEstimate(sub, { ...personal, skillMode: "at-cap", skills: {} }, buy, () => 100).success, 0, "desynthesis uses personal levels even in hypothetical crafting mode");
+  assert.throws(() => desynthesisEstimate(recipe, personal, buy, () => 1), /desynthesis recipe/);
 });
 
 test("distinct HQ sale prices, nerfs, and overhead are applied without changing yields", () => {
@@ -522,4 +690,15 @@ test("distinct HQ sale prices, nerfs, and overhead are applied without changing 
   const result = printingEstimate(special, { ...settings, sellMultiplier: 50, seconds: 22, overhead: 8 }, () => 0, (name) => name === "HQ" ? 101 : 10);
   close(result.revenue, 0.95 * (0.5 * 5 + 0.5 * 50));
   close(result.attemptsPerHour, 120);
+});
+
+test("stack-derived sale quotes retain precision while NPC base payouts keep integer rounding", () => {
+  for (const stack of [12, 99]) {
+    const quoted = printingEstimate(recipe, { ...settings, sellMultiplier: 50 }, () => 0, () => ({ unitPrice: 1000 / stack }));
+    close(quoted.outcomes[0].price, 500 / stack);
+    const expectedYield = quoted.outcomes.reduce((total, outcome) => total + outcome.probability * outcome.q, 0);
+    close(quoted.revenue, expectedYield * 500 / stack);
+    const baseline = printingEstimate(recipe, { ...settings, sellMultiplier: 50 }, () => 0, () => 101);
+    assert.equal(baseline.outcomes[0].price, 50);
+  }
 });

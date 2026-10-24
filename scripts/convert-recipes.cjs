@@ -16,12 +16,17 @@ const CHECK_ONLY = process.argv.includes("--check");
 const sourceArg = process.argv.indexOf("--lsb");
 if (sourceArg >= 0 && !process.argv[sourceArg + 1]) throw new Error("--lsb requires a checkout path");
 const server = sourceArg >= 0 ? path.resolve(process.argv[sourceArg + 1]) : null;
+const revisionArg = process.argv.indexOf("--revision");
+if (revisionArg >= 0 && (!server || !process.argv[revisionArg + 1])) throw new Error("--revision requires --lsb and a Git revision");
+const revision = revisionArg >= 0 ? execFileSync("git", ["-C", server, "rev-parse", "--verify", `${process.argv[revisionArg + 1]}^{commit}`], { encoding: "utf8" }).trim() : null;
 const inputHashes = {};
 const hash = (content) => createHash("sha256").update(content).digest("hex");
 const readSql = (name) => {
   const workingFile = server ? path.join(server, "sql", name) : path.join(DATA_DIR, name);
   if (!server && !fs.existsSync(workingFile)) throw new Error(`Missing SQL snapshot: ${workingFile}`);
-  const content = fs.existsSync(workingFile)
+  const content = revision
+    ? execFileSync("git", ["-C", server, "show", `${revision}:sql/${name}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 })
+    : fs.existsSync(workingFile)
     ? fs.readFileSync(workingFile, "utf8")
     : execFileSync("git", ["-C", server, "show", `HEAD:sql/${name}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
   inputHashes[name] = hash(content.replace(/\r\n/g, "\n"));
@@ -168,7 +173,7 @@ function main() {
     const hqIds = [num(22), num(23), num(24)];
     const resultQty = num(25);
     const hqQtys = [num(26), num(27), num(28)];
-    const resultName = f[29] || itemName(resultId);
+    const resultName = num(1) === 1 ? itemName(resultId) : f[29] || itemName(resultId);
 
     const recipe = {
       id: num(0),
@@ -212,7 +217,7 @@ function main() {
     const provenance = {
       schemaVersion: 1,
       source: server ? "server checkout" : "saved SQL snapshots (revision unknown)",
-      revision: server ? execFileSync("git", ["-C", server, "rev-parse", "HEAD"], { encoding: "utf8" }).trim() : null,
+      revision: revision ?? (server ? execFileSync("git", ["-C", server, "rev-parse", "HEAD"], { encoding: "utf8" }).trim() : null),
       inputSha256: inputHashes,
       generatorSha256: hash(fs.readFileSync(__filename)),
       outputSha256: hash(output),

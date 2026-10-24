@@ -1,4 +1,4 @@
-import { printingEstimate, type PrintRecipe, type PrintSettings } from "./printing";
+import { printingEstimate, type PrintRecipe, type PrintSettings, type SalePrice } from "./printing";
 
 export type SourceChoice = "auto" | "buy" | number;
 export type SourceChoices = Record<string, SourceChoice>;
@@ -15,12 +15,13 @@ type ChainEstimate = ReturnType<typeof printingEstimate> & {
   totalAttempts: number; seconds: number; directProfit: number | null;
 };
 type PriceLookup = (name: string) => number | null;
+type SaleLookup = (name: string) => SalePrice;
 type PrintingChain = {
   resolve: (name: string, ancestors?: string[], depth?: number) => ChainNode;
   estimate: (recipe: PrintRecipe, tier?: number) => ChainEstimate;
   options: (name: string) => PrintRecipe[];
   expectedYield: (recipe: PrintRecipe, name: string, tier?: number) => number;
-  reprice: (buy: PriceLookup, sell: PriceLookup, changedBuy: string[], changedSell: string[]) => PrintingChain;
+  reprice: (buy: PriceLookup, sell: SaleLookup, changedBuy: string[], changedSell: string[]) => PrintingChain;
 };
 
 function combineLeaves(parts: { leaves: ChainLeaf[]; quantity: number }[]): ChainLeaf[] {
@@ -32,7 +33,7 @@ function combineLeaves(parts: { leaves: ChainLeaf[]; quantity: number }[]): Chai
   return [...combined.values()].filter((leaf) => leaf.quantity > 0);
 }
 
-export function createPrintingChain(recipes: PrintRecipe[], settings: PrintSettings, buy: PriceLookup, sell: PriceLookup, itemKey: (name: string) => string, choices: SourceChoices = {}): PrintingChain {
+export function createPrintingChain(recipes: PrintRecipe[], settings: PrintSettings, buy: PriceLookup, sell: SaleLookup, itemKey: (name: string) => string, choices: SourceChoices = {}): PrintingChain {
   const byOutput = new Map<string, PrintRecipe[]>();
   const consumers = new Map<string, Set<string>>();
   const stats = new Map(recipes.map((recipe) => [recipe.id, printingEstimate(recipe, settings, () => null, () => 0)]));
@@ -54,7 +55,7 @@ export function createPrintingChain(recipes: PrintRecipe[], settings: PrintSetti
     const estimate = tier === undefined ? stats.get(recipe.id)! : printingEstimate(recipe, settings, () => null, () => 0, tier);
     return estimate.outcomes.reduce((total, outcome) => total + (itemKey(outcome.n) === itemKey(name) ? outcome.probability * outcome.q : 0), 0);
   };
-  const priceChain = (buy: PriceLookup, sell: PriceLookup, cache = new Map<string, ChainNode>(), estimates = new Map<PrintRecipe, Map<number | undefined, ChainEstimate>>()): PrintingChain => {
+  const priceChain = (buy: PriceLookup, sell: SaleLookup, cache = new Map<string, ChainNode>(), estimates = new Map<PrintRecipe, Map<number | undefined, ChainEstimate>>()): PrintingChain => {
     const resolve = (name: string, ancestors: string[] = [], depth = MAX_CHAIN_DEPTH): ChainNode => {
       const key = itemKey(name);
       const choice = choices[key] ?? "auto";

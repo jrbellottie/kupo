@@ -18,7 +18,7 @@ test("catalog covers every craft input and output, aliases, digging items, and s
   const rows = new Map(data.PRICE_CATALOG.map((item) => [item.key, item]));
   assert.equal(rows.size, data.PRICE_CATALOG.length);
   assert.ok(rows.size >= 9103);
-  for (const recipe of data.PRINT_RECIPES) {
+  for (const recipe of [...data.PRINT_RECIPES, ...data.DESYNTH_RECIPES]) {
     for (const name of [recipe.res.n, ...recipe.hq.map((item) => item.n), ...recipe.ing.map((item) => item.n), `${recipe.crystal} Crystal`]) assert.equal(rows.get(data.printItemKey(name))?.crafting, true, name);
   }
   const rockSalt = rows.get(data.printItemKey("Rock Salt"));
@@ -41,7 +41,7 @@ test("real item aliases share quotes across market, Profits costs, revenue, and 
   let vendors = true;
   const plan = () => {
     const prices = resolvedPriceBooks(store.getSnapshot(), (key) => data.printBuyPrice(key, {}, vendors, false), (key) => data.printSellPrice(key, {}));
-    return planner({ settings: data.restorePrintSettings(), buy: prices.effectiveBuy, sell: prices.effectiveSell, sources: {}, vendors, modernGuilds: false, wotg: false, keyItems: false });
+    return planner({ settings: data.restorePrintSettings({ skillMode: "at-cap" }), buy: prices.effectiveBuy, sell: prices.effectiveSell, sources: {}, vendors, modernGuilds: false, wotg: false, keyItems: false });
   };
   store.setPrice("market", "Distilled Water", 20);
   store.setPrice("market", "Ice Crystal", 50);
@@ -169,4 +169,24 @@ test("automatic prices minimize buying and maximize selling while vendor and man
   store.setPrice("market", "Elm Log", 0);
   assert.equal(selected().effectiveBuy["1"], 0);
   assert.equal(selected().effectiveSell["1"], 50);
+});
+
+test("vendor sale quotes are independent of AH and generic sale quotes, persist, and reset to NPC values", () => {
+  const saved = storage({ [ITEM_PRICES_KEY]: { version: 1, market: { "1": 200 }, sell: { "1": 175 } } });
+  const store = createItemPriceStore(saved, key);
+  assert.deepEqual(store.getSnapshot().vendor, {}, "old price books migrate without inventing vendor quotes");
+  const selected = () => resolvedPriceBooks(store.getSnapshot(), () => 100, () => 50);
+  store.setPrice("vendor", "Log of Elm", 250);
+  assert.equal(store.getSnapshot().market["1"], 200);
+  assert.equal(store.getSnapshot().sell["1"], 175);
+  assert.equal(createItemPriceStore(saved, key).getSnapshot().vendor["1"], 250);
+  store.setSellMode("Elm Log", "vendor");
+  assert.equal(selected().effectiveSell["1"], 250);
+  store.setPrice("vendor", "Elm Log", 0);
+  assert.equal(selected().effectiveSell["1"], 0);
+  store.setPrice("vendor", "Elm Log", null);
+  assert.equal(selected().effectiveSell["1"], 50);
+  assert.equal(store.getSnapshot().market["1"], 200);
+  store.setPrice("vendor", "Unknown vendor-only item", 30);
+  assert.ok(data.priceCatalogItems(store.getSnapshot()).some((item) => item.name === "Unknown vendor-only item"));
 });

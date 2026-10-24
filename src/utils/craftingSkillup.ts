@@ -54,11 +54,11 @@ export function synthSuccessPct(gap: number): number {
 }
 
 /** Desynth completion chance: 40% at/below cap, dropping harder with the gap. */
-export function desynthSuccessPct(gap: number): number {
+export function desynthSuccessPct(gap: number, bonus = 0): number {
   let rate = 40;
   if (gap >= 8) rate = 10 - (10 * (gap - 7)) / 3;
   else if (gap >= 1) rate = 40 - 5 * (gap - 1);
-  return clamp(rate, 0, 99);
+  return clamp(rate + bonus, 0, 100);
 }
 
 /** Era flat skill-up chance: 60% below skill 50.0, 25% at 50.0 and above. */

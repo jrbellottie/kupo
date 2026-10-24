@@ -23,6 +23,12 @@ test("recipe check does not write; generation reproduces snapshots with provenan
     const generated = readFileSync(output);
     const recipes = JSON.parse(generated);
     assert.ok(recipes.length > 0);
+    const socks = recipes.find((recipe) => recipe.id === 60510);
+    assert.equal(socks.d, 1);
+    assert.equal(socks.ing[0].n, "Gigas Socks");
+    assert.equal(socks.res.n, "Pinch of Poison Dust", "desynth labels describe the input, not the recovered result");
+    assert.deepEqual([socks.res, ...socks.hq].map((item) => item.q), [2, 4, 6, 8]);
+    assert.ok(recipes.filter((recipe) => recipe.d === 1).every((recipe) => [recipe.res, ...recipe.hq].every((item) => !item.n.includes("(desynth)"))));
     assert.equal(new Set(recipes.map((recipe) => recipe.id)).size, recipes.length);
     run();
     assert.deepEqual(readFileSync(output), generated);
