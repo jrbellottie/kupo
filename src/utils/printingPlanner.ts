@@ -11,7 +11,8 @@ const changedPrices = (previous: PriceBook, next: PriceBook) => [...new Set([...
 
 export function createPrintingPlanner(recipes: PrintRecipe[], itemKey: (name: string) => string,
   buyPrice: (name: string, book: PriceBook, vendors: boolean, modernGuilds: boolean) => number | null,
-  sellPrice: (name: string, book: PriceBook) => number | null) {
+  sellPrice: (name: string, book: PriceBook) => number | null,
+  hasVendorPrice: (name: string, modernGuilds: boolean) => boolean = () => false) {
   let cached: { configuration: string; buy: PriceBook; sell: PriceBook; available: PrintRecipe[]; chain: ReturnType<typeof createPrintingChain> } | undefined;
   return (state: PlannerState) => {
     const sources = { ...state.sources };
@@ -29,7 +30,8 @@ export function createPrintingPlanner(recipes: PrintRecipe[], itemKey: (name: st
     };
     if (!cached || cached.configuration !== configuration) {
       const available = recipes.filter((recipe) => (state.wotg || recipe.era !== "WotG") && (state.keyItems || !recipe.ki));
-      cached = { configuration, buy: buyBook, sell: state.sell, available, chain: createPrintingChain(available, state.settings, buy, sell, itemKey, sources) };
+      cached = { configuration, buy: buyBook, sell: state.sell, available, chain: createPrintingChain(available, state.settings, buy, sell, itemKey, sources,
+        (name) => state.vendors && hasVendorPrice(name, state.modernGuilds)) };
     } else {
       const changedBuy = changedPrices(cached.buy, buyBook);
       const changedSell = changedPrices(cached.sell, state.sell);

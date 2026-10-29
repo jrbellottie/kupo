@@ -24,10 +24,13 @@ for (const row of shopsData) add(row.n, { price: row.price, npc: row.npc, zone: 
 for (const row of guildData) add(row.n, { price: row.price, guild: row.guild, rank: row.rank });
 for (const entries of offers.values()) entries.sort((first, second) => first.price - second.price);
 export function printOffers(name: string): PrintOffer[] { return offers.get(printItemKey(name)) ?? []; }
+export function printVendorPrice(name: string, modernGuilds = false): number | null {
+  return printOffers(name).find((offer) => modernGuilds || !offer.guild)?.price ?? null;
+}
 export function printBuyPrice(name: string, overrides: PriceBook, useVendors = true, modernGuilds = false): number | null {
   const price = overrides[printItemKey(name)];
   if (validPrice(price)) return price;
-  return useVendors ? printOffers(name).find((offer) => modernGuilds || !offer.guild)?.price ?? null : null;
+  return useVendors ? printVendorPrice(name, modernGuilds) : null;
 }
 export function printSellPrice(name: string, overrides: PriceBook): number | null {
   const price = overrides[printItemKey(name)];

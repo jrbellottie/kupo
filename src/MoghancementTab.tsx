@@ -2,11 +2,14 @@ import { useMemo, useState } from "react";
 import {
   AURA_TIERS,
   calculateFurniturePlan,
+  evaluateFurnitureSetup,
+  furnitureQuantityOptionsMaximum,
   ELEMENTS,
   FURNITURE,
   MAX_FURNITURE_STORAGE,
   MOGHANCEMENTS,
   type Furniture,
+  type PlannedFurniture,
 } from "./utils/moghancements";
 import "./MoghancementTab.css";
 
@@ -30,20 +33,37 @@ export default function MoghancementTab() {
   const [effectId, setEffectId] = useState(512);
   const [elementId, setElementId] = useState(1);
   const [tierId, setTierId] = useState<(typeof AURA_TIERS)[number]["id"]>("faint");
-  const [maxPieces, setMaxPieces] = useState(10);
   const [storageTarget, setStorageTarget] = useState(MAX_FURNITURE_STORAGE);
   const [furnitureSearch, setFurnitureSearch] = useState("");
   const [furnitureElementFilter, setFurnitureElementFilter] = useState("target");
   const [craftableOnly, setCraftableOnly] = useState(false);
+  const [customPieces, setCustomPieces] = useState<PlannedFurniture[] | null>(null);
 
   const effect = MOGHANCEMENTS.find(item => item.id === effectId) ?? MOGHANCEMENTS[0];
   const targetTier = AURA_TIERS.find(tier => tier.id === tierId) ?? AURA_TIERS[0];
   const selectedElement = ELEMENTS.find(item => item.id === elementId) ?? ELEMENTS[0];
+  const suggestedPlan = useMemo(
+    () => effect ? calculateFurniturePlan(effect, elementId, targetTier.minimum, storageTarget) : null,
+    [effect, elementId, storageTarget, targetTier.minimum],
+  );
   const plan = useMemo(
-    () => effect ? calculateFurniturePlan(effect, elementId, targetTier.minimum, maxPieces, storageTarget) : null,
-    [effect, elementId, maxPieces, storageTarget, targetTier.minimum],
+    () => customPieces !== null && effect
+      ? evaluateFurnitureSetup(customPieces, effect, elementId, targetTier.minimum, storageTarget)
+      : suggestedPlan,
+    [customPieces, effect, elementId, targetTier.minimum, storageTarget, suggestedPlan],
   );
   const planComplete = Boolean(plan?.targetReached && plan.storageTargetReached);
+  const quantities = new Map(plan?.pieces.map(piece => [piece.furniture.id, piece.quantity]));
+  const setQuantity = (furniture: Furniture, quantity: number) => {
+    setCustomPieces(current => {
+      const pieces = current ?? suggestedPlan?.pieces ?? [];
+      if (quantity === 0) return pieces.filter(piece => piece.furniture.id !== furniture.id);
+      if (pieces.some(piece => piece.furniture.id === furniture.id)) {
+        return pieces.map(piece => piece.furniture.id === furniture.id ? { ...piece, quantity } : piece);
+      }
+      return [...pieces, { furniture, quantity }];
+    });
+  };
 
   const furnitureRows = useMemo(() => {
     const query = furnitureSearch.trim().toLowerCase();
@@ -77,7 +97,7 @@ export default function MoghancementTab() {
             <h1 className="mogha-title">Moghancement &amp; Furniture</h1>
             <p className="mogha-intro">
               Choose an effect, dominant aura element, aura tier, and storage target up to 80.
-              The catalog also shows storage and listed synthesis recipes.
+              Start with a suggestion or choose furniture quantities from the catalog.
             </p>
           </div>
         </div>
@@ -102,16 +122,6 @@ export default function MoghancementTab() {
             </select>
           </label>
           <label className="mogha-field mogha-count-field">
-            <span>Furniture limit</span>
-            <input
-              type="number"
-              min={1}
-              max={30}
-              value={maxPieces}
-              onChange={event => setMaxPieces(Math.max(1, Math.min(30, Number(event.target.value) || 1)))}
-            />
-          </label>
-          <label className="mogha-field mogha-count-field">
             <span>Storage target (max 80)</span>
             <input
               type="number"
@@ -127,7 +137,7 @@ export default function MoghancementTab() {
           <strong>{effect.label}</strong>
           {effect.description && <span>{effect.description}</span>}
           {effect.pairedBaseId !== undefined && (
-            <span>This Moglification requires the matching guild signboard and stall; the plan includes that pair when the furnishings are listed.</span>
+            <span>This Moglification requires the matching guild signboard and stall; the suggested setup includes that pair when the furnishings are listed.</span>
           )}
         </div>
       </div>
@@ -135,25 +145,36 @@ export default function MoghancementTab() {
       <section className="mogha-card">
         <div className="mogha-section-heading">
           <div>
-            <h2>Suggested setup</h2>
-            <p>Uses the selected element and keeps the Moghancement source at the highest individual aura for that element.</p>
+            <h2>{customPieces === null ? "Suggested setup" : "Your setup"}</h2>
+            <p>Repeat furniture for aura, add storage, and keep your Moghancement source. Quantity 0 removes an item; totals update as you edit.</p>
+            <div className="mogha-setup-actions">
+              <button type="button" onClick={() => setCustomPieces(null)} disabled={customPieces === null || !suggestedPlan}>Use suggested setup</button>
+              <button type="button" onClick={() => setCustomPieces([])}>Clear setup</button>
+            </div>
           </div>
           {plan && <div className="mogha-summary">
-            <span><strong>{plan.totalAura}</strong> {selectedElement.name} aura · {plan.targetReached ? `${targetTier.label} target met` : `${targetTier.minimum}+ target not met`}</span>
+            <span><strong>{plan.totalAura}</strong> {selectedElement.name} aura · {plan.totalAura >= targetTier.minimum ? `${targetTier.label} aura target met` : `${targetTier.minimum}+ aura target not met`}</span>
             <span><strong>+{plan.effectiveStorage}/{MAX_FURNITURE_STORAGE}</strong> effective storage · {plan.storageTargetReached ? `${storageTarget} target met` : `${storageTarget} target not met`}</span>
-            <span>{plan.totalStorage} raw storage · {plan.pieces.length}/{maxPieces} pieces{plan.totalStorage > MAX_FURNITURE_STORAGE ? ` · ${plan.totalStorage - MAX_FURNITURE_STORAGE} above cap unused` : ""}</span>
+            <span>{plan.totalStorage} raw storage · {plan.totalPieces} pieces{plan.totalStorage > MAX_FURNITURE_STORAGE ? ` · ${plan.totalStorage - MAX_FURNITURE_STORAGE} above cap unused` : ""}</span>
           </div>}
         </div>
         {plan ? <>
-          <div className={`mogha-status ${planComplete ? "mogha-status-good" : "mogha-status-warn"}`}>
+          <div role="status" className={`mogha-status ${planComplete ? "mogha-status-good" : "mogha-status-warn"}`}>
             {plan.targetReached
-              ? `${effect.label} is represented by this setup, with ${plan.totalAura} ${selectedElement.name} aura (${plan.otherElementAura} points in the strongest other element). ${plan.storageTargetReached ? `The ${storageTarget}-point storage target is reached.` : `Only ${plan.totalStorage} raw storage points fit within the current furniture limit; the target is ${storageTarget}.`}`
-              : `The best listed setup reaches ${plan.totalAura} ${selectedElement.name} aura with the current furniture limit; it does not reach the ${targetTier.minimum}-point aura target${plan.storageTargetReached ? `, though it reaches the ${storageTarget}-point storage target` : ` or the ${storageTarget}-point storage target`}.`}
+              ? `${effect.label} is represented by this setup, with ${plan.totalAura} ${selectedElement.name} aura. `
+              : "This setup does not meet the selected Moghancement and aura target. "}
+            {!plan.effectPresent && <span>Add the matching Moghancement source{effect.pairedBaseId !== undefined ? " (both guild signboard and stall)" : " for the selected element"}. </span>}
+            {plan.effectPresent && !plan.effectDominant && <span>Another furnishing has higher or tied individual aura for the selected element and a competing effect. Repeating a source adds elemental aura, not individual effect priority. </span>}
+            {!plan.elementDominant && <span>{selectedElement.name} must exceed the strongest other element ({plan.otherElementAura} aura). </span>}
+            {plan.totalAura < targetTier.minimum && <span>Add {targetTier.minimum - plan.totalAura} more {selectedElement.name} aura to reach {targetTier.label}. </span>}
+            {plan.storageTargetReached ? `The ${storageTarget}-point storage target is reached. ` : `Storage is ${plan.effectiveStorage}; the target is ${storageTarget}. `}
           </div>
-          <FurnitureTable rows={plan.pieces.map(piece => piece.furniture)} purposes={plan.pieces.map(piece => piece.purpose)} />
+          {plan.pieces.length > 0
+            ? <FurnitureTable rows={plan.pieces.map(piece => piece.furniture)} purposes={plan.pieces.map(piece => piece.purpose)} quantities={quantities} onQuantityChange={setQuantity} showTotals />
+            : <div className="mogha-empty">Choose quantities from the catalog below to build your setup.</div>}
         </> : (
           <div className="mogha-empty">
-              No listed furniture source matches {effect.label} with {selectedElement.name} aura. Choose an element with a matching source furnishing; if a plan falls short of its tier, increase the furniture limit.
+              No listed furniture source matches {effect.label} with {selectedElement.name} aura. Choose an element with a matching source furnishing.
           </div>
         )}
       </section>
@@ -183,17 +204,23 @@ export default function MoghancementTab() {
             </label>
           </div>
         </div>
-        <FurnitureTable rows={furnitureRows} />
+        <FurnitureTable rows={furnitureRows} quantities={quantities} onQuantityChange={setQuantity} />
       </section>
 
       <p className="mogha-footnote">
-        Furniture storage is capped at 80 spaces; extra storage points do not add capacity. Aura tiers are Faint (1–50), Powerful (51–100), and Overwhelming (101+). The suggested setup uses each item type once and does not model room slots or other furniture already placed. Storage, aura, and effect names come from the pinned furnishing data; recipe availability comes from the recipe reference list. Live server layouts and effects may differ. Aura tiers do not specify an exact synthesis material-loss percentage.
+        Furniture storage is capped at 80 spaces; extra storage points do not add capacity. Aura tiers are Faint (1–50), Powerful (51–100), and Overwhelming (101+). Furniture copies add aura and storage; Rare furnishings are limited to one. Quantity dropdowns expand as needed. Custom choices stay in place when targets change; use the suggested setup to replace them. Room slots and unselected furniture are not modeled. Storage, aura, item flags, and effect names come from the pinned furnishing data; recipe availability comes from the recipe reference list. Live server layouts and effects may differ. Aura tiers do not specify an exact synthesis material-loss percentage.
       </p>
     </div>
   );
 }
 
-function FurnitureTable({ rows, purposes }: { rows: Furniture[]; purposes?: string[] }) {
+function FurnitureTable({ rows, purposes, quantities, onQuantityChange, showTotals = false }: {
+  rows: Furniture[];
+  purposes?: (string | undefined)[];
+  quantities: Map<number, number>;
+  onQuantityChange: (furniture: Furniture, quantity: number) => void;
+  showTotals?: boolean;
+}) {
   if (rows.length === 0) return <div className="mogha-empty">No matching furniture in the reference catalog.</div>;
 
   return (
@@ -202,9 +229,10 @@ function FurnitureTable({ rows, purposes }: { rows: Furniture[]; purposes?: stri
         <thead>
           <tr>
             <th>Furniture</th>
-            <th>Element / aura</th>
+            <th>Quantity</th>
+            <th>Element / aura {showTotals ? "total" : "each"}</th>
             <th>Moghancement</th>
-            <th>Storage</th>
+            <th>Storage {showTotals ? "total" : "each"}</th>
             <th>Listed recipe</th>
           </tr>
         </thead>
@@ -213,12 +241,24 @@ function FurnitureTable({ rows, purposes }: { rows: Furniture[]; purposes?: stri
             <tr key={`${item.id}-${index}`}>
               <td>
                 <strong>{item.name}</strong>
+                {item.rare && <span className="mogha-purpose">Rare: max 1</span>}
                 {purposes?.[index] && <span className="mogha-purpose">{purposes[index]}</span>}
                 {item.recipes[0] && <span className="mogha-ingredients">{recipeIngredients(item)}</span>}
               </td>
-              <td>{item.element} +{item.aura}</td>
+              <td>
+                <label className="mogha-field mogha-quantity-field">
+                  <select aria-label={`Quantity of ${item.name}`} value={quantities.get(item.id) ?? 0} onChange={event => onQuantityChange(item, Number(event.target.value))}>
+                    {Array.from({ length: furnitureQuantityOptionsMaximum(item, quantities.get(item.id) ?? 0) + 1 }, (_, quantity) => <option key={quantity} value={quantity}>{quantity}</option>)}
+                  </select>
+                </label>
+              </td>
+              <td>{item.element} +{item.aura * (showTotals ? quantities.get(item.id) ?? 0 : 1)}
+                {showTotals && <span className="mogha-purpose">+{item.aura} each</span>}
+              </td>
               <td>{item.effectLabel}</td>
-              <td>+{item.storage}</td>
+              <td>+{item.storage * (showTotals ? quantities.get(item.id) ?? 0 : 1)}
+                {showTotals && <span className="mogha-purpose">+{item.storage} each</span>}
+              </td>
               <td>{recipeSummary(item)}{item.recipes.length > 2 ? ` · +${item.recipes.length - 2} more` : ""}</td>
             </tr>
           ))}

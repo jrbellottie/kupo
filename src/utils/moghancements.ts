@@ -36,6 +36,7 @@ export type Furniture = {
   id: number;
   name: string;
   storage: number;
+  rare: boolean;
   moghancementId: number;
   elementId: number;
   element: string;
@@ -52,11 +53,13 @@ export type Moghancement = EffectData;
 
 export type PlannedFurniture = {
   furniture: Furniture;
-  purpose: "Moghancement source" | "Guild signboard" | "Guild stall" | "Aura support";
+  quantity: number;
+  purpose?: "Moghancement source" | "Guild signboard" | "Guild stall" | "Aura support" | "Storage support";
 };
 
 export type FurniturePlan = {
   pieces: PlannedFurniture[];
+  totalPieces: number;
   totalAura: number;
   totalStorage: number;
   effectiveStorage: number;
@@ -66,9 +69,15 @@ export type FurniturePlan = {
   storageTargetReached: boolean;
   dominantElementAura: number;
   otherElementAura: number;
+  effectPresent: boolean;
+  effectDominant: boolean;
+  elementDominant: boolean;
 };
 
 export const MAX_FURNITURE_STORAGE = 80;
+export function furnitureQuantityOptionsMaximum(furniture: Furniture, selectedQuantity = 0): number {
+  return furniture.rare ? 1 : Math.max(30, selectedQuantity + 10);
+}
 
 const source = furnishingData as {
   source: { repository: string; revision: string };
@@ -139,6 +148,64 @@ export function auraTier(aura: number): string {
   return "None";
 }
 
+export function evaluateFurnitureSetup(
+  pieces: PlannedFurniture[],
+  effect: Moghancement,
+  elementId: number,
+  targetAura: number,
+  storageTarget = MAX_FURNITURE_STORAGE,
+): FurniturePlan {
+  const elementAura = new Map<number, number>();
+  const quantities = new Map<number, number>();
+  let totalStorage = 0;
+  let totalPieces = 0;
+  for (const { furniture, quantity } of pieces) {
+    if (!Number.isInteger(quantity) || quantity < 1) {
+      throw new Error(`Invalid furniture quantity for ${furniture.name}: ${quantity}`);
+    }
+    const combinedQuantity = (quantities.get(furniture.id) ?? 0) + quantity;
+    if (furniture.rare && combinedQuantity > 1) {
+      throw new Error(`Only one ${furniture.name} can be placed because it is Rare`);
+    }
+    quantities.set(furniture.id, combinedQuantity);
+    totalPieces += quantity;
+    totalStorage += furniture.storage * quantity;
+    elementAura.set(furniture.elementId, (elementAura.get(furniture.elementId) ?? 0) + furniture.aura * quantity);
+  }
+  const paired = effect.pairedBaseId !== undefined && effect.pairedMegaId !== undefined;
+  const sourceIds = paired ? [effect.pairedBaseId, effect.pairedMegaId] : [effect.id];
+  const effectPresent = paired
+    ? pieces.some(({ furniture }) => furniture.moghancementId === effect.pairedBaseId && /signboard/i.test(furniture.name))
+      && pieces.some(({ furniture }) => furniture.moghancementId === effect.pairedMegaId && /stall/i.test(furniture.name))
+    : pieces.some(({ furniture }) => furniture.moghancementId === effect.id && furniture.elementId === elementId);
+  const targetFurniture = pieces.map(piece => piece.furniture).filter(item => item.elementId === elementId);
+  const highestAura = Math.max(0, ...targetFurniture.map(item => item.aura));
+  const strongest = targetFurniture.filter(item => item.aura === highestAura);
+  // Copies add elemental aura, but do not strengthen an item's individual effect priority.
+  const winningEffectId = Math.max(0, ...strongest.map(item => item.moghancementId));
+  const effectDominant = effectPresent && highestAura > 0
+    && sourceIds.includes(winningEffectId);
+  const totalAura = elementAura.get(elementId) ?? 0;
+  const otherElementAura = Math.max(0, ...[...elementAura].filter(([id]) => id !== elementId).map(([, aura]) => aura));
+  const elementDominant = totalAura > otherElementAura;
+  return {
+    pieces,
+    totalPieces,
+    totalAura,
+    totalStorage,
+    effectiveStorage: Math.min(totalStorage, MAX_FURNITURE_STORAGE),
+    targetAura,
+    targetReached: totalAura >= targetAura && elementDominant && effectDominant,
+    storageTarget,
+    storageTargetReached: totalStorage >= storageTarget,
+    dominantElementAura: totalAura,
+    otherElementAura,
+    effectPresent,
+    effectDominant,
+    elementDominant,
+  };
+}
+
 function comparePlans(
   first: FurniturePlan,
   second: FurniturePlan,
@@ -149,6 +216,7 @@ function comparePlans(
   if (!first.targetReached && first.totalAura !== second.totalAura) return second.totalAura - first.totalAura;
   if (first.storageTargetReached !== second.storageTargetReached) return first.storageTargetReached ? -1 : 1;
   if (!first.storageTargetReached && first.totalStorage !== second.totalStorage) return second.totalStorage - first.totalStorage;
+  if (first.totalPieces !== second.totalPieces) return first.totalPieces - second.totalPieces;
   if (first.pieces.length !== second.pieces.length) return first.pieces.length - second.pieces.length;
   const firstStorageOverage = first.totalStorage - storageTarget;
   const secondStorageOverage = second.totalStorage - storageTarget;
@@ -164,25 +232,27 @@ function comparePlans(
 function makePlan(
   fixedPieces: PlannedFurniture[],
   effectFurniture: Furniture[],
+  effect: Moghancement,
   elementId: number,
   targetAura: number,
   storageTarget: number,
-  maxPieces: number,
 ): FurniturePlan | null {
-  if (fixedPieces.length > maxPieces) return null;
   const highestSourceAura = Math.max(
     0,
     ...effectFurniture.filter(item => item.elementId === elementId).map(item => item.aura),
   );
   if (highestSourceAura === 0) return null;
+  const highestSourceEffectId = Math.max(
+    ...effectFurniture.filter(item => item.elementId === elementId && item.aura === highestSourceAura).map(item => item.moghancementId),
+  );
 
-  const pieces = [...fixedPieces];
-  const pieceIds = new Set(fixedPieces.map(piece => piece.furniture.id));
+  const pieces = fixedPieces.map(piece => ({ ...piece }));
   const elementAura = new Map<number, number>();
   let totalStorage = 0;
   const addPiece = (furniture: Furniture, purpose: PlannedFurniture["purpose"]) => {
-    pieces.push({ furniture, purpose });
-    pieceIds.add(furniture.id);
+    const existing = pieces.find(piece => piece.furniture.id === furniture.id);
+    if (existing) existing.quantity++;
+    else pieces.push({ furniture, purpose, quantity: 1 });
     totalStorage += furniture.storage;
     elementAura.set(furniture.elementId, (elementAura.get(furniture.elementId) ?? 0) + furniture.aura);
   };
@@ -198,25 +268,29 @@ function makePlan(
     0,
     ...[...elementAura].filter(([id]) => id !== elementId).map(([, aura]) => aura),
   );
+  const canAdd = (item: Furniture) => !item.rare || !pieces.some(piece => piece.furniture.id === item.id);
   const sameElementSupports = FURNITURE
-    .filter(item => item.elementId === elementId && item.aura > 0 && item.aura <= highestSourceAura && !pieceIds.has(item.id))
+    .filter(item => item.elementId === elementId && item.aura > 0
+      && (item.aura < highestSourceAura
+        || (item.aura === highestSourceAura && item.moghancementId <= highestSourceEffectId)))
     .sort((a, b) => b.aura - a.aura || b.storage - a.storage || a.name.localeCompare(b.name));
 
   while (
     (currentElementAura() < targetAura || currentElementAura() <= strongestOtherAura())
-    && pieces.length < maxPieces
     && sameElementSupports.length > 0
   ) {
-    const support = sameElementSupports.shift()!;
-    if (pieceIds.has(support.id)) continue;
+    const support = sameElementSupports.find(canAdd);
+    if (!support) break;
     addPiece(support, "Aura support");
   }
 
-  while (totalStorage < storageTarget && pieces.length < maxPieces) {
+  while (totalStorage < storageTarget) {
     const next = FURNITURE
-      .filter(item => !pieceIds.has(item.id))
+      .filter(canAdd)
+      .filter(item => item.storage > 0)
       .filter(item => {
-        if (item.elementId === elementId) return item.aura <= highestSourceAura;
+        if (item.elementId === elementId) return item.aura < highestSourceAura
+          || (item.aura === highestSourceAura && item.moghancementId <= highestSourceEffectId);
         return (elementAura.get(item.elementId) ?? 0) + item.aura < currentElementAura();
       })
       .sort((a, b) => b.storage - a.storage
@@ -224,33 +298,19 @@ function makePlan(
         || b.aura - a.aura
         || a.name.localeCompare(b.name))[0];
     if (!next) break;
-    addPiece(next, "Aura support");
+    addPiece(next, "Storage support");
   }
 
-  const totalAura = currentElementAura();
-  const otherElementAura = strongestOtherAura();
-  return {
-    pieces,
-    totalAura,
-    totalStorage,
-    effectiveStorage: Math.min(totalStorage, MAX_FURNITURE_STORAGE),
-    targetAura,
-    targetReached: totalAura >= targetAura && totalAura > otherElementAura,
-    storageTarget,
-    storageTargetReached: totalStorage >= storageTarget,
-    dominantElementAura: totalAura,
-    otherElementAura,
-  };
+  return evaluateFurnitureSetup(pieces, effect, elementId, targetAura, storageTarget);
 }
 
 export function calculateFurniturePlan(
   effect: Moghancement,
   elementId: number,
   targetAura: number,
-  maxPieces = 10,
   storageTarget = MAX_FURNITURE_STORAGE,
 ): FurniturePlan | null {
-  if (!Number.isInteger(maxPieces) || maxPieces < 1
+  if (!Number.isInteger(targetAura) || targetAura < 1
     || !Number.isInteger(storageTarget) || storageTarget < 1 || storageTarget > MAX_FURNITURE_STORAGE) return null;
 
   let plans: FurniturePlan[];
@@ -265,11 +325,11 @@ export function calculateFurniturePlan(
     for (const signboard of signboards) {
       for (const stall of stalls) {
         const fixed = [
-          { furniture: signboard, purpose: "Guild signboard" as const },
-          { furniture: stall, purpose: "Guild stall" as const },
+          { furniture: signboard, purpose: "Guild signboard" as const, quantity: 1 },
+          { furniture: stall, purpose: "Guild stall" as const, quantity: 1 },
         ];
         if (!fixed.some(piece => piece.furniture.elementId === elementId)) continue;
-        const plan = makePlan(fixed, fixed.map(piece => piece.furniture), elementId, targetAura, storageTarget, maxPieces);
+        const plan = makePlan(fixed, fixed.map(piece => piece.furniture), effect, elementId, targetAura, storageTarget);
         if (plan) plans.push(plan);
       }
     }
@@ -279,12 +339,12 @@ export function calculateFurniturePlan(
     );
     plans = anchors.flatMap(anchor => {
       const plan = makePlan(
-        [{ furniture: anchor, purpose: "Moghancement source" }],
+        [{ furniture: anchor, purpose: "Moghancement source", quantity: 1 }],
         [anchor],
+        effect,
         elementId,
         targetAura,
         storageTarget,
-        maxPieces,
       );
       return plan ? [plan] : [];
     });

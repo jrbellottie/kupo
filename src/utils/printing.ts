@@ -10,9 +10,9 @@ export const printTone = (amount: number | null) => amount === null ? "print-mut
 export type PrintRecipe = { id: number; craft: string; lvl: number; crystal: string; era: string; ing: { n: string; q: number }[]; res: { n: string; q: number }; hq: { n: string; q: number }[]; subs?: { c: string; l: number }[]; d?: number; ki?: boolean };
 export type PrintSettings = { skillMode?: "at-cap" | "character"; lossMode?: "skill" | "fixed"; lossDefaultVersion?: number; skills: Record<string, number>; bonuses: Record<string, number>; hqRates: number[]; lossPct: number; seconds: number; overhead: number; sellMultiplier: number; successBonus: number; desynthSuccessBonus?: number; desynthHqRate?: number };
 export type PrintSettingsUpdate = Partial<PrintSettings> | ((current: PrintSettings) => Partial<PrintSettings>);
-export const DEFAULT_PRINT_SETTINGS: PrintSettings = { skillMode: "character", lossMode: "skill", skills: {}, bonuses: {}, hqRates: DEFAULT_HQ_RATES, lossPct: 50, lossDefaultVersion: 1, seconds: 21, overhead: 0, sellMultiplier: 100, successBonus: 0, desynthSuccessBonus: 0, desynthHqRate: 60 };
+export const DEFAULT_PRINT_SETTINGS: PrintSettings = { skillMode: "at-cap", lossMode: "skill", skills: {}, bonuses: {}, hqRates: DEFAULT_HQ_RATES, lossPct: 50, lossDefaultVersion: 1, seconds: 21, overhead: 0, sellMultiplier: 100, successBonus: 0, desynthSuccessBonus: 0, desynthHqRate: 60 };
 export function restorePrintSettings(saved: Partial<PrintSettings> = {}): PrintSettings {
-  return { ...DEFAULT_PRINT_SETTINGS, ...saved, skillMode: saved.skillMode ?? "character",
+  return { ...DEFAULT_PRINT_SETTINGS, ...saved, skillMode: saved.skillMode ?? "at-cap",
     lossMode: saved.lossMode ?? (saved.lossPct === undefined ? "skill" : "fixed"), lossDefaultVersion: 1,
     lossPct: saved.lossDefaultVersion === undefined && saved.lossPct === 100 ? DEFAULT_PRINT_SETTINGS.lossPct : saved.lossPct ?? DEFAULT_PRINT_SETTINGS.lossPct };
 }
@@ -52,6 +52,11 @@ export function printingChances(recipe: PrintRecipe, settings: PrintSettings, ti
   const distribution = desynth ? [1 - hq, hq / 2, hq / 3, hq / 6]
     : tier <= 0 ? [1 - hq, hq, 0, 0] : tier === 1 ? [1 - hq, hq * 0.75, hq * 0.25, 0] : [1 - hq, hq * 0.75, hq * 0.1875, hq * 0.0625];
   return { eligible, requirements, limitingGap, tier, success, skillSuccess, hq, distribution };
+}
+
+export function isPrintRecipeAvailable(recipe: PrintRecipe, settings: PrintSettings): boolean {
+  const chances = printingChances(recipe, settings);
+  return chances.eligible && chances.success > 0;
 }
 
 export function printingEstimate(recipe: PrintRecipe, settings: PrintSettings, buy: (name: string) => number | null, sell: (name: string) => SalePrice, tierOverride?: number) {

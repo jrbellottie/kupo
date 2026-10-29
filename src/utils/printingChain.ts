@@ -11,7 +11,7 @@ export type ChainNode = {
 export const MAX_CHAIN_DEPTH = 32;
 type ChainEstimate = ReturnType<typeof printingEstimate> & {
   sources: { node: ChainNode; quantity: number }[]; leaves: ChainLeaf[];
-  rawCeilings: (ChainLeaf & { maximum: number | null })[]; issues: string[];
+  issues: string[];
   totalAttempts: number; seconds: number; directProfit: number | null;
 };
 type PriceLookup = (name: string) => number | null;
@@ -33,7 +33,7 @@ function combineLeaves(parts: { leaves: ChainLeaf[]; quantity: number }[]): Chai
   return [...combined.values()].filter((leaf) => leaf.quantity > 0);
 }
 
-export function createPrintingChain(recipes: PrintRecipe[], settings: PrintSettings, buy: PriceLookup, sell: SaleLookup, itemKey: (name: string) => string, choices: SourceChoices = {}): PrintingChain {
+export function createPrintingChain(recipes: PrintRecipe[], settings: PrintSettings, buy: PriceLookup, sell: SaleLookup, itemKey: (name: string) => string, choices: SourceChoices = {}, preferVendor: (name: string) => boolean = () => false): PrintingChain {
   const byOutput = new Map<string, PrintRecipe[]>();
   const consumers = new Map<string, Set<string>>();
   const stats = new Map(recipes.map((recipe) => [recipe.id, printingEstimate(recipe, settings, () => null, () => 0)]));
@@ -63,7 +63,7 @@ export function createPrintingChain(recipes: PrintRecipe[], settings: PrintSetti
       const cached = cache.get(cacheKey);
       if (cached) return cached;
       const purchased: ChainNode = { key, name, price: buy(name), attempts: 0, leaves: [{ key, name, quantity: 1, price: buy(name) }], yield: 1, success: 1, hq: 0, tier: -1, children: [] };
-      if (choice === "buy" || key === itemKey("Distilled Water")) return purchased;
+      if (choice === "buy" || key === itemKey("Distilled Water") || (choice === "auto" && purchased.price !== null && preferVendor(name))) return purchased;
       if (options(name).length && (ancestors.includes(key) || depth === 0)) {
         return { ...purchased, price: null, issue: ancestors.includes(key) ? "Circular ingredient chain: choose Buy to stop this branch" : `More than ${MAX_CHAIN_DEPTH} ingredient stages: choose Buy to stop this branch` };
       }
@@ -106,12 +106,7 @@ export function createPrintingChain(recipes: PrintRecipe[], settings: PrintSetti
       const issues = [...new Set(sources.flatMap((source) => source.node.issue ? [source.node.issue] : []))];
       const totalAttempts = 1 + sources.reduce((total, source) => total + source.quantity * source.node.attempts, 0);
       const seconds = totalAttempts * (3600 / direct.attemptsPerHour);
-      const rawCeilings = leaves.map((leaf) => {
-        const others = leaves.filter((other) => other.key !== leaf.key);
-        const otherCost = others.reduce((total, other) => total + other.quantity * (other.price ?? 0), 0);
-        return { ...leaf, maximum: !issues.length && result.revenue !== null && others.every((other) => other.price !== null) ? (result.revenue - otherCost) / leaf.quantity : null };
-      });
-      const combined = { ...result, eligible: result.eligible && !issues.length, sources, leaves, rawCeilings, issues, totalAttempts, seconds,
+      const combined = { ...result, eligible: result.eligible && !issues.length, sources, leaves, issues, totalAttempts, seconds,
         directProfit: direct.profit, gilPerHour: result.profit === null || issues.length ? null : result.profit * 3600 / seconds,
         attemptsPerHour: 3600 / seconds };
       const tiers = estimates.get(recipe) ?? new Map<number | undefined, ChainEstimate>();

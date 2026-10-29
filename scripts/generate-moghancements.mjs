@@ -59,6 +59,7 @@ const furniture = furnishingRows.map(row => {
   return {
     id: row.itemid,
     name: displayName(item.name),
+    rare: (item.flags & 0x8000) !== 0,
     storage: row.storage,
     moghancementId: row.moghancement,
     elementId: row.element,

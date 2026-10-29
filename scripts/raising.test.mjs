@@ -379,6 +379,21 @@ test("late starts use only remaining days and do not claim unlearned abilities",
   assert.deepEqual(finished.finalAbilities, ["Bore", "Burrow"]);
 });
 
+test("day-19 digging plan reaches every minimum instead of favoring priority Endurance", () => {
+  const plan = planRaisingGoal(goal({
+    current: stats(0, 0, 64, 64),
+    currentDay: 19,
+    today: { feedingDone: false, storyDone: false },
+    tomorrowCareId: 3,
+    feedingReport: { affection: 224, fullness: 255, condition: "healthy", day: 19 },
+  }));
+  assert.equal(plan.complete, true, plan.remaining.join("; "));
+  assert.ok(STAT_KEYS.every(key => plan.result[key] >= RAISING_PRESETS[0].target[key]));
+  const completedDay = plan.days.find(day =>
+    STAT_KEYS.every(key => day.after[key] >= RAISING_PRESETS[0].target[key]))?.day;
+  assert.ok(completedDay !== undefined && completedDay < LAST_RAISING_DAY);
+});
+
 test("today mode plans unfinished meals and stories without repeating reported care or completed activities", () => {
   const current = stats(200, 128, 160, 96);
   for (const currentDay of [31, 63, 64, 127, 128]) {

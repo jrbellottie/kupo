@@ -168,8 +168,8 @@
   background: rgba(255, 255, 255, 0.035);
 }
 
-.mogha-table td:nth-child(2),
-.mogha-table td:nth-child(4) {
+.mogha-table td:nth-child(3),
+.mogha-table td:nth-child(5) {
   white-space: nowrap;
 }
 
@@ -190,6 +190,31 @@
   align-items: end;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.mogha-quantity-field {
+  min-width: 65px;
+}
+
+.mogha-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mogha-setup-actions button {
+  border: 1px solid #444;
+  border-radius: 8px;
+  padding: 7px 10px;
+  background: #171717;
+  color: #eaeaea;
+  cursor: pointer;
+}
+
+.mogha-setup-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .mogha-search-field {

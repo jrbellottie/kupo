@@ -1,4 +1,6 @@
+import { useEffect, useState } from "react";
 import { PRINT_CRAFTS, printGil as gil, printTone as tone, type PrintSettings, type PrintSettingsUpdate } from "./utils/printing";
+import { committedNumberValue, normalizeNumberDraft } from "./utils/numberField";
 import { printItem } from "./utils/printingData";
 import { RotateCcw } from "lucide-react";
 import PriceInput from "./PriceInput";
@@ -50,23 +52,47 @@ export function ProfitCostField({ name, value, baseline, onChange }: {
 }
 
 export function NumberField({ label, value, onChange, min = 0, max = 1000000000, step = 1 }: { label: string; value: number; onChange: (value: number) => void; min?: number; max?: number; step?: number }) {
-  return <label>{label}<input type="number" aria-label={label} min={min} max={max} step={step} value={value} onChange={(event) => { const next = event.target.valueAsNumber; if (Number.isFinite(next)) onChange(Math.min(max, Math.max(min, next))); }} /></label>;
+  const [draft, setDraft] = useState(() => String(value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => {
+    if (!editing) setDraft(String(value));
+  }, [editing, value]);
+  const clampValue = (next: number) => Math.min(max, Math.max(min, next));
+  const commit = () => {
+    const next = committedNumberValue(draft, min, max);
+    setDraft(String(next));
+    setEditing(false);
+    if (next !== value) onChange(next);
+  };
+  return <label>{label}<input type="number" aria-label={label} min={min} max={max} step={step} value={draft} onFocus={() => setEditing(true)} onChange={(event) => {
+    const text = event.target.value;
+    const nextDraft = normalizeNumberDraft(draft, text);
+    setDraft(nextDraft);
+    if (nextDraft === "") return;
+    const next = Number(nextDraft);
+    if (Number.isFinite(next)) onChange(clampValue(next));
+  }} onBlur={commit} /></label>;
 }
 
 export function CraftingLevels({ settings, onChange, planning = true }: { settings: PrintSettings; onChange: (patch: PrintSettingsUpdate) => void; planning?: boolean }) {
   return <section className="print-section print-levels">
-    <div className="print-section-heading"><h3>Your crafting levels</h3>{planning && <label>Calculate using<select value={settings.skillMode ?? "character"} onChange={(event) => onChange({ skillMode: event.target.value === "at-cap" ? "at-cap" : "character" })}><option value="character">My crafting levels</option><option value="at-cap">Hypothetical HQ planning</option></select></label>}</div>
-    <div className="print-skills">{PRINT_CRAFTS.map((craft) => <NumberField key={craft} label={`${craft} level`} value={settings.skills[craft] ?? 0} max={110} step={0.1} onChange={(value) => onChange((current) => ({ skillMode: "character", skills: { ...current.skills, [craft]: value } }))} />)}</div>
-    <p className="print-muted">{planning && settings.skillMode === "at-cap" ? "Planning mode ignores your levels. Switch to My crafting levels for your actual success and HQ estimates." : "These levels apply to the main recipe, every subcraft, and every ingredient you craft. Unentered levels are 0."}</p>
-    <details><summary>Skill bonuses from support / equipment</summary><div className="print-skills">{PRINT_CRAFTS.map((craft) => <NumberField key={craft} label={`${craft} bonus`} value={settings.bonuses[craft] ?? 0} max={30} onChange={(value) => onChange((current) => ({ skillMode: "character", bonuses: { ...current.bonuses, [craft]: value } }))} />)}</div></details>
+    <div className="print-section-heading"><h3>Your crafting levels</h3>{planning && <label className="print-skill-toggle"><input type="checkbox" aria-label="Use my actual skill" checked={settings.skillMode === "character"} onChange={(event) => onChange({ skillMode: event.target.checked ? "character" : "at-cap" })} />Use my actual skill</label>}</div>
+    <div className="print-skills">{PRINT_CRAFTS.map((craft) => <NumberField key={craft} label={`${craft} level`} value={settings.skills[craft] ?? 0} max={110} step={1} onChange={(value) => onChange((current) => ({ skills: { ...current.skills, [craft]: value } }))} />)}</div>
+    <details><summary>Skill bonuses from support / equipment</summary><div className="print-skills">{PRINT_CRAFTS.map((craft) => <NumberField key={craft} label={`${craft} bonus`} value={settings.bonuses[craft] ?? 0} max={30} onChange={(value) => onChange((current) => ({ bonuses: { ...current.bonuses, [craft]: value } }))} />)}</div></details>
   </section>;
 }
 
-export function ProfitMetrics({ cost, profit, gilPerHour, available = true }: { cost: number | null; profit: number | null; gilPerHour: number | null; available?: boolean }) {
+export function ProfitMetrics({ cost, profit, gilPerHour, available = true, labels = { cost: "Cost per synth", profit: "Profit per synth", gilPerHour: "Profit / gil per hour" } }: {
+  cost: number | null;
+  profit: number | null;
+  gilPerHour: number | null;
+  available?: boolean;
+  labels?: { cost: string; profit: string; gilPerHour: string };
+}) {
   const values = [
-    { label: "Cost per synth", value: cost, className: "" },
-    { label: "Profit per 100 synths", value: profit === null ? null : profit * 100, className: tone(profit) },
-    { label: "Profit / gil per hour", value: gilPerHour, className: tone(gilPerHour) },
+    { label: labels.cost, value: cost, className: "" },
+    { label: labels.profit, value: profit, className: tone(profit) },
+    { label: labels.gilPerHour, value: gilPerHour, className: tone(gilPerHour) },
   ];
   return <div className="print-metrics">{values.map(({ label, value, className }) => <div key={label}><span>{label}</span><strong className={available ? className : "print-warning"}>{available ? `${gil(value)}${value === null ? "" : " gil"}` : "Unavailable"}</strong></div>)}</div>;
 }

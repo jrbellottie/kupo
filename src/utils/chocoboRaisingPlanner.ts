@@ -148,8 +148,12 @@ export type TrainingDay = {
 const zeroStats = (): RaisingStats => ({ strength: 0, endurance: 0, discernment: 0, receptivity: 0 });
 const total = (stats: RaisingStats) => STAT_KEYS.reduce((sum, key) => sum + stats[key], 0);
 const meetsGoal = (stats: RaisingStats, target: RaisingStats) => STAT_KEYS.every(key => stats[key] >= target[key]);
+const unmetGoalMask = (stats: RaisingStats, target: RaisingStats) => STAT_KEYS.reduce((mask, key, index) =>
+  stats[key] < target[key] ? mask | (1 << index) : mask, 0);
 const statsKey = (stats: RaisingStats) => stats.strength | (stats.endurance << 8) | (stats.discernment << 16) | (stats.receptivity << 24);
 const COLOR_STATES_PER_WORM_COUNT = 8;
+const GOAL_STATES_PER_MASK = 1;
+const MAX_SEARCH_STATES = 48;
 export const LAST_RAISING_DAY = RAISING.settings.daysToAdult4 - 1;
 
 export function validateRaisingGoal(input: RaisingGoalInput): string | null {
@@ -404,11 +408,11 @@ export function planRaisingGoal(input: RaisingGoalInput) {
   };
   const score = (node: SearchNode) => {
     const learning = node.attempts < attemptBudget;
-    const deficit = STAT_KEYS.reduce((sum, key) =>
-      sum + Math.max(0, input.target[key] - node.stats[key]) * (key === input.priority ? 2 : 1), 0);
+    const deficit = STAT_KEYS.reduce((sum, key) => sum + Math.max(0, input.target[key] - node.stats[key]), 0);
+    const priorityDeficit = Math.max(0, input.target[input.priority] - node.stats[input.priority]);
     const excess = STAT_KEYS.reduce((sum, key) => sum + Math.max(0, node.stats[key] - input.target[key]), 0);
     const urgency = input.feedingReport && LAST_RAISING_DAY - (node.entry?.day ?? input.currentDay) < 8 ? 8 : 1;
-    return (deficit + excess * 0.7) * urgency + node.cost * 0.015 + node.affectionDebt
+    return (deficit + priorityDeficit * 0.25 + excess * 0.7) * urgency + node.cost * 0.015 + node.affectionDebt
       + (input.feedingReport ? Math.max(0, AFFECTION_TARGET - node.affection) * 2 : 0)
       + (learning ? Math.max(0, threshold - node.stats.discernment) * 5 + (attemptBudget - node.attempts) * 8 : 0);
   };
@@ -523,16 +527,37 @@ export function planRaisingGoal(input: RaisingGoalInput) {
     }
     // Keep diverse worm totals without allowing extra chick meals to make the color search unbounded.
     const sorted = [...candidates.values()].sort(compare);
-    if (optimizingColor && day < RAISING.settings.daysToAdolescent) {
-      const byWormCount = new Map<number, SearchNode[]>();
-      for (const node of sorted) {
-        const states = byWormCount.get(node.worms) ?? [];
-        if (states.length < COLOR_STATES_PER_WORM_COUNT) states.push(node);
-        byWormCount.set(node.worms, states);
+    if (optimizingColor) {
+      if (day < RAISING.settings.daysToAdolescent) {
+        const byWormCount = new Map<number, SearchNode[]>();
+        for (const node of sorted) {
+          const states = byWormCount.get(node.worms) ?? [];
+          if (states.length < COLOR_STATES_PER_WORM_COUNT) states.push(node);
+          byWormCount.set(node.worms, states);
+        }
+        frontier = [...byWormCount.values()].flat().sort(compare);
+      } else {
+        frontier = sorted.slice(0, MAX_SEARCH_STATES);
       }
-      frontier = [...byWormCount.values()].flat().sort(compare);
     } else {
-      frontier = sorted.slice(0, 48);
+      const byUnmetGoal = new Map<number, SearchNode[]>();
+      // Preserve alternatives for each unmet-stat combination before filling by score.
+      for (const node of sorted) {
+        const mask = unmetGoalMask(node.stats, input.target);
+        const states = byUnmetGoal.get(mask) ?? [];
+        if (states.length < GOAL_STATES_PER_MASK) states.push(node);
+        byUnmetGoal.set(mask, states);
+      }
+      frontier = [...byUnmetGoal.values()].flat();
+      const selected = new Set(frontier);
+      for (const node of sorted) {
+        if (frontier.length >= MAX_SEARCH_STATES) break;
+        if (!selected.has(node)) {
+          frontier.push(node);
+          selected.add(node);
+        }
+      }
+      frontier.sort(compare);
     }
     if (!frontier.length) throw new Error(`No valid training candidates on day ${day}.`);
   }

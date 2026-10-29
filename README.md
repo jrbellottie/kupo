@@ -60,7 +60,7 @@ Look ahead at estimated weather and elemental-ore opportunities, and set reminde
 Find Mog House gardening recipes by harvest item, pot, seed, or crystal, with yields and growth estimates from a pinned reference ruleset. Set one rolling timer per planting for feeding windows and harvest readiness, with optional actual feeding records to refine later estimates.
 
 ### 🪑 Moghancement
-Plan Mog House furniture for a selected Moghancement and aura tier, compare storage, and browse the furniture’s listed crafting recipes.
+Plan Mog House furniture for a selected Moghancement and aura tier, choose quantities with live aura and storage totals and one-copy limits for Rare items, and browse listed crafting recipes.
 
 ### HELM
 Find mining, harvesting, excavation, and logging opportunities, with gathering maps and information about rewards and equipment.
@@ -84,7 +84,7 @@ Find two- and three-step skillchain combinations for your chosen weapons and wea
 Browse era-appropriate recipes and guild-point items, plan a crafting skill-up path, or compare selling prices, locations, stock capacity, and opening countdowns with reminders across all nine guilds.
 
 ### Profits
-Plan expandable crafting chains using your main and subcraft levels, compare crafting and desynthesis costs and estimated returns from NPC or auction-house sales, and manage a local price book shared with Chocobo Digging.
+Compare crafting and desynthesis returns, explore ingredient chains, estimate quantities from a target or available materials, and manage a shared local price book.
 
 ### 📜 Quests
 Browse era-focused quests and missions with requirements, rewards, and available walkthroughs, supported by linked maps.
