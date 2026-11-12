@@ -4,12 +4,11 @@ import MapView, { type MapDef } from "./MapView";
 import HelmGatheringMap from "./HelmGatheringMap";
 import mapData from "./data/maps.json";
 import helmMapData from "./data/helmMaps.json";
-import { PHOENIX_SOURCE } from "./utils/phoenixData";
 import { printSellPrice } from "./utils/printingData";
 import { findableName } from "./utils/itemLinks";
 import { navigateToTab } from "./utils/tabNav";
 import { loadJson, saveJson } from "./utils/storage";
-import { HELM_DAYS, HELM_DEFAULTS, HELM_GEAR, HELM_KINDS, HELM_ROCKS, HELM_ZONES, helmAvailable, helmCount, helmMapKey, helmRates, helmZoneKey, helmZoneName, type HelmKind, type HelmScenario } from "./utils/helm";
+import { HELM_DAYS, HELM_DEFAULTS, HELM_GEAR, HELM_KINDS, HELM_ROCKS, HELM_SOURCE, HELM_ZONES, helmAvailable, helmCount, helmMapKey, helmRates, helmZoneKey, helmZoneName, type HelmKind, type HelmScenario } from "./utils/helm";
 import "./HelmTab.css";
 import { CollapsibleSection } from "./ScreenControls";
 
@@ -59,14 +58,14 @@ export default function HelmTab() {
   const changeScenario = (patch: Partial<HelmScenario>) => setState(current => ({ ...current, scenario: { ...current.scenario, ...patch } }));
   const changePool = (patch: Partial<PoolState>) => setState(current => ({ ...current, pools: { ...current.pools, [key]: { ...pool, ...patch } } }));
   const rows = rates?.drops.filter(drop => !query || matches(helmZoneName(zone!.zone)) || matches(drop.name) || (drop.sourceItemId === 769 && HELM_ROCKS.some(rock => matches(rock.name)))).sort((first, second) => state.sort === "name" ? first.name.localeCompare(second.name) : state.sort === "value" ? (printSellPrice(second.name, {}) ?? -1) - (printSellPrice(first.name, {}) ?? -1) : second.perAttempt - first.perAttempt || second.share - first.share) ?? [];
-  const sourceUrl = `${PHOENIX_SOURCE.repository}/blob/${PHOENIX_SOURCE.revision}`;
+  const sourceUrl = `${HELM_SOURCE.repository}/blob/${HELM_SOURCE.revision}`;
 
   return <section className="helm" aria-label="HELM gathering">
     <header className="helm-header">
       <div><h2>HELM</h2><p>Gathering / {state.wotg ? "Through WotG" : "ToAU"}</p></div>
-      <a className="helm-source" href={`${sourceUrl}/scripts/globals/hobbies/helm/logic.lua`} target="_blank" rel="noreferrer">Source {PHOENIX_SOURCE.revision.slice(0, 8)} <ExternalLink size={14} /></a>
+      <a className="helm-source" href={`${sourceUrl}/scripts/globals/hobbies/helm/logic.lua`} target="_blank" rel="noreferrer">Source {HELM_SOURCE.revision.slice(0, 8)} <ExternalLink size={14} /></a>
     </header>
-    <p className="helm-notice">Pinned source data with pre-WotG item adjustments. Live server settings may differ; rates are source calculations, not live observations.</p>
+    <p className="helm-notice">Source snapshot checked {HELM_SOURCE.checked}, with pre-WotG item adjustments. Live server settings may differ; rates are source calculations, not live observations.</p>
     {saveError && <p role="alert">HELM settings could not be saved in this browser.</p>}
     <CollapsibleSection kind="search">
     <div className="helm-toolbar">
@@ -151,7 +150,7 @@ export default function HelmTab() {
             {zone.drops.some(drop => drop.dailyCap !== null) ? <p>Daily limits: {zone.drops.filter(drop => drop.dailyCap !== null).map(drop => `${drop.name}: ${drop.dailyCap}`).join("; ")}. Each item's weight becomes floor(base weight / (already obtained + 1)), then zero at its cap. Reset takes effect on zone-in after midnight JST, not while remaining in the zone.</p> : <p>No per-item daily caps are configured for this pool.</p>}
             <p>Remaining weights are renormalized after cap and depletion adjustments. These are per-character limits, not a server-wide stock count.</p>
             {zone.zone === "Wajaom Woodlands" && zone.kind === "Harvesting" && <><h4>Quest result</h4><p>Vanishing Act: while the quest is accepted and Rainbow Berry is missing, a non-breaking harvesting attempt can grant the key item. It is separate from the regular weighted item pool.</p></>}
-            <div className="helm-source-links"><a href={`${sourceUrl}/scripts/globals/hobbies/helm/data.lua`} target="_blank" rel="noreferrer">Gathering data <ExternalLink size={13} /></a><a href={`${sourceUrl}/modules/era/lua/globals/helm/helm_adjustments.lua`} target="_blank" rel="noreferrer">Era adjustments <ExternalLink size={13} /></a></div>
+            <div className="helm-source-links"><a href={`${sourceUrl}/scripts/globals/hobbies/helm/data.lua`} target="_blank" rel="noreferrer">Gathering data <ExternalLink size={13} /></a><a href={`${sourceUrl}/modules/era/lua/globals/helm/helm_adjustments.lua`} target="_blank" rel="noreferrer">Era adjustments <ExternalLink size={13} /></a><a href={HELM_SOURCE.wiki} target="_blank" rel="noreferrer">Logging reference <ExternalLink size={13} /></a></div>
           </div>}
           {state.view === "Locations" && <div className="helm-locations">
             {gatheringMap ? <div>

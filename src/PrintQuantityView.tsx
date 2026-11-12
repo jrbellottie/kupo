@@ -1,7 +1,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
 import { PRINT_CRAFTS, printGil as gil, printUnits as units, printPct as pct, type PrintSettings, type PrintSettingsUpdate } from "./utils/printing";
-import { printAttemptsForOutput, printAttemptsFromMaterials, printingQuantityPlan, printQuantityDurationSeconds, printQuantityFromStacks, printQuantityStacks, PRINT_QUANTITY_SECONDS_PER_SYNTH } from "./utils/printingQuantities";
+import { printAttemptsForOutput, printAttemptsFromMaterials, printingQuantityPlan, printQuantityDurationSeconds, printQuantityFromStacks, printQuantityStacks, printQuantityStacksToBuy, PRINT_QUANTITY_SECONDS_PER_SYNTH } from "./utils/printingQuantities";
 import { PRINT_RECIPES, printItem, printItemKey } from "./utils/printingData";
 import { normalizeItemName } from "./utils/itemLinks";
 import { loadJson, saveJson } from "./utils/storage";
@@ -102,7 +102,12 @@ export default function PrintQuantityView({ settings, onSettingsChange }: { sett
         </div>
         {state.mode === "target" && <section className="print-section">
           <h3>Expected materials needed</h3>
-          <div className="print-table-wrap"><table><thead><tr><th>Material</th><th>Expected quantity / synth</th><th>For {attempts === null ? "—" : gil(attempts)} synths</th></tr></thead><tbody>{plan.inputs.map((input) => <tr key={input.key}><td>{input.name}</td><td>{units(input.perAttempt)}</td><td>{attempts === null ? "Unavailable" : units(input.perAttempt * attempts)}</td></tr>)}</tbody></table></div>
+          <div className="print-table-wrap"><table><thead><tr><th>Material</th><th>Expected quantity / synth</th><th>For {attempts === null ? "—" : gil(attempts)} synths</th><th>Stacks to buy</th></tr></thead><tbody>{plan.inputs.map((input) => {
+            const quantity = attempts === null ? null : input.perAttempt * attempts;
+            const stackSize = printItem(input.name)?.stack;
+            const stacksToBuy = quantity === null || stackSize === undefined ? null : printQuantityStacksToBuy(quantity, stackSize);
+            return <tr key={input.key}><td>{input.name}</td><td>{units(input.perAttempt)}</td><td>{quantity === null ? "Unavailable" : units(quantity)}</td><td>{stacksToBuy === null ? "Unknown stack size" : `${gil(stacksToBuy)} (${stackSize} each)`}</td></tr>;
+          })}</tbody></table></div>
         </section>}
         {state.mode === "materials" && <section className="print-section">
           <h3>Expected output</h3>

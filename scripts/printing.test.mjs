@@ -17,7 +17,7 @@ const { createPrintingPlanner } = await import(`data:text/javascript;base64,${Bu
 const tiersBundle = buildSync({ entryPoints: [fileURLToPath(new URL("../src/utils/printingTiers.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "esm" });
 const { reachablePrintTiers, printOutcomeSkillRequirements, printTierComparisons, selectPrintTier } = await import(`data:text/javascript;base64,${Buffer.from(tiersBundle.outputFiles[0].text).toString("base64")}`);
 const quantitiesBundle = buildSync({ entryPoints: [fileURLToPath(new URL("../src/utils/printingQuantities.ts", import.meta.url))], bundle: true, write: false, platform: "node", format: "esm" });
-const { printingQuantityPlan, printAttemptsForOutput, printAttemptsFromMaterials, printQuantityDurationSeconds, printQuantityFromStacks, printQuantityStacks } = await import(`data:text/javascript;base64,${Buffer.from(quantitiesBundle.outputFiles[0].text).toString("base64")}`);
+const { printingQuantityPlan, printAttemptsForOutput, printAttemptsFromMaterials, printQuantityDurationSeconds, printQuantityFromStacks, printQuantityStacks, printQuantityStacksToBuy } = await import(`data:text/javascript;base64,${Buffer.from(quantitiesBundle.outputFiles[0].text).toString("base64")}`);
 const lumber = { ...recipe, id: 20, lvl: 1, ing: [{ n: "Log", q: 1 }], res: { n: "Lumber", q: 1 }, hq: [2, 3, 4].map((q) => ({ n: "Lumber", q })) };
 const pole = { ...recipe, id: 21, lvl: 60, ing: [{ n: "Lumber", q: 2 }], res: { n: "Pole", q: 1 }, hq: [1, 1, 1].map((q) => ({ n: "Pole", q })) };
 
@@ -37,6 +37,12 @@ test("quantity plans estimate attempts for target output and expected output fro
   assert.equal(printQuantityFromStacks(24, 99), 2376);
   assert.equal(printQuantityStacks(2376, 99), 24);
   assert.equal(printQuantityStacks(100, 99), 1.0101);
+  assert.equal(printQuantityStacksToBuy(134.55, 12), 12);
+  assert.equal(printQuantityStacksToBuy(67.275, 12), 6);
+  assert.equal(printQuantityStacksToBuy(24, 12), 2);
+  assert.equal(printQuantityStacksToBuy(0, 12), 0);
+  assert.equal(printQuantityStacksToBuy(3, 1), 3);
+  assert.equal(printQuantityStacksToBuy(10, 0), null);
   assert.equal(printQuantityFromStacks(2, 12), 24);
   assert.equal(printAttemptsFromMaterials(plan.inputs, { "elm log": 200, "wind crystal": 100 }), 100);
   assert.equal(printAttemptsFromMaterials(plan.inputs, { "elm log": 194, "wind crystal": 100 }), 99);

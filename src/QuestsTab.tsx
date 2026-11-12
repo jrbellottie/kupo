@@ -383,16 +383,32 @@ function Detail({ entry, onOpen, onBack }: { entry: Entry; onOpen: (id: string) 
           <h4 style={{ margin: "8px 0 6px", fontSize: 15 }}>Walkthrough</h4>
           <div style={{ display: "flex", flexDirection: "column", gap: 5, maxWidth: 860 }}>
             {entry.walkthrough.map((step, i) => {
-              if (step.startsWith("## ")) {
+              const wildcatZoneHeading = entry.id.startsWith("lure-of-the-wildcat-") && step.startsWith(";");
+              if (step.startsWith("## ") || wildcatZoneHeading) {
                 const maps = headingMaps(i);
+                const headingText = wildcatZoneHeading ? step.slice(1).trim().replace(/:$/, "") : step.slice(3);
                 return (
                   <div
                     key={i}
-                    style={{ fontWeight: 800, fontSize: 14, color: "#e8d47e", marginTop: 8, cursor: maps.length ? "pointer" : undefined, textDecoration: maps.length ? "underline dotted" : undefined }}
+                    style={{
+                      fontWeight: 800,
+                      fontSize: 14,
+                      color: "#e8d47e",
+                      marginTop: wildcatZoneHeading ? 12 : 8,
+                      ...(wildcatZoneHeading ? {
+                        padding: "7px 10px",
+                        background: "rgba(232, 212, 126, 0.08)",
+                        borderLeft: "3px solid #e8d47e",
+                        borderBottom: "1px solid rgba(232, 212, 126, 0.2)",
+                        borderRadius: "0 6px 6px 0",
+                      } : {}),
+                      cursor: maps.length ? "pointer" : undefined,
+                      textDecoration: maps.length ? "underline dotted" : undefined,
+                    }}
                     onMouseEnter={maps.length ? () => setActiveMapId(maps[0].id) : undefined}
                     onClick={maps.length ? () => setActiveMapId(maps[0].id) : undefined}
                   >
-                    <CoordText text={step.slice(3)} {...handlersFor(i)} />
+                    <CoordText text={headingText} {...handlersFor(i)} />
                   </div>
                 );
               }

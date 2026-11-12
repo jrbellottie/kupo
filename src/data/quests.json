@@ -9327,17 +9327,146 @@
    ],
    "mapRefs": [
     {
-     "zone": "South Gustaberg",
+     "zone": "Port Bastok",
      "mapNo": null,
-     "pos": "E-11"
+     "pos": ""
+    },
+    {
+     "zone": "Metalworks",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Bastok Markets",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Bastok Mines",
+     "mapNo": null,
+     "pos": ""
     }
    ],
    "stepRefs": [
     {
+     "step": 7,
+     "zone": "Port Bastok",
+     "mapNo": null,
+     "pos": "J-5"
+    },
+    {
+     "step": 8,
+     "zone": "Port Bastok",
+     "mapNo": null,
+     "pos": "F-5"
+    },
+    {
+     "step": 9,
+     "zone": "Port Bastok",
+     "mapNo": null,
+     "pos": "F-6"
+    },
+    {
+     "step": 10,
+     "zone": "Port Bastok",
+     "mapNo": null,
+     "pos": "E-6"
+    },
+    {
+     "step": 11,
+     "zone": "Port Bastok",
+     "mapNo": null,
+     "pos": "F-8"
+    },
+    {
+     "step": 13,
+     "zone": "Metalworks",
+     "mapNo": null,
+     "pos": "G-8"
+    },
+    {
+     "step": 14,
+     "zone": "Metalworks",
+     "mapNo": null,
+     "pos": "G-8"
+    },
+    {
+     "step": 15,
+     "zone": "Metalworks",
+     "mapNo": null,
+     "pos": "G-7"
+    },
+    {
+     "step": 16,
+     "zone": "Metalworks",
+     "mapNo": null,
+     "pos": "I-8"
+    },
+    {
+     "step": 17,
+     "zone": "Metalworks",
+     "mapNo": null,
+     "pos": "K-7"
+    },
+    {
+     "step": 19,
+     "zone": "Bastok Markets",
+     "mapNo": null,
+     "pos": "K-10"
+    },
+    {
+     "step": 20,
+     "zone": "Bastok Markets",
+     "mapNo": null,
+     "pos": "J-10"
+    },
+    {
+     "step": 21,
+     "zone": "Bastok Markets",
+     "mapNo": null,
+     "pos": "I-9"
+    },
+    {
+     "step": 22,
+     "zone": "Bastok Markets",
+     "mapNo": null,
+     "pos": "E-10"
+    },
+    {
      "step": 23,
-     "zone": "South Gustaberg",
+     "zone": "Bastok Markets",
      "mapNo": null,
      "pos": "E-11"
+    },
+    {
+     "step": 25,
+     "zone": "Bastok Mines",
+     "mapNo": null,
+     "pos": "H-5"
+    },
+    {
+     "step": 26,
+     "zone": "Bastok Mines",
+     "mapNo": null,
+     "pos": "I-6"
+    },
+    {
+     "step": 27,
+     "zone": "Bastok Mines",
+     "mapNo": null,
+     "pos": "I-7"
+    },
+    {
+     "step": 28,
+     "zone": "Bastok Mines",
+     "mapNo": null,
+     "pos": "H-6"
+    },
+    {
+     "step": 29,
+     "zone": "Bastok Mines",
+     "mapNo": null,
+     "pos": "H-9"
     }
    ],
    "headingRefs": [],
@@ -15169,8 +15298,150 @@
     "H-8",
     "I-8"
    ],
-   "mapRefs": [],
-   "stepRefs": [],
+   "mapRefs": [
+    {
+     "zone": "Ru'Lude Gardens",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Upper Jeuno",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Lower Jeuno",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Port Jeuno",
+     "mapNo": null,
+     "pos": ""
+    }
+   ],
+   "stepRefs": [
+    {
+     "step": 5,
+     "zone": "Ru'Lude Gardens",
+     "mapNo": null,
+     "pos": "H-9"
+    },
+    {
+     "step": 6,
+     "zone": "Ru'Lude Gardens",
+     "mapNo": null,
+     "pos": "G-8"
+    },
+    {
+     "step": 7,
+     "zone": "Ru'Lude Gardens",
+     "mapNo": null,
+     "pos": "H-7"
+    },
+    {
+     "step": 8,
+     "zone": "Ru'Lude Gardens",
+     "mapNo": null,
+     "pos": "G-7"
+    },
+    {
+     "step": 9,
+     "zone": "Ru'Lude Gardens",
+     "mapNo": null,
+     "pos": "I-6"
+    },
+    {
+     "step": 11,
+     "zone": "Upper Jeuno",
+     "mapNo": null,
+     "pos": "G-7"
+    },
+    {
+     "step": 12,
+     "zone": "Upper Jeuno",
+     "mapNo": null,
+     "pos": "G-8"
+    },
+    {
+     "step": 13,
+     "zone": "Upper Jeuno",
+     "mapNo": null,
+     "pos": "G-8"
+    },
+    {
+     "step": 14,
+     "zone": "Upper Jeuno",
+     "mapNo": null,
+     "pos": "H-9"
+    },
+    {
+     "step": 15,
+     "zone": "Upper Jeuno",
+     "mapNo": null,
+     "pos": "H-9"
+    },
+    {
+     "step": 17,
+     "zone": "Lower Jeuno",
+     "mapNo": null,
+     "pos": "J-7"
+    },
+    {
+     "step": 18,
+     "zone": "Lower Jeuno",
+     "mapNo": null,
+     "pos": "I-7"
+    },
+    {
+     "step": 19,
+     "zone": "Lower Jeuno",
+     "mapNo": null,
+     "pos": "H-9"
+    },
+    {
+     "step": 20,
+     "zone": "Lower Jeuno",
+     "mapNo": null,
+     "pos": "H-10"
+    },
+    {
+     "step": 21,
+     "zone": "Lower Jeuno",
+     "mapNo": null,
+     "pos": "G-10"
+    },
+    {
+     "step": 23,
+     "zone": "Port Jeuno",
+     "mapNo": null,
+     "pos": "G-8"
+    },
+    {
+     "step": 24,
+     "zone": "Port Jeuno",
+     "mapNo": null,
+     "pos": "H-8"
+    },
+    {
+     "step": 25,
+     "zone": "Port Jeuno",
+     "mapNo": null,
+     "pos": "H-8"
+    },
+    {
+     "step": 26,
+     "zone": "Port Jeuno",
+     "mapNo": null,
+     "pos": "I-8"
+    },
+    {
+     "step": 27,
+     "zone": "Port Jeuno",
+     "mapNo": null,
+     "pos": "I-8"
+    }
+   ],
    "headingRefs": [],
    "url": "https://ffxiclopedia.fandom.com/wiki/Lure_of_the_Wildcat_(Jeuno)"
   },
@@ -31667,9 +31938,24 @@
      "pos": "I-10"
     },
     {
-     "zone": "Victory Square",
+     "zone": "Southern San d'Oria",
      "mapNo": null,
-     "pos": "I-8"
+     "pos": ""
+    },
+    {
+     "zone": "Northern San d'Oria",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Port San d'Oria",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Chateau d'Oraguille",
+     "mapNo": null,
+     "pos": ""
     }
    ],
    "stepRefs": [
@@ -31680,10 +31966,124 @@
      "pos": "I-10"
     },
     {
+     "step": 9,
+     "zone": "Southern San d'Oria",
+     "mapNo": null,
+     "pos": "K-5"
+    },
+    {
+     "step": 10,
+     "zone": "Southern San d'Oria",
+     "mapNo": null,
+     "pos": "J-9"
+    },
+    {
      "step": 11,
-     "zone": "Victory Square",
+     "zone": "Southern San d'Oria",
      "mapNo": null,
      "pos": "I-8"
+    },
+    {
+     "step": 12,
+     "zone": "Southern San d'Oria",
+     "mapNo": null,
+     "pos": "I-8"
+    },
+    {
+     "step": 13,
+     "zone": "Southern San d'Oria",
+     "mapNo": null,
+     "pos": "G-8"
+    },
+    {
+     "step": 15,
+     "zone": "Northern San d'Oria",
+     "mapNo": null,
+     "pos": "J-8"
+    },
+    {
+     "step": 16,
+     "zone": "Northern San d'Oria",
+     "mapNo": null,
+     "pos": "J-8"
+    },
+    {
+     "step": 17,
+     "zone": "Northern San d'Oria",
+     "mapNo": null,
+     "pos": "I-9"
+    },
+    {
+     "step": 18,
+     "zone": "Northern San d'Oria",
+     "mapNo": null,
+     "pos": "H-8"
+    },
+    {
+     "step": 19,
+     "zone": "Northern San d'Oria",
+     "mapNo": null,
+     "pos": "E-4"
+    },
+    {
+     "step": 21,
+     "zone": "Port San d'Oria",
+     "mapNo": null,
+     "pos": "G-7"
+    },
+    {
+     "step": 22,
+     "zone": "Port San d'Oria",
+     "mapNo": null,
+     "pos": "H-8"
+    },
+    {
+     "step": 23,
+     "zone": "Port San d'Oria",
+     "mapNo": null,
+     "pos": "H-8"
+    },
+    {
+     "step": 24,
+     "zone": "Port San d'Oria",
+     "mapNo": null,
+     "pos": "H-10"
+    },
+    {
+     "step": 25,
+     "zone": "Port San d'Oria",
+     "mapNo": null,
+     "pos": "J-8"
+    },
+    {
+     "step": 27,
+     "zone": "Chateau d'Oraguille",
+     "mapNo": null,
+     "pos": "I-9"
+    },
+    {
+     "step": 28,
+     "zone": "Chateau d'Oraguille",
+     "mapNo": null,
+     "pos": "I-9"
+    },
+    {
+     "step": 29,
+     "zone": "Chateau d'Oraguille",
+     "mapNo": null,
+     "pos": "H-9"
+    },
+    {
+     "step": 30,
+     "zone": "Chateau d'Oraguille",
+     "mapNo": null,
+     "pos": "H-7"
+    },
+    {
+     "step": 31,
+     "zone": "Chateau d'Oraguille",
+     "mapNo": null,
+     "pos": "F-7"
     }
    ],
    "headingRefs": [],
@@ -38573,8 +38973,150 @@
     "G-7",
     "M-6"
    ],
-   "mapRefs": [],
-   "stepRefs": [],
+   "mapRefs": [
+    {
+     "zone": "Windurst Woods",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Windurst Walls",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Port Windurst",
+     "mapNo": null,
+     "pos": ""
+    },
+    {
+     "zone": "Windurst Waters",
+     "mapNo": 2,
+     "pos": ""
+    }
+   ],
+   "stepRefs": [
+    {
+     "step": 9,
+     "zone": "Windurst Woods",
+     "mapNo": null,
+     "pos": "H-10"
+    },
+    {
+     "step": 10,
+     "zone": "Windurst Woods",
+     "mapNo": null,
+     "pos": "J-13"
+    },
+    {
+     "step": 11,
+     "zone": "Windurst Woods",
+     "mapNo": null,
+     "pos": "I-10"
+    },
+    {
+     "step": 12,
+     "zone": "Windurst Woods",
+     "mapNo": null,
+     "pos": "I-5"
+    },
+    {
+     "step": 13,
+     "zone": "Windurst Woods",
+     "mapNo": null,
+     "pos": "J-3"
+    },
+    {
+     "step": 15,
+     "zone": "Windurst Walls",
+     "mapNo": null,
+     "pos": "J-11"
+    },
+    {
+     "step": 16,
+     "zone": "Windurst Walls",
+     "mapNo": null,
+     "pos": "K-7"
+    },
+    {
+     "step": 17,
+     "zone": "Windurst Walls",
+     "mapNo": null,
+     "pos": "J-6"
+    },
+    {
+     "step": 18,
+     "zone": "Windurst Walls",
+     "mapNo": null,
+     "pos": "H-3"
+    },
+    {
+     "step": 19,
+     "zone": "Windurst Walls",
+     "mapNo": null,
+     "pos": "F-5"
+    },
+    {
+     "step": 21,
+     "zone": "Windurst Waters",
+     "mapNo": 2,
+     "pos": "G-4"
+    },
+    {
+     "step": 22,
+     "zone": "Windurst Waters",
+     "mapNo": 2,
+     "pos": "F-8"
+    },
+    {
+     "step": 23,
+     "zone": "Windurst Waters",
+     "mapNo": 2,
+     "pos": "G-9"
+    },
+    {
+     "step": 24,
+     "zone": "Windurst Waters",
+     "mapNo": 2,
+     "pos": "F-9"
+    },
+    {
+     "step": 25,
+     "zone": "Windurst Waters",
+     "mapNo": 2,
+     "pos": "F-10"
+    },
+    {
+     "step": 27,
+     "zone": "Port Windurst",
+     "mapNo": null,
+     "pos": "E-7"
+    },
+    {
+     "step": 28,
+     "zone": "Port Windurst",
+     "mapNo": null,
+     "pos": "E-7"
+    },
+    {
+     "step": 29,
+     "zone": "Port Windurst",
+     "mapNo": null,
+     "pos": "F-6"
+    },
+    {
+     "step": 30,
+     "zone": "Port Windurst",
+     "mapNo": null,
+     "pos": "G-7"
+    },
+    {
+     "step": 31,
+     "zone": "Port Windurst",
+     "mapNo": null,
+     "pos": "M-6"
+    }
+   ],
    "headingRefs": [],
    "url": "https://ffxiclopedia.fandom.com/wiki/Lure_of_the_Wildcat_(Windurst)"
   },

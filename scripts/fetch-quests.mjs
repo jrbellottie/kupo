@@ -268,6 +268,33 @@ const HEADING_MAPS = {
   },
 };
 
+const WILDCAT_SECTIONS = {
+  "Lure of the Wildcat (Bastok)": [
+    [";Port Bastok", "Port Bastok"],
+    [";Metalworks", "Metalworks"],
+    [";Bastok Markets", "Bastok Markets"],
+    [";Bastok Mines", "Bastok Mines"],
+  ],
+  "Lure of the Wildcat (Jeuno)": [
+    [";Ru'Lude Gardens", "Ru'Lude Gardens"],
+    [";Upper Jeuno", "Upper Jeuno"],
+    [";Lower Jeuno", "Lower Jeuno"],
+    [";Port Jeuno", "Port Jeuno"],
+  ],
+  "Lure of the Wildcat (San d'Oria)": [
+    [";Southern San d'Oria", "Southern San d'Oria"],
+    [";Northern San d'Oria", "Northern San d'Oria"],
+    [";Port San d'Oria", "Port San d'Oria"],
+    [";Chateau d'Oraguille", "Chateau d'Oraguille"],
+  ],
+  "Lure of the Wildcat (Windurst)": [
+    [";Windurst Woods", "Windurst Woods"],
+    [";Windurst Walls", "Windurst Walls"],
+    [";Windurst Waters", "Windurst Waters", 2],
+    [";Port Windurst", "Port Windurst"],
+  ],
+};
+
 const SUMMARY_OVERRIDES = {
   "The Last Verse": "This is the last chapter in both the Chains of Promathia and Rise of the Zilart storylines. It is automatically activated after finishing Apocalypse Nigh. It does not have a mission description and simply signifies that you have finished the storylines.",
 };
@@ -1056,6 +1083,35 @@ for (const fix of COORD_FIXES) {
       e.mapRefs.push({ zone: fix.zone, mapNo: fix.mapNo ?? null, pos });
   }
   console.log(`  corrected ${fix.page} step ${i}: ${fix.wrong ?? pos} -> ${pos}${fix.zone ? ` @ ${fix.zone}${fix.mapNo != null ? ` map ${fix.mapNo}` : ""}` : ""}`);
+}
+
+for (const e of [...quests, ...missions]) {
+  const sections = WILDCAT_SECTIONS[e.pageTitle];
+  if (!sections) continue;
+  let zone = null;
+  let mapNo = null;
+  for (const [step, text] of e.walkthrough.entries()) {
+    const section = sections.find(([heading]) => text.startsWith(heading));
+    if (section) [ , zone, mapNo = null] = section;
+    if (!zone) continue;
+    for (const match of text.matchAll(/[A-P]-\d{1,2}/g)) {
+      const pos = match[0];
+      const incorrectRefs = e.stepRefs.filter((r) => r.step === step && r.pos === pos && (r.zone !== zone || (mapNo != null && r.mapNo !== mapNo)));
+      e.stepRefs = e.stepRefs.filter((r) => !incorrectRefs.includes(r));
+      for (const ref of incorrectRefs) {
+        if (!e.stepRefs.some((r) => r.zone === ref.zone && r.pos === ref.pos)) {
+          e.mapRefs = e.mapRefs.filter((r) => r.zone !== ref.zone || r.pos !== ref.pos);
+        }
+      }
+      if (!e.stepRefs.some((r) => r.step === step && r.pos === pos && r.zone === zone && (mapNo == null || r.mapNo === mapNo))) {
+        e.stepRefs.push({ step, zone, mapNo, pos });
+      }
+    }
+    if (!e.mapRefs.some((r) => r.zone === zone && r.mapNo === mapNo)) {
+      e.mapRefs = e.mapRefs.filter((r) => r.zone !== zone || r.pos !== "");
+      e.mapRefs.push({ zone, mapNo, pos: "" });
+    }
+  }
 }
 
 // Pin each assault to its arena map so the map panel shows it (assault pages have no {{Location}} refs)

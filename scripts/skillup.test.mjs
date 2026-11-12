@@ -675,6 +675,49 @@ test("200-catch sessions retain canceled bites, remove their gains, and advance 
   assert.deepEqual(fishing.calculatePoolSession(settings), all);
 });
 
+test("automatic skill-up cancellations use entered base skill and preserve manual selections", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Tarutaru Fishing Rod");
+  const fish = [
+    { ...fishingSnapshot.fish.Crayfish, skillCap: 7 },
+    { ...fishingSnapshot.fish["Moat Carp"], skillCap: 11 },
+    { ...fishingSnapshot.fish["Giant Catfish"], skillCap: 57 },
+    { ...fishingSnapshot.fish["Black Eel"], skillCap: 58 },
+  ].map(member => ({ ...member, hookBonus: 80 }));
+  const manual = ["Moat Carp"];
+  const excluded = fishing.getSkillupExcludedFish(7.9, "West Ronfaure", rod.rod, fish, manual, true);
+  assert.deepEqual(excluded, ["Moat Carp", "Crayfish", "Black Eel"]);
+  assert.deepEqual(manual, ["Moat Carp"]);
+  assert.deepEqual(fishing.getSkillupExcludedFish(7.9, "West Ronfaure", rod.rod, fish, manual, false), manual);
+  assert.deepEqual(fishing.getSkillupExcludedFish(6, "West Ronfaure", rod.rod, fish, manual, true),
+    ["Moat Carp", "Giant Catfish", "Black Eel"]);
+  assert.deepEqual(fishing.getSkillupExcludedFish(7, "West Ronfaure", rod.rod, fish, ["Crayfish"], true),
+    ["Crayfish", "Black Eel"]);
+});
+
+test("auto-canceled pool competitors still bite but add no catches, fatigue or skill", () => {
+  const rod = fishingSnapshot.rods.find(row => row.rod === "Tarutaru Fishing Rod");
+  const fish = ["Crayfish", "Moat Carp"].map(name => ({ ...fishingSnapshot.fish[name], hookBonus: 80 }));
+  const settings = { baseSkill: 7, bonusSkill: 8, zone: "West Ronfaure", rod, fish,
+    options: { city: false, hasItems: false, hasMobs: false, difficulty: 0 } };
+  const excludedFish = fishing.getSkillupExcludedFish(settings.baseSkill, settings.zone, rod.rod, fish, [], true);
+  assert.deepEqual(excludedFish, ["Crayfish"]);
+  const auto = fishing.calculatePoolSession({ ...settings, excludedFish });
+  const manual = fishing.calculatePoolSession({ ...settings, excludedFish: ["Crayfish"] });
+  assert.deepEqual(auto, manual);
+  assert.equal(auto.catches[0], 0);
+  assert.equal(auto.gains[0], 0);
+  assert.ok(auto.skillGain > 0);
+  const removed = fishing.calculatePoolSession({ ...settings, fish: fish.slice(1) });
+  assert.ok(auto.casts > removed.casts);
+  assert.ok(auto.catchTimeSeconds > removed.catchTimeSeconds);
+  assert.ok(Math.abs(auto.fatigueUsed - removed.fatigueUsed) < 1e-8);
+  assert.deepEqual(fishing.calculatePoolSession(settings), fishing.calculatePoolSession({
+    ...settings, excludedFish: fishing.getSkillupExcludedFish(settings.baseSkill, settings.zone, rod.rod, fish, [], false),
+  }));
+  const none = fishing.getSkillupExcludedFish(100, settings.zone, rod.rod, fish, [], true);
+  assert.equal(fishing.calculatePoolSession({ ...settings, baseSkill: 100, excludedFish: none }).catchTimeSeconds, null);
+});
+
 test("planner groups equivalent zone rows while retaining every sublocation and bait", () => {
   const first = {
     zone: "East Sarutabaruta", fish: "Moat Carp", rod: "Carbon Fishing Rod",

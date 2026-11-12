@@ -36,13 +36,13 @@ Track notorious monster spawn windows and lottery placeholders, with reminders t
 Quickly add reminders for guild openings, Tenshodo hours, the next Vana'diel day, and scheduled boat or airship journeys, with each timer button showing its offset and local alert time. Transport times are timetable estimates, not live tracking.
 
 ### 🔢 Counters
-Keep manual tallies of session results, including success rates and synthesis outcomes.
+Track session outcomes and synthesis results, including per-craft skill-up counts and rates saved across app reloads.
 
 ### 🪝 Lu Shang
 Track progress toward the 10,000 moat carp needed for Lu Shang's Fishing Rod.
 
 ### 🐟 Fish
-Explore fish, bait, rods, and locations, plan fishing skill-ups, and compare estimated fishing time and direct-vendor returns across spots, with fish prices and crafting options using the pinned reference ruleset.
+Explore fish, bait, rods, and locations, plan fishing skill-ups with optional automatic cancellation of non-skill-up fish in estimates, and compare estimated fishing time and direct-vendor returns across spots using the pinned reference ruleset.
 
 ### 🪣 Clam
 Browse clamming locations and possible rewards, with information to help manage bucket weight and equipment choices.
@@ -51,7 +51,7 @@ Browse clamming locations and possible rewards, with information to help manage 
 Compare chocobo digging locations and estimated returns, including ore, weather and night-drop rates under their required conditions, alongside clearly labeled base-source ability-layer references.
 
 ### Chocobo Raising
-Save your egg's start time and use trainer reports to plan meals, track daily activities, and estimate training through day 128 with digging and racing presets. An optional non-yellow goal estimates color odds and plans worm feedings from your starting egg. Training follows a pinned reference ruleset, racing advice is community-based, and live availability and outcomes may differ.
+Save your egg's start time and record food, stories, and completed care to maintain a running stat estimate, corrected by trainer reports, and plan remaining training through day 128 with digging and racing presets. An optional non-yellow goal estimates color odds and plans worm feedings from your starting egg. Training follows a pinned reference ruleset, racing advice is community-based, and live availability and outcomes may differ.
 
 ### 🌦️ Weather
 Look ahead at estimated weather and elemental-ore opportunities, and set reminders for upcoming windows. Forecasts are not guaranteed in-game conditions.
@@ -209,6 +209,8 @@ npm run test:items
 ```
 
 Metadata generation reads committed source revisions, records input hashes, and uses `scripts/lsb-data/synth_recipes.sql` for recipe aliases. Reapply pinned overrides after refreshing base metadata; `--check` verifies the saved reference snapshot. Wiki imports save progress in batches and resolve missing titles only through unique exact normalized matches, preserving HQ identities.
+
+The HELM reference is independently pinned to [source revision fffca036](https://github.com/phoenixffxi/Phoenix/tree/fffca036344db11481008895ca81a0d31eb03ac9), checked November 6, 2026 against the [logging reference](https://wiki.phoenix-xi.com/Logging). Its pre-WotG pools include the jungle and volcanic-zone item removals and corrected Worker Hose logging modifier; the optional WotG-zone filter does not change that item-era assumption. `source:generate` refreshes HELM alongside the other independently pinned data, with input hashes and equipment corrections recorded in `src/data/phoenix.json`. Numeric tables and mechanics are credited to Darkstar, LandSandBoat and source-fork contributors under the [source license](https://github.com/phoenixffxi/Phoenix/blob/fffca036344db11481008895ca81a0d31eb03ac9/LICENSE). Public source does not establish live deployment.
 
 Guild selling uses the pinned stock definitions, era overrides, and stock-based payout rules. Some target stocks are source assumptions. Opening reminders enable weekly holidays by default to match confirmed live behavior, while retaining the public source's disabled-holidays setting as provenance; the Guilds view lets you change this assumption. Validate guild calculations with `npm run test:guilds`.
 

@@ -50,6 +50,23 @@ test("neutral item-source wording preserves mechanics, game names and repository
   assert.match(data.getItemSources("Fire Ore").digging[0].condition, /Journeyman.*waxing moon 6-21%/);
 });
 
+test("refreshed HELM pools and Worker Hose correction reach shared item consumers", () => {
+  for (const [name, kind, zone] of [
+    ["Butterpear", "Logging", "Yuhtunga Jungle"],
+    ["Kapor Log", "Logging", "Yuhtunga Jungle"],
+    ["Slab of Plumbago", "Mining", "Halvung"],
+    ["Slab of Plumbago", "Mining", "Mount Zhayolm"],
+  ]) assert.ok(!data.getItemSources(name).helm.some(row => row.kind === kind && row.zone === zone), `${zone}: ${name}`);
+  const rattan = data.getItemSources("Piece of Rattan Lumber").helm.find(row => row.kind === "Logging" && row.zone === "Yuhtunga Jungle");
+  assert.ok(rattan);
+  assert.ok(Math.abs(rattan.pct - 100 * 1840 / 7320) < 1e-10);
+  const worker = data.catalogData.items[14298];
+  assert.deepEqual(worker.modifiers, [[1, 8], [1212, 1], [1213, 1]]);
+  assert.deepEqual(worker.modifiers, snapshot.helmItemDetails[14298].modifiers);
+  assert.equal(worker.name, "Worker Hose");
+  assert.equal(worker.equipment.level, 15);
+});
+
 test("GP cap quantities round up to the minimum number of items, not gil or synths", () => {
   assert.equal(data.itemsToCapGuildPoints(100, 1500), 15);
   assert.equal(data.itemsToCapGuildPoints(100, 1501), 16);

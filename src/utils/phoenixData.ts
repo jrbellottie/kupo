@@ -20,12 +20,13 @@ export type ItemMetadata = {
 };
 const overrides = phoenix.items as Record<string, EconomyItem>;
 const detailOverrides = phoenix.itemDetails as Record<string, Partial<ItemMetadata>>;
+const helmDetailOverrides = phoenix.helmItemDetails as Record<string, Partial<ItemMetadata>>;
 const baseItems: Record<string, ItemMetadata> = baseCatalog.items;
 const extraItems = Object.fromEntries(Object.entries(overrides).filter(([, item]) => item.name).map(([id, item]) => [id, { category: 0, ...item, name: item.name! }]));
 export const catalogData = {
   ...baseCatalog,
   names: { ...baseCatalog.names, ...Object.fromEntries(Object.entries(extraItems).map(([id, item]) => [item.name.toLowerCase(), Number(id)])) } as Record<string, number>,
-  items: { ...Object.fromEntries(Object.entries(baseItems).map(([id, item]) => [id, { ...item, ...overrides[id], ...detailOverrides[id] }])), ...extraItems } as Record<string, ItemMetadata>,
+  items: { ...Object.fromEntries(Object.entries(baseItems).map(([id, item]) => [id, { ...item, ...overrides[id], ...detailOverrides[id], ...helmDetailOverrides[id] }])), ...extraItems } as Record<string, ItemMetadata>,
 };
 export const PHOENIX_GUILD_NPCS = new Set(phoenix.guildNpcs);
 export const shopsData = [...baseShops.filter(row => !PHOENIX_GUILD_NPCS.has(row.npc) && row.npc !== "Valeriano"), ...phoenix.guildOffers.filter(row => row.stocked), ...phoenix.valerianoOffers];

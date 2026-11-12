@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { styles } from "./styles";
 import PresetTimerDetails from "./PresetTimerDetails";
 import {
-  createGuildDecayTimer,
+  createGuildDecayTimers,
+  guildDecayBuyPlanByEarthTime,
+  guildDecayTimerSchedule,
   GUILD_DECAY_MAX_TIMER_DAYS,
   GUILD_DECAY_OFFERS,
   GUILD_DECAY_PREVIEW_DAYS,
@@ -15,16 +17,19 @@ import {
   type GuildDecayInputMode,
   type GuildDecaySelection,
 } from "./utils/guildDecay";
+import { DEFAULT_GUILD_SHOP_HOLIDAYS } from "./utils/guildSelling";
 import { loadJson, saveJson } from "./utils/storage";
+import { formatLocalDateTime, pad2, parseLocalDateTimeToMs } from "./utils/time";
+import { weekdayStyle } from "./utils/weekday";
 import type { EarthTimer } from "./types";
 import type { Calibration } from "./vanadiel";
 
 type GuildDecayTabProps = {
   cal: Calibration;
   nowMs: number;
-  offsetHours: number;
+  offsetVanaHours: number;
   offsetDescription: string;
-  onAddTimer: (timer: EarthTimer) => void;
+  onAddTimers: (timers: EarthTimer[]) => void;
 };
 
 const STORAGE_KEY = "ffxi_guild_decay_v3";
@@ -58,12 +63,12 @@ function loadSelection(): GuildDecaySelection {
   return DEFAULT_SELECTION;
 }
 
-export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescription, onAddTimer }: GuildDecayTabProps) {
+export default function GuildDecayTab({ cal, nowMs, offsetVanaHours, offsetDescription, onAddTimers }: GuildDecayTabProps) {
   const [selection, setSelection] = useState<GuildDecaySelection>(loadSelection);
   const [targetDay, setTargetDay] = useState(1);
-  const timerOffsetDescription = offsetHours === 0
-    ? "at the selected day boundary"
-    : `${offsetDescription} before the selected day boundary`;
+  const [targetLocalDateTime, setTargetLocalDateTime] = useState("");
+  const [holidays] = useState<boolean>(() =>
+    loadJson<boolean>("ffxi_guild_holidays_v1", DEFAULT_GUILD_SHOP_HOLIDAYS));
   const guildOffers = GUILD_DECAY_OFFERS.filter(offer => offer.guild === selection.guild);
   const itemNames = [...new Set(guildOffers.map(offer => offer.n))].sort((first, second) => first.localeCompare(second));
   const itemOffers = guildOffers.filter(offer => offer.n === selection.item);
@@ -87,6 +92,27 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
     : guildPriceAfterDays(selectedOffer, selection, targetDay);
   const canSetTargetTimer = !error && !targetDayError && selectedOffer !== undefined
     && targetPrice !== null;
+  const timerSchedule = (days: number, offset = offsetVanaHours) => {
+    if (!selectedOffer || error || !Number.isSafeInteger(days) || days < 1 || days > GUILD_DECAY_MAX_TIMER_DAYS) {
+      return null;
+    }
+    return guildDecayTimerSchedule(selectedOffer, days, nowMs, cal, offset, holidays);
+  };
+  const shopHours = timerSchedule(1);
+  const targetSchedule = timerSchedule(targetDay);
+  const targetOpeningSchedule = timerSchedule(targetDay, 0);
+  const timerPrice = (forecastDays: number) => selectedOffer
+    ? guildPriceAfterDays(selectedOffer, selection, Math.min(forecastDays, GUILD_DECAY_MAX_TIMER_DAYS))
+    : null;
+  const targetLocalEarthMs = parseLocalDateTimeToMs(targetLocalDateTime);
+  const targetLocalTimeError = targetLocalDateTime
+    && (targetLocalEarthMs === undefined || targetLocalEarthMs <= nowMs)
+    ? "Choose a future local date and time."
+    : null;
+  const buyPlan = useMemo(() => {
+    if (!selectedOffer || error || targetLocalTimeError || targetLocalEarthMs === undefined) return null;
+    return guildDecayBuyPlanByEarthTime(selectedOffer, selection, nowMs, targetLocalEarthMs, cal);
+  }, [cal, error, nowMs, selectedOffer, selection, targetLocalEarthMs, targetLocalTimeError]);
   const changeGuild = (guild: string) => {
     const firstOffer = GUILD_DECAY_OFFERS.find(offer => offer.guild === guild);
     if (!firstOffer) throw new Error(`No guild shop offers are available for ${guild}.`);
@@ -104,13 +130,7 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
   };
   const addTimer = (days: number) => {
     if (!selectedOffer) throw new Error("Choose a guild item and shop before setting a timer.");
-    onAddTimer(createGuildDecayTimer(selectedOffer, selection, days, nowMs, cal, offsetHours));
-  };
-  const timerFireAt = (days: number) => {
-    if (!selectedOffer || error || !Number.isSafeInteger(days) || days < 1 || days > GUILD_DECAY_MAX_TIMER_DAYS) {
-      return null;
-    }
-    return createGuildDecayTimer(selectedOffer, selection, days, nowMs, cal, offsetHours).targetEarthMs;
+    onAddTimers(createGuildDecayTimers(selectedOffer, selection, days, nowMs, cal, offsetVanaHours, holidays));
   };
   const setQuantityBought = (value: number) => setSelection(previous => ({ ...previous, quantityBought: value }));
   const setCurrentPrice = (value: number) => setSelection(previous => ({ ...previous, currentPrice: value }));
@@ -180,7 +200,10 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
           : <>Current price: <strong>{selection.currentPrice.toLocaleString()} gil</strong>; estimated shelf stock is
               {" "}<strong>{priceEstimate?.estimatedStock}</strong> of {selectedOffer.targetStock}.</>}
         {" "}The current day&apos;s quote is locked; stock is replenished by {selectedOffer.restockRate} items per Vana&apos;diel day,
-        up to the target. Timer fires {timerOffsetDescription}.
+        up to the target. Preset timers add {offsetVanaHours === 0
+          ? "one alert at"
+          : "one alert at the selected offset before and another at"} the {selectedOffer.npc} opening ({shopHours?.openingHour}:00–
+        {shopHours?.closingHour}:00 Vana&apos;diel); weekly holidays are {holidays ? "observed" : "not observed"}.
       </p>
       {priceEstimate && !priceEstimate.exact && <p role="status" style={styles.sub}>
         That price is not on the exact item curve. The closest source price is {priceEstimate.sourcePrice.toLocaleString()} gil
@@ -207,15 +230,38 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
               <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>—</td>
             </tr>
             {preview?.days.map(({ day, stock, price }) => {
-              const fireAtMs = timerFireAt(day);
+              const schedule = timerSchedule(day);
+              const openingSchedule = timerSchedule(day, 0);
+              const openingPrice = schedule ? timerPrice(schedule.forecastDays) : null;
               return <tr key={day}>
                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>After {day} {day === 1 ? "day" : "days"}</td>
                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>{stock}</td>
                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>{price.toLocaleString()} gil</td>
                 <td style={{ padding: "8px 10px", borderBottom: "1px solid #333" }}>
                   <button type="button" style={styles.buttonCompact} onClick={() => addTimer(day)}>Set timer</button>
-                  {fireAtMs !== null && <PresetTimerDetails offsetText={offsetDescription} offsetValue={offsetHours}
-                    reference="the selected guild day boundary" fireAtMs={fireAtMs} nowMs={nowMs} />}
+                  {offsetVanaHours > 0 && schedule && <>
+                    <div style={{ ...styles.sub, marginTop: 4, fontWeight: 700 }}>Offset reminder</div>
+                    <PresetTimerDetails offsetText={offsetDescription} offsetValue={offsetVanaHours}
+                      reference={`${selectedOffer.npc} opening`} fireAtMs={schedule.targetEarthMs} nowMs={nowMs} />
+                    <div style={styles.sub}>
+                      Offset fires in Vana&apos;diel: <span style={weekdayStyle(schedule.fireWeekday)}>{schedule.fireWeekday}</span>
+                      {" "}{pad2(schedule.fireHour)}:{pad2(schedule.fireMinute)}
+                    </div>
+                  </>}
+                  {openingSchedule && <>
+                    <div style={{ ...styles.sub, marginTop: 4, fontWeight: 700 }}>Guild opening alarm</div>
+                    <PresetTimerDetails offsetText="" offsetValue={0}
+                      reference={`${selectedOffer.npc} opening`} fireAtMs={openingSchedule.targetEarthMs} nowMs={nowMs} />
+                    <div style={styles.sub}>
+                      Opens in Vana&apos;diel: <span style={weekdayStyle(openingSchedule.fireWeekday)}>{openingSchedule.fireWeekday}</span>
+                      {" "}{pad2(openingSchedule.fireHour)}:{pad2(openingSchedule.fireMinute)}
+                    </div>
+                  </>}
+                  {schedule?.closedWeekday && <div role="status" style={{ ...styles.sub, color: "#ffcc66", opacity: 1 }}>
+                    Closed on <span style={weekdayStyle(schedule.closedWeekday)}>{schedule.closedWeekday}</span>; moved to the
+                    {" "}<span style={weekdayStyle(schedule.openingWeekday)}>{schedule.openingWeekday}</span> opening after {schedule.forecastDays} game days.
+                    Opening estimate: {openingPrice?.toLocaleString()} gil.
+                  </div>}
                 </td>
               </tr>;
             })}
@@ -244,11 +290,67 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
           <button type="button" style={styles.buttonPrimary} disabled={!canSetTargetTimer} onClick={() => addTimer(targetDay)}>
             Set timer for this day
           </button>
-          {canSetTargetTimer && <PresetTimerDetails offsetText={offsetDescription} offsetValue={offsetHours}
-            reference="the selected guild day boundary" fireAtMs={timerFireAt(targetDay)!} nowMs={nowMs} />}
+          {offsetVanaHours > 0 && targetSchedule && <>
+            <div style={{ ...styles.sub, marginTop: 4, fontWeight: 700 }}>Offset reminder</div>
+            <PresetTimerDetails offsetText={offsetDescription} offsetValue={offsetVanaHours}
+              reference={`${selectedOffer.npc} opening`} fireAtMs={targetSchedule.targetEarthMs} nowMs={nowMs} />
+          </>}
+          {canSetTargetTimer && targetOpeningSchedule && <>
+            <div style={{ ...styles.sub, marginTop: 4, fontWeight: 700 }}>Guild opening alarm</div>
+            <PresetTimerDetails offsetText="" offsetValue={0}
+              reference={`${selectedOffer.npc} opening`} fireAtMs={targetOpeningSchedule.targetEarthMs} nowMs={nowMs} />
+          </>}
         </div>
       </div>
+      {offsetVanaHours > 0 && targetSchedule && <p style={styles.sub}>
+        Offset fires in Vana&apos;diel: <span style={weekdayStyle(targetSchedule.fireWeekday)}>{targetSchedule.fireWeekday}</span>
+        {" "}{pad2(targetSchedule.fireHour)}:{pad2(targetSchedule.fireMinute)}
+      </p>}
+      {targetOpeningSchedule && <p style={styles.sub}>
+        Opens in Vana&apos;diel: <span style={weekdayStyle(targetOpeningSchedule.fireWeekday)}>{targetOpeningSchedule.fireWeekday}</span>
+        {" "}{pad2(targetOpeningSchedule.fireHour)}:{pad2(targetOpeningSchedule.fireMinute)}
+      </p>}
+      {targetSchedule?.closedWeekday && <p role="status" style={{ ...styles.sub, color: "#ffcc66", opacity: 1 }}>
+        Closed on <span style={weekdayStyle(targetSchedule.closedWeekday)}>{targetSchedule.closedWeekday}</span>; the reminder moves to the
+        {" "}<span style={weekdayStyle(targetSchedule.openingWeekday)}>{targetSchedule.openingWeekday}</span> opening after
+        {" "}{targetSchedule.forecastDays} game days. Opening estimate: {timerPrice(targetSchedule.forecastDays)?.toLocaleString()} gil.
+      </p>}
       {targetDayError && <p role="alert" style={styles.errorText}>{targetDayError}</p>}
+
+      <div style={{ ...styles.subCard, display: "grid", gap: 10 }}>
+        <div>
+          <h4 style={{ margin: "0 0 6px" }}>Buy quantity by target time</h4>
+          <p style={styles.sub}>
+            Choose a future local time to see the most you can buy now and still have the shop fully restocked by then.
+            The estimate counts Vana&apos;diel day refreshes between now and your target.
+          </p>
+        </div>
+        <label style={{ ...styles.field, width: 260 }}>
+          <span style={styles.label}>Target local date and time</span>
+          <input style={styles.input} type="datetime-local" min={formatLocalDateTime(nowMs).slice(0, 16)}
+            value={targetLocalDateTime} onChange={event => setTargetLocalDateTime(event.target.value)} />
+        </label>
+        {targetLocalTimeError && <p role="alert" style={styles.errorText}>{targetLocalTimeError}</p>}
+        {buyPlan && selectedOffer && targetLocalEarthMs !== undefined && <div role="status" aria-live="polite" style={styles.sub}>
+          <div>
+            {buyPlan.maxItemsToBuy === null
+              ? <>Not enough time for a full restock: even with no additional purchase, stock is estimated at
+                  {" "}{buyPlan.stockAtTargetWithoutPurchase} of {selectedOffer.targetStock} by {new Date(targetLocalEarthMs).toLocaleString()}.</>
+              : buyPlan.maxItemsToBuy === 0
+                ? <>Buy 0 items. The current stock is already expected to fully restock by {new Date(targetLocalEarthMs).toLocaleString()}.</>
+                : <>Buy up to <strong>{buyPlan.maxItemsToBuy}</strong> item{buyPlan.maxItemsToBuy === 1 ? "" : "s"} now.
+                    That is the most you can buy and still reach full stock by {new Date(targetLocalEarthMs).toLocaleString()}.</>}
+          </div>
+          <div>
+            {buyPlan.refreshCount} Vana&apos;diel day refresh{buyPlan.refreshCount === 1 ? "" : "es"} before the target;
+            {" "}current stock estimate {buyPlan.currentStockMin === buyPlan.currentStockMax
+              ? buyPlan.currentStockMin
+              : `${buyPlan.currentStockMin}–${buyPlan.currentStockMax}`} of {selectedOffer.targetStock}.
+          </div>
+          {selection.inputMode === "currentPrice" && buyPlan.currentStockMin !== buyPlan.currentStockMax
+            && <div>Rounded prices can match multiple stock levels; the estimate uses the lowest match to avoid overstating the safe purchase amount.</div>}
+        </div>}
+      </div>
 
       <details style={styles.subCard}>
         <summary>How the source price formula works</summary>
@@ -257,7 +359,9 @@ export default function GuildDecayTab({ cal, nowMs, offsetHours, offsetDescripti
           <p>Let <code>F</code> be the item&apos;s price floor, <code>M</code> its maximum stock, <code>B</code> its empty-shelf price, and <code>S</code> its stock. The default <code>F</code> is 75% of <code>M</code>, unless the item overrides it; the curve&apos;s knee is <code>2F/3</code>.</p>
           <p><code>S ≤ 2F/3</code>: <code>floor(B × (125 − floor(150S/F)) / 125)</code><br />
             <code>S &gt; 2F/3</code>: <code>floor(B × (200 − floor(100(S − 2F/3)/(M − 2F/3))) / 1000)</code></p>
-          <p>The timer fires {timerOffsetDescription}. Actual prices can differ if other players change stock; the new quote is applied when the shop refreshes.</p>
+          <p>Preset timers alert {offsetVanaHours === 0
+            ? "when the guild opens"
+            : `${offsetDescription} before and again when the guild opens`}. Actual prices can differ if other players change stock; the new quote is applied when the shop refreshes.</p>
         </div>
       </details>
     </>}

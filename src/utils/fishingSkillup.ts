@@ -357,6 +357,18 @@ export function calculatePoolSkillup(
   return { gains, totalGain: gains.reduce((sum, gain) => sum + gain, 0) };
 }
 
+export function getSkillupExcludedFish(
+  baseSkill: number, zone: string, rodName: string, fish: SkillupFish[],
+  manuallyExcluded: string[], cancelNonSkillupFish: boolean,
+): string[] {
+  if (!cancelNonSkillupFish) return manuallyExcluded;
+  return [...new Set([
+    ...manuallyExcluded,
+    ...fish.filter(member => !calculateSkillup(baseSkill, member.skillCap, zone, rodName).eligible)
+      .map(member => member.fish),
+  ])];
+}
+
 export function calculateSkillup(baseSkill: number, fishLevel: number, zone: string, rodName: string) {
   const skill = clamp(Math.floor(baseSkill), 0, 200);
   const difference = fishLevel - skill;

@@ -14,6 +14,7 @@ import {
   SkillupRod,
   calculateRodRisk,
   calculateSkillup,
+  getSkillupExcludedFish,
   getRodHiddenSuccessBonus,
   calculateCastOdds,
   calculatePoolSkillup,
@@ -464,6 +465,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     uFishSeconds: string;
     uOtherSeconds: string;
     uExcludedFish: string[];
+    uCancelNonSkillupFish: boolean;
     uBonusSkill: string;
     uSelectedRods: string[];
     uIncludeCop: boolean;
@@ -515,6 +517,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     uFishSeconds: String(DEFAULT_FISHING_TIMING.fishSeconds),
     uOtherSeconds: String(DEFAULT_FISHING_TIMING.otherSeconds),
     uExcludedFish: [],
+    uCancelNonSkillupFish: false,
     uBonusSkill: "5",
     uSelectedRods: SKILLUP_ROD_NAMES,
     uIncludeCop: true,
@@ -625,6 +628,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
   const [uFishSeconds, setUFishSeconds] = useState(initialUi.uFishSeconds);
   const [uOtherSeconds, setUOtherSeconds] = useState(initialUi.uOtherSeconds);
   const [uExcludedFish, setUExcludedFish] = useState(initialUi.uExcludedFish);
+  const [uCancelNonSkillupFish, setUCancelNonSkillupFish] = useState(initialUi.uCancelNonSkillupFish);
   function togglePoolFish(fish: string) {
     setUExcludedFish(previous => previous.includes(fish)
       ? previous.filter(name => name !== fish) : [...previous, fish]);
@@ -712,6 +716,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
       uFishSeconds,
       uOtherSeconds,
       uExcludedFish,
+      uCancelNonSkillupFish,
       uBonusSkill,
       uSelectedRods,
       uIncludeCop,
@@ -762,6 +767,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     uFishSeconds,
     uOtherSeconds,
     uExcludedFish,
+    uCancelNonSkillupFish,
     uBonusSkill,
     uSelectedRods,
     uIncludeCop,
@@ -1235,7 +1241,6 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     const availableRods = SKILLUP_RODS.filter((rod) => selectedRodNames.has(rod.rod));
 
     const rows: SkillupRow[] = [];
-    const excludedFish = uExcludedFish;
     const estimates = new Map<string, {
       fishPct: number; itemPct: number; mobPct: number; nothingPct: number;
       targetPct: number[]; names: string[]; gains: number[]; totalGain: number; itemHazards: string;
@@ -1277,6 +1282,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
           };
           const odds = calculateCastOdds(effectiveSkill, rod, members, options);
           const gains = calculatePoolSkillup(baseSkill, effectiveSkill, pool.zone, rod, members, odds.targetPct, pool.kind);
+          const excludedFish = getSkillupExcludedFish(baseSkill, pool.zone, rod.rod, members, uExcludedFish, uCancelNonSkillupFish);
           const session = calculatePoolSession({ baseSkill, bonusSkill, zone: pool.zone, rod, fish: members, options, baitKind: pool.kind, excludedFish, timing: { fishSeconds, otherSeconds } });
           const retainedGains = gains.gains.map((gain, index) => excludedFish.includes(members[index].fish) ? 0 : gain);
           const itemHazards = items.filter(item => calculateRodRisk(effectiveSkill, item, rod).breakPct > 0).map(item => item.fish).join(", ");
@@ -1304,7 +1310,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
         const candidate: SkillupRow = {
           ...pool,
           catchTimeSeconds: estimate.catchTimeSeconds,
-          targetFishPer200: excludedFish.includes(pool.fish) ? 0 : estimate.catches[targetIndex],
+          targetFishPer200: estimate.catchBreakdown[targetIndex].included ? estimate.catches[targetIndex] : 0,
           catchBreakdown: estimate.catchBreakdown,
           skillGainPer200: estimate.catchBreakdown.find(member => member.fish === pool.fish)?.skillGain ?? null,
           poolSkillGainPer200: estimate.skillGain,
@@ -1390,6 +1396,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
     fishSeconds,
     otherSeconds,
     uExcludedFish,
+    uCancelNonSkillupFish,
     uBonusSkill,
     uSelectedRods,
     uIncludeCop,
@@ -1681,9 +1688,6 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
               </button>
             </div>
 
-            <div style={{ marginTop: 8, ...styles.sub }}>
-              Sort by net gil per hour or day to compare money; sort by time or target catches for speed. Daily estimates stop at 200 landed fish or 20,000 fatigue, whichever comes first, using your entered skill without skill progression. Direct NPC prices are the default; AH prices can be entered and recipe output values selected per fish. Net estimates subtract consumable bait costs but do not include auction fees or recipe ingredients and synthesis failures. One reusable lure is counted, with replacement after loss excluded. All fishing prerequisites are assumed met.
-            </div>
           </div>
         ) : (
           <div>
@@ -1788,6 +1792,11 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
                   onChange={event => setUOtherSeconds(event.target.value)} onBlur={() => setUOtherSeconds(String(otherSeconds))} />
               </label>
               <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "center", minHeight: 32 }}>
+                <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, cursor: "pointer" }}
+                  title="In planner estimates, cancel fish that cannot give skill-ups at your entered base skill, including capped fish and fish more than 50 levels above it. They still bite and cost cancellation time and bait. Manual fish selections are preserved when unchecked; fish are not automatically canceled as skill rises during the estimate.">
+                  <input type="checkbox" checked={uCancelNonSkillupFish} onChange={event => setUCancelNonSkillupFish(event.target.checked)} />
+                  Auto-cancel fish without skill-ups
+                </label>
                 <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, cursor: "pointer" }}
                   title="General catch planning, including legendary, capped and prerequisite-gated fish. Assumes all fishing prerequisites are met; disabled fish remain excluded. Lures complete fish fights, including epic catches, in either mode and can be lost. Existing search, rod and area filters still apply.">
                   <input type="checkbox" checked={uIncludeAllFish} onChange={event => {
@@ -2354,6 +2363,9 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
                           {row.itemHazards && <div style={{ color: "#ff9c7a", marginTop: 6 }}>Item rod-break hazards: {row.itemHazards}</div>}
                           <div style={{ marginTop: 16, maxWidth: 620 }}>
                             <div style={{ fontWeight: 700, marginBottom: 8 }}>Expected catch breakdown / day</div>
+                            {uCancelNonSkillupFish && <p style={{ fontSize: 13 }}>
+                              Fish without skill-ups at your entered base skill are automatically canceled and cannot be selected while auto-cancel is on.
+                            </p>}
                             <table aria-label={`Expected catch breakdown for ${row.fish}, ${row.rod}, ${row.zone}, ${row.area}, ${row.bait}`} style={{ width: "100%", borderCollapse: "collapse" }}>
                               <thead><tr>
                                 <th scope="col" style={{ ...skillupCellStyle, textAlign: "left" }}>Fish</th>
@@ -2365,7 +2377,9 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
                               <tbody>{row.catchBreakdown.map(member => <tr key={member.fish}>
                                 <td style={{ ...skillupCellStyle, ...(member.fish === row.fish ? { color: "#8af6b0", fontWeight: 700 } : {}) }}>
                                   <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                                    <input type="checkbox" aria-label={`Retain ${member.fish}`} checked={member.included} onChange={() => togglePoolFish(member.fish)} />
+                                    <input type="checkbox" aria-label={`Retain ${member.fish}`} checked={member.included}
+                                      disabled={uCancelNonSkillupFish && !calculateSkillup(Number(uSkill), member.level, row.zone, row.rod).eligible}
+                                      onChange={() => togglePoolFish(member.fish)} />
                                     <span style={{ textDecoration: member.included ? undefined : "line-through", opacity: member.included ? 1 : 0.6 }}>{member.fish}{member.fish === row.fish ? " (target)" : ""}</span>
                                   </label>
                                 </td>

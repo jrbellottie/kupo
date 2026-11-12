@@ -6,13 +6,26 @@ import { buildSync } from "esbuild";
 import sharp from "sharp";
 
 const bundle = buildSync({ entryPoints: ["src/utils/helm.ts"], bundle: true, write: false, platform: "node", format: "esm" });
-const { HELM_ZONES, HELM_DEFAULTS, HELM_ROCKS, helmRates, helmAvailable } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
+const { HELM_ZONES, HELM_DEFAULTS, HELM_ROCKS, HELM_SOURCE, helmRates, helmAvailable } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0].text).toString("base64")}`);
 const snapshot = JSON.parse(readFileSync("src/data/phoenix.json", "utf8"));
 const catalog = JSON.parse(readFileSync("src/data/itemInfo.json", "utf8"));
 const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-10, `${actual} != ${expected}`);
 const zone = (name, kind = "Mining") => HELM_ZONES.find(row => row.zone === name && row.kind === kind);
 
-test("every Phoenix HELM pool matches existing source shares and has valid tools and points", () => {
+test("HELM has its own source revision and input fingerprints", () => {
+  assert.equal(HELM_SOURCE.revision, "fffca036344db11481008895ca81a0d31eb03ac9");
+  assert.equal(HELM_SOURCE.repository, snapshot.source.repository);
+  assert.equal(snapshot.source.revision, "ace1415cf5643d8d45ff72067522d97f2ccb038f");
+  assert.equal(HELM_SOURCE.checked, "2026-11-06");
+  for (const file of [
+    "scripts/enum/item.lua", "data/enums/zone.yaml", "data/enums/mod.yaml",
+    "modules/init.txt", "settings/default/main.lua", "sql/item_mods.sql",
+    "scripts/globals/hobbies/helm/data.lua", "scripts/globals/hobbies/helm/logic.lua",
+    "modules/era/lua/globals/helm/helm_adjustments.lua",
+  ]) assert.match(HELM_SOURCE.inputs[file], /^[a-f0-9]{64}$/, file);
+});
+
+test("every HELM pool matches shared item-source shares and has valid tools and points", () => {
   assert.equal(HELM_ZONES.length, 42);
   for (const entry of HELM_ZONES) {
     assert.ok(catalog.items[entry.toolId]);
@@ -27,6 +40,54 @@ test("every Phoenix HELM pool matches existing source shares and has valid tools
       assert.ok(original, row.name);
       close(row.share * 100, original.pct);
     }
+  }
+});
+test("corrected jungle and volcanic pools retain exact source weights and renormalize chances", () => {
+  const pools = [
+    ["Yuhtunga Jungle", "Logging", 82.76, [[721, 1840], [688, 1750], [689, 1160], [912, 870], [940, 600], [697, 590], [701, 240], [702, 140], [1237, 130]]],
+    ["Halvung", "Mining", 76.7, [[768, 1300], [2417, 1240], [1108, 1200], [928, 1180], [1155, 1170], [1625, 400], [2161, 390], [1638, 390], [1631, 380], [2160, 380], [1632, 370], [737, 260], [739, 20], [2228, 10]]],
+    ["Mount Zhayolm", "Mining", 75.06, [[643, 1580], [928, 1360], [1155, 1330], [1108, 1310], [768, 1160], [2161, 290], [902, 280], [1632, 270], [1625, 270], [1638, 270], [1631, 260], [2160, 250], [646, 100], [685, 15]]],
+  ];
+  for (const [name, kind, obtainRate, expected] of pools) {
+    const entry = zone(name, kind);
+    assert.deepEqual(entry.drops.map(drop => [drop.itemId, drop.weight]), expected, name);
+    close(entry.obtainRate, obtainRate);
+    const total = expected.reduce((sum, [, weight]) => sum + weight, 0);
+    const rates = helmRates(entry, HELM_DEFAULTS);
+    for (const [itemId, weight] of expected) {
+      const drop = rates.drops.find(row => row.itemId === itemId);
+      close(drop.share, weight / total);
+      close(drop.perAttempt, obtainRate / 100 * weight / total);
+    }
+  }
+  const logging = helmRates(zone("Yuhtunga Jungle", "Logging"), HELM_DEFAULTS);
+  assert.equal((logging.drops.find(drop => drop.itemId === 721).perAttempt * 100).toFixed(2), "20.80");
+  assert.equal((logging.drops.find(drop => drop.itemId === 1237).perAttempt * 100).toFixed(2), "1.47");
+});
+test("logging zone rates and movement agree with the checked wiki reference", () => {
+  const expected = [
+    ["Buburimu Peninsula", "62.6", "16.8", 42],
+    ["Caedarva Mire", "75.6", "7.6", 24],
+    ["Carpenters' Landing", "70.3", "12.2", 11],
+    ["East Ronfaure", "73.2", "7.1", 30],
+    ["Ghelsba Outpost", "61.6", "7.5", 32],
+    ["Jugner Forest", "70.3", "12.1", 30],
+    ["Lufaise Meadows", "70.4", "17.8", 12],
+    ["Mamook", "79.0", "9.2", 11],
+    ["Misareaux Coast", "66.7", "18.5", 12],
+    ["Yhoator Jungle", "83.4", "18.2", 20],
+    ["Yuhtunga Jungle", "82.8", "15.6", 25],
+  ];
+  assert.equal(HELM_ZONES.filter(entry => entry.kind === "Logging" && helmAvailable(entry, false)).length, expected.length);
+  for (const [name, success, breakRate, points] of expected) {
+    const entry = zone(name, "Logging");
+    assert.equal(entry.obtainRate.toFixed(1), success, name);
+    assert.equal(entry.breakRate.toFixed(1), breakRate, name);
+    assert.equal(entry.points.length, points, name);
+    assert.equal(entry.relocateRate, 100);
+    assert.equal(entry.respawnTime, 60);
+    close(entry.campMultiplier, 2.1);
+    close(helmRates(entry, HELM_DEFAULTS).relocateChance, entry.obtainRate / 100);
   }
 });
 test("ToAU excludes past and Abyssea zones; WotG opt-in never includes Abyssea", () => {
@@ -69,6 +130,20 @@ test("depletion uses a shared pool count with integer rounding", () => {
   const exhausted = helmRates(entry, { ...HELM_DEFAULTS, depleted: 5 });
   assert.ok(exhausted.drops.filter(row => entry.depletion.pool.includes(row.itemId)).every(row => row.perAttempt === 0));
 });
+test("logging visit limits share one count across rare logs and leave common logs available", () => {
+  for (const [name, pool] of [["Ghelsba Outpost", [690]], ["Lufaise Meadows", [690, 699]], ["Misareaux Coast", [690, 699]]]) {
+    const entry = zone(name, "Logging");
+    assert.equal(entry.depletion.max, 20);
+    assert.deepEqual([...entry.depletion.pool].sort(), pool);
+    const halfway = helmRates(entry, { ...HELM_DEFAULTS, depleted: 10 });
+    const exhausted = helmRates(entry, { ...HELM_DEFAULTS, depleted: 20 });
+    for (const drop of halfway.drops) {
+      assert.equal(drop.effectiveWeight, pool.includes(drop.itemId) ? Math.floor(drop.weight / 2) : drop.weight);
+    }
+    assert.ok(exhausted.drops.filter(drop => pool.includes(drop.itemId)).every(drop => drop.perAttempt === 0));
+    close(exhausted.drops.reduce((sum, drop) => sum + drop.perAttempt, 0), entry.obtainRate / 100);
+  }
+});
 test("colored rock results follow the Vana'diel weekday without changing probability", () => {
   const entry = HELM_ZONES.find(entry => entry.drops.some(row => row.itemId === 769));
   for (const [day, rock] of HELM_ROCKS.entries()) {
@@ -91,6 +166,9 @@ test("HELM equipment carries named source modifiers for each supported activity"
   }
   assert.ok(!snapshot.helmGear.some(row => row.kind === "Harvesting" && row.itemId === 14817));
   assert.ok(snapshot.helmGear.some(row => row.kind === "Logging" && row.itemId === 14817 && row.nq === 1));
+  assert.deepEqual(snapshot.helmGear.filter(row => row.itemId === 14298).map(row => [row.kind, row.nq, row.hq]), [
+    ["Harvesting", 0, 1], ["Logging", 0, 1],
+  ]);
 });
 
 test("gathering maps preserve bundled images, dimensions and wiki provenance", async () => {

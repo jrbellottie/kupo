@@ -3,6 +3,7 @@ import { LAST_RAISING_DAY, RAISING_ABILITIES, careAvailableDay, maxManualShortWa
 import { BIRD_CONDITIONS, PLANNER_FEEDING_FOODS, validateFeedingReport, validHealthDetails, type FeedingReport } from "./chocoboFeeding";
 import { PARASITE_WORM_ID, type ColorGoal } from "./chocoboColor";
 import { validLostChickClues, validRaisingStoryKeyItems, type LostChickClues, type RaisingStoryKeyItem } from "./raisingEvents";
+import { validRaisingTrackers, type RaisingTracker } from "./raisingTracker";
 
 export const RAISING_DAILY_KEY = "kupo.raising.daily.v1";
 export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "currentDay" | "today" | "colorGoal" | "tomorrowCareId"> & {
@@ -33,6 +34,7 @@ export type SavedRaisingDaily = {
   daily?: DailySchedule;
   progress?: DailyProgress;
   arrangedCare?: { startedAt: number | null; days: { day: number; careId: number }[] };
+  trackers?: RaisingTracker[];
 };
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -73,7 +75,7 @@ function validFeeding(value: unknown, day: number): boolean {
 }
 
 function isSavedDaily(value: unknown): value is SavedRaisingDaily {
-  if (!record(value) || !record(value.form)) return false;
+  if (!record(value) || !record(value.form) || !validRaisingTrackers(value.trackers)) return false;
   const form = value.form;
   if (!statInputs(form.current) || !statInputs(form.target) || !abilityNames(form.desiredAbilities)
     || !abilityNames(form.knownAbilities) || !STAT_KEYS.some(key => key === form.priority)

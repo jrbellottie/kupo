@@ -59,6 +59,11 @@ export function printQuantityStacks(quantity: number, stackSize: number): number
   return Number((Math.max(0, quantity) / stackSize).toFixed(4));
 }
 
+export function printQuantityStacksToBuy(quantity: number, stackSize: number): number | null {
+  if (!Number.isFinite(quantity) || !Number.isFinite(stackSize) || stackSize < 1) return null;
+  return Math.ceil(Math.max(0, quantity) / stackSize);
+}
+
 export function printQuantityFromStacks(stacks: number, stackSize: number): number {
   if (!Number.isFinite(stacks) || !Number.isFinite(stackSize) || stackSize <= 1) return 0;
   return Math.min(1_000_000_000, Math.max(0, Math.round(stacks * stackSize)));

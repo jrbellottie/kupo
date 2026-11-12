@@ -15,6 +15,7 @@ export type HelmScenario = {
   depleted: number; daily: Record<string, number>; day: number;
 };
 export const HELM_DEFAULTS: HelmScenario = { level: 75, nq: 0, hq: 0, camped: false, inventoryFull: false, depleted: 0, daily: {}, day: 0 };
+export const HELM_SOURCE = phoenix.helmSource;
 export const HELM_ZONES = phoenix.helmZones as HelmZone[];
 export const HELM_GEAR = phoenix.helmGear.filter(gear => /^(Field|Worker) (Boots|Hose|Tunica|Gloves)$/.test(gear.name));
 export const HELM_DAYS = ["Firesday", "Earthsday", "Watersday", "Windsday", "Iceday", "Lightningday", "Lightsday", "Darksday"];

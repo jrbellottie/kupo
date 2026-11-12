@@ -11,6 +11,7 @@ const checkout = process.argv[2];
 if (!checkout) throw new Error("Usage: node scripts/generate-phoenix.mjs <Phoenix checkout> [--check]");
 const revision = "ace1415cf5643d8d45ff72067522d97f2ccb038f";
 const diggingRevision = "0f016c5c7b1639d16233fddb93db48e9a51222de";
+const helmRevision = "fffca036344db11481008895ca81a0d31eb03ac9";
 const inputs = {};
 const readSource = (file, ref, hashes) => {
   const content = execFileSync("git", ["-C", checkout, "show", `${ref}:${file}`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
@@ -20,6 +21,8 @@ const readSource = (file, ref, hashes) => {
 const source = (file) => readSource(file, revision, inputs);
 const diggingInputs = {};
 const digSource = (file) => readSource(file, diggingRevision, diggingInputs);
+const helmInputs = {};
+const helmSource = (file) => readSource(file, helmRevision, helmInputs);
 const catalog = JSON.parse(readFileSync("src/data/itemInfo.json", "utf8"));
 const gitLines = (...args) => execFileSync("git", ["-C", checkout, ...args], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 }).trim().split(/\r?\n/);
 const itemDetails = generateSourceItemDetails({
@@ -54,7 +57,7 @@ for (const row of db.prepare("SELECT * FROM item_basic ORDER BY itemid").all()) 
   if (original && (original.sell !== row.BaseSell || original.stack !== row.stackSize || (original.flags & 4096) !== (row.flags & 4096))) items[row.itemid] = { sell: row.BaseSell, stack: row.stackSize, flags: row.flags };
 }
 
-const enumValues = (file) => Object.fromEntries([...source(file).matchAll(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+)\s*,/gm)].map(match => [match[1], Number(match[2])]));
+const enumValues = (file, read = source) => Object.fromEntries([...read(file).matchAll(/^\s*([A-Z][A-Z0-9_]*)\s*=\s*(\d+)\s*,/gm)].map(match => [match[1], Number(match[2])]));
 const itemEnums = enumValues("scripts/enum/item.lua");
 const zoneEnums = Object.fromEntries(Object.entries(parseYaml(source("data/enums/zone.yaml")).values).map(([name, id]) => [name.toUpperCase(), id]));
 const ranks = ["Amateur", "Recruit", "Initiate", "Novice", "Apprentice", "Journeyman", "Craftsman", "Artisan", "Adept", "Veteran", "Expert"];
@@ -68,27 +71,35 @@ for (const id of Object.keys(clamming.itemData)) if (!catalog.items[id]) {
   items[id] = { name: row.name.replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase()), sell: row.BaseSell, stack: row.stackSize, flags: row.flags, category: 0 };
 }
 source("scripts/globals/hobbies/clamming/logic.lua");
-const zoneName = (id) => Object.entries(zoneEnums).find(([, value]) => value === Number(id))?.[0].toLowerCase().replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase()).replace("The Sanctuary Of Zitah", "The Sanctuary of Zi'Tah").replace("Carpenters Landing", "Carpenters' Landing");
+const zoneName = (id, enums = zoneEnums) => Object.entries(enums).find(([, value]) => value === Number(id))?.[0].toLowerCase().replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase()).replace("The Sanctuary Of Zitah", "The Sanctuary of Zi'Tah").replace("Carpenters Landing", "Carpenters' Landing");
+const helmItemEnums = enumValues("scripts/enum/item.lua", helmSource);
+const helmZoneEnums = Object.fromEntries(Object.entries(parseYaml(helmSource("data/enums/zone.yaml")).values).map(([name, id]) => [name.toUpperCase(), id]));
+const helmNames = new Map(Object.entries(helmItemEnums).map(([name, id]) => [id, catalog.items[id]?.name ?? name.toLowerCase().replaceAll("_", " ").replace(/\b\w/g, letter => letter.toUpperCase())]));
+const helmInit = helmSource("modules/init.txt").split(/\r?\n/).map(line => line.replace(/#.*/, "").trim()).filter(Boolean);
+if (!helmInit.includes("era/lua")) throw new Error("HELM era adjustments are not enabled");
+const helmBootstrap = `xi={item=${luaTable(helmItemEnums)},zone=${luaTable(helmZoneEnums)}}; Module={}; super=function() end`;
 const helmSetup = `xi.helmType={HARVESTING=1,EXCAVATION=2,LOGGING=3,MINING=4}; xi.emote=xi.helmType; xi.expansion={ABYSSEA=8,WOTG=4}; Module.new=function() return {addOverrideByEra=function(self,name,callbacks) for _,callback in pairs(callbacks) do callback() end end} end`;
-const helmTable = evaluateLuaData([bootstrap, helmSetup, source("scripts/globals/hobbies/helm/data.lua"), source("modules/era/lua/globals/helm/helm_adjustments.lua")], "xi.helm.dataTable");
-source("scripts/globals/hobbies/helm/logic.lua");
+const helmTable = evaluateLuaData([helmBootstrap, helmSetup, helmSource("scripts/globals/hobbies/helm/data.lua"), helmSource("modules/era/lua/globals/helm/helm_adjustments.lua")], "xi.helm.dataTable");
+helmSource("scripts/globals/hobbies/helm/logic.lua");
+helmSource("settings/default/main.lua");
 const helm = [];
 const helmZones = [];
 for (const table of Object.values(helmTable)) for (const [zone, data] of Object.entries(table.zone)) {
   const drops = Object.values(data.drops);
   const total = drops.reduce((sum, row) => sum + row[1], 0);
-  helmZones.push({ kind: table.id.toLowerCase().replace(/^\w/, letter => letter.toUpperCase()), zone: zoneName(zone), zoneId: Number(zone), toolId: table.tool, tool: names.get(table.tool), obtainRate: data.obtainRate, breakRate: data.breakRate, minLevel: data.minLevel ?? 0, relocateRate: table.relocateRate, respawnTime: table.respawnTime, campMultiplier: table.campMultiplier, depletion: data.depletion ? { max: data.depletion.max, pool: Object.values(data.depletion.pool) } : null, points: Object.values(data.points).map(point => Object.values(point)), drops: drops.map(row => ({ itemId: row[2], name: names.get(row[2]), weight: row[1], dailyCap: data.dailyCap?.[row[2]] ?? null })) });
-  for (const row of drops) helm.push({ kind: table.id.toLowerCase().replace(/^\w/, letter => letter.toUpperCase()), zone: zoneName(zone), n: names.get(row[2]), pct: 100 * row[1] / total, obtainRate: data.obtainRate, breakRate: data.breakRate, minLevel: data.minLevel ?? 0, dailyCap: data.dailyCap?.[row[2]] ?? null, depletion: data.depletion ?? null });
+  helmZones.push({ kind: table.id.toLowerCase().replace(/^\w/, letter => letter.toUpperCase()), zone: zoneName(zone, helmZoneEnums), zoneId: Number(zone), toolId: table.tool, tool: helmNames.get(table.tool), obtainRate: data.obtainRate, breakRate: data.breakRate, minLevel: data.minLevel ?? 0, relocateRate: table.relocateRate, respawnTime: table.respawnTime, campMultiplier: table.campMultiplier, depletion: data.depletion ? { max: data.depletion.max, pool: Object.values(data.depletion.pool) } : null, points: Object.values(data.points).map(point => Object.values(point)), drops: drops.map(row => ({ itemId: row[2], name: helmNames.get(row[2]), weight: row[1], dailyCap: data.dailyCap?.[row[2]] ?? null })) });
+  for (const row of drops) helm.push({ kind: table.id.toLowerCase().replace(/^\w/, letter => letter.toUpperCase()), zone: zoneName(zone, helmZoneEnums), n: helmNames.get(row[2]), pct: 100 * row[1] / total, obtainRate: data.obtainRate, breakRate: data.breakRate, minLevel: data.minLevel ?? 0, dailyCap: data.dailyCap?.[row[2]] ?? null, depletion: data.depletion ?? null });
 }
 helm.sort((first, second) => first.kind.localeCompare(second.kind) || first.zone.localeCompare(second.zone) || first.n.localeCompare(second.n));
 helmZones.sort((first, second) => first.kind.localeCompare(second.kind) || first.zone.localeCompare(second.zone));
-const modEnums = parseYaml(source("data/enums/mod.yaml")).values;
+const modEnums = parseYaml(helmSource("data/enums/mod.yaml")).values;
 const helmMods = new Map();
 for (const kind of ["Harvesting", "Logging", "Mining"]) for (const quality of ["nq", "hq"]) {
   helmMods.set(modEnums[`${kind.toLowerCase()}_result_${quality}`], { kind, quality });
 }
 const gearByItem = new Map();
-for (const row of parseSql(source("sql/item_mods.sql"), "item_mods")) {
+const helmItemMods = parseSql(helmSource("sql/item_mods.sql"), "item_mods");
+for (const row of helmItemMods) {
   const mod = helmMods.get(row.modId);
   if (!mod) continue;
   const key = `${row.itemId}:${mod.kind}`;
@@ -99,6 +110,13 @@ for (const row of parseSql(source("sql/item_mods.sql"), "item_mods")) {
   gearByItem.set(key, gear);
 }
 const helmGear = [...gearByItem.values()].sort((first, second) => first.kind.localeCompare(second.kind) || first.name.localeCompare(second.name));
+const helmItemDetails = {};
+for (const itemId of new Set(helmGear.map(gear => gear.itemId))) {
+  const modifiers = helmItemMods.filter(row => row.itemId === itemId).map(row => [row.modId, row.value]);
+  if (catalog.items[itemId] && JSON.stringify(modifiers) !== JSON.stringify(catalog.items[itemId].modifiers)) {
+    helmItemDetails[itemId] = { modifiers };
+  }
+}
 const valerianoSource = source("modules/era/lua/globals/valeriano_shop_adjust.lua");
 const valerianoStock = evaluateLuaData([bootstrap], `{${valerianoSource.match(/local stock\s*=\s*\{([\s\S]*?)\n    \}/)[1]}}`);
 const valerianoOffers = ["Southern San d'Oria", "Port Bastok", "Windurst Woods"].flatMap(zone => Object.values(valerianoStock).map(row => ({ n: names.get(row[1]), npc: "Valeriano", zone, price: row[2] })));
@@ -275,9 +293,9 @@ const guildPoints = db.prepare("SELECT * FROM guild_item_points ORDER BY guildid
   return { guild, itemId: row.itemid, item, rank: row.rank, pattern: row.pattern, points: row.points, maxPoints: row.max_points };
 });
 db.close();
-const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, branch: "beta", eraScenario: "ToAU (pre-WotG)", itemDetailSqlOrder: itemDetails.sqlOrder, guildPointSqlOrder, guildPointScenario: "Global cap rollback before item-specific era corrections; live Greedie cap confirmed at 1520 GP", inputs }, items, itemDetails: itemDetails.items, fishing, clamming, helm, helmZones, helmGear, valerianoOffers, guildNpcs: Object.keys(guilds).map(npc => npc.replaceAll("_", " ")).sort(), guildOffers, guildSelling, guildShopHolidays, guildPoints, digging };
+const output = { source: { repository: "https://github.com/phoenixffxi/Phoenix", revision, branch: "beta", eraScenario: "ToAU (pre-WotG)", itemDetailSqlOrder: itemDetails.sqlOrder, guildPointSqlOrder, guildPointScenario: "Global cap rollback before item-specific era corrections; live Greedie cap confirmed at 1520 GP", inputs }, items, itemDetails: itemDetails.items, fishing, clamming, helmSource: { repository: "https://github.com/phoenixffxi/Phoenix", revision: helmRevision, branch: "beta", eraScenario: "ToAU (pre-WotG item pools; optional WotG zones)", checked: "2026-11-06", wiki: "https://wiki.phoenix-xi.com/Logging", inputs: helmInputs }, helm, helmZones, helmGear, helmItemDetails, valerianoOffers, guildNpcs: Object.keys(guilds).map(npc => npc.replaceAll("_", " ")).sort(), guildOffers, guildSelling, guildShopHolidays, guildPoints, digging };
 const filename = "src/data/phoenix.json";
 const text = JSON.stringify(output) + "\n";
 if (process.argv.includes("--check")) { if (readFileSync(filename, "utf8") !== text) throw new Error("Phoenix snapshot differs; regenerate explicitly"); }
 else writeFileSync(filename, text);
-console.log(`Phoenix ${revision}: ${Object.keys(items).length} item overrides, ${guildOffers.length} guild offers; digging ${diggingRevision}: ${entries.length} entries in ${Object.keys(digTable.zoneTable).length} zones`);
+console.log(`Phoenix ${revision}: ${Object.keys(items).length} item overrides, ${guildOffers.length} guild offers; digging ${diggingRevision}: ${entries.length} entries in ${Object.keys(digTable.zoneTable).length} zones; HELM ${helmRevision}: ${helmZones.length} pools`);

@@ -43,6 +43,7 @@ import WeatherTab from "./WeatherTab";
 import StopwatchTab from "./StopwatchTab";
 import BcnmTab from "./BcnmTab";
 import SkillchainTab from "./SkillchainTab";
+import SynthesisLevelTracker from "./SynthesisLevelTracker";
 
 const BestiaryTab = React.lazy(() => import("./BestiaryTab"));
 const CraftingTab = React.lazy(() => import("./CraftingTab"));
@@ -330,6 +331,22 @@ function normalizeCounterWidgetState(raw: unknown): CounterWidgetState {
   };
 }
 
+function loadTimers(): AnyTimer[] {
+  const saved = loadJson<AnyTimer[]>("ffxi_timers_v2", []);
+  const ids = new Set<string>();
+  return saved.map(timer => {
+    if (!ids.has(timer.id)) {
+      ids.add(timer.id);
+      return timer;
+    }
+
+    let id = uid();
+    while (ids.has(id)) id = uid();
+    ids.add(id);
+    return { ...timer, id };
+  });
+}
+
 export default function AppShell() {
   const [nowMs, setNowMs] = useState(Date.now());
 
@@ -339,7 +356,7 @@ export default function AppShell() {
     const stored = loadJson<Calibration | null>("ffxi_cal_v1", DEFAULT_CALIBRATION);
     return stored ?? DEFAULT_CALIBRATION;
   });
-  const [timers, setTimers] = useState<AnyTimer[]>(() => loadJson<AnyTimer[]>("ffxi_timers_v2", []));
+  const [timers, setTimers] = useState<AnyTimer[]>(loadTimers);
   const activeTimerIds = useMemo(() => new Set(timers.filter(timer => timer.enabled).map(timer => timer.id)), [timers]);
   useEffect(() => {
     const bridge = window.kupoNotifications;
@@ -867,12 +884,14 @@ export default function AppShell() {
     setTimers(prev => [timer, ...prev.filter(existing => existing.id !== timer.id)]);
   }
 
-  function addGuildDecayTimer(timer: EarthTimer) {
-    if (!Number.isFinite(timer.targetEarthMs) || timer.targetEarthMs <= Date.now()) {
-      alert("This decay timer has already passed. Set a reminder for a later game day.");
-      return;
+  function addGuildDecayTimers(timers: EarthTimer[]) {
+    const now = Date.now();
+    const futureTimers = timers.filter(timer => Number.isFinite(timer.targetEarthMs) && timer.targetEarthMs > now);
+    const passedTimers = timers.filter(timer => !Number.isFinite(timer.targetEarthMs) || timer.targetEarthMs <= now);
+    if (futureTimers.length > 0) setTimers(prev => [...futureTimers, ...prev]);
+    if (passedTimers.length > 0) {
+      alert(`${passedTimers.map(timer => timer.label).join("\n")}\n\nThese guild decay reminders have already passed and were not added.`);
     }
-    setTimers(prev => [timer, ...prev]);
   }
 
   function recordGardenFeed(id: string, index: number, atMs: number | null) {
@@ -2704,7 +2723,7 @@ export default function AppShell() {
       {activeTab === "presets" && (
         <div style={styles.tabContent}>
           {presetView === "guildDecay"
-            ? <GuildDecayTab cal={cal} nowMs={nowMs} offsetHours={presetOffsetHours} offsetDescription={presetOffsetText} onAddTimer={addGuildDecayTimer} />
+            ? <GuildDecayTab cal={cal} nowMs={nowMs} offsetVanaHours={presetOffsetHours} offsetDescription={presetOffsetText} onAddTimers={addGuildDecayTimers} />
             : presetContent}
         </div>
       )}
@@ -2712,7 +2731,10 @@ export default function AppShell() {
       {activeTab === "counters" && (
         <div style={styles.tabContent}>
           <div>
-            <div style={{ ...styles.tabGrid, alignItems: "start", gridAutoRows: "max-content" }}>{countersCard}</div>
+            <div style={{ ...styles.tabGrid, alignItems: "start", gridAutoRows: "max-content" }}>
+              {countersCard}
+              <SynthesisLevelTracker />
+            </div>
           </div>
         </div>
       )}
