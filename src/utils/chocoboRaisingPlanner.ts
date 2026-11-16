@@ -77,7 +77,8 @@ export type RaisingGoalInput = {
   knownAbilities: string[];
   priority: StatKey;
   currentDay: number;
-  today?: { feedingDone: boolean; storyDone: boolean };
+  today?: { feedingDone: boolean; storyDone: boolean; storyEnergy?: number; storyAttemptsDone?: number };
+  storyAttemptsDone?: number;
   feedingReport?: FeedingReport;
   colorGoal?: ColorGoal;
   tomorrowCareId?: number;
@@ -141,6 +142,7 @@ export type TrainingDay = {
   story: string | null;
   attempt: number;
   assumedLearned: boolean;
+  additionalStories?: { ability: string; attempt: number; assumedLearned: boolean }[];
   before: RaisingStats;
   after: RaisingStats;
   feeding?: FeedingEstimate;
@@ -170,6 +172,14 @@ export function validateRaisingGoal(input: RaisingGoalInput): string | null {
   }
   if (input.today && (typeof input.today.feedingDone !== "boolean" || typeof input.today.storyDone !== "boolean")) {
     return "Today's feeding and story completion must be checked or unchecked.";
+  }
+  if (input.today?.storyEnergy !== undefined
+    && (!Number.isInteger(input.today.storyEnergy) || input.today.storyEnergy < 0 || input.today.storyEnergy > 100)) {
+    return "Available story energy must be a whole number from 0 to 100.";
+  }
+  if (input.storyAttemptsDone !== undefined
+    && (!Number.isInteger(input.storyAttemptsDone) || input.storyAttemptsDone < 0 || input.storyAttemptsDone >= STORY_ATTEMPTS_95)) {
+    return `Recorded attempts for the next unlearned story must be from 0 to ${STORY_ATTEMPTS_95 - 1}.`;
   }
   for (const [label, stats] of [["Current", input.current], ["Target", input.target]] as const) {
     if (STAT_KEYS.some(key => !Number.isInteger(stats[key]) || stats[key] < 0 || stats[key] > 255)) {
@@ -369,6 +379,7 @@ export function groupTrainingDays(days: TrainingDay[], separateDays: readonly nu
       && previous.endDay + 1 === entry.day && previous.careId === entry.careId && previous.carePoints === entry.carePoints
       && previous.manualShortWalks === entry.manualShortWalks
       && previous.foodId === entry.foodId && previous.foodCount === entry.foodCount && previous.story === entry.story
+      && JSON.stringify(previous.additionalStories ?? []) === JSON.stringify(entry.additionalStories ?? [])
       && previous.feeding?.items.join(",") === entry.feeding?.items.join(",")) {
       previous.endDay = entry.day;
       previous.days++;
@@ -401,7 +412,7 @@ export function planRaisingGoal(input: RaisingGoalInput) {
     4 * Math.max(0, RAISING.settings.daysToAdolescent - Math.max(RAISING.settings.daysToChick, firstDay))) : undefined;
   const optimizingColor = !!color && color.best.worms > 0;
   const start: SearchNode = {
-    stats: { ...input.current }, parent: null, entry: null, attempts: 0, cost: 0,
+    stats: { ...input.current }, parent: null, entry: null, attempts: input.storyAttemptsDone ?? 0, cost: 0,
     affection: input.feedingReport?.affection ?? RAISING.feeding.initialAffection,
     fullness: input.feedingReport?.fullness ?? 255, energySpent: 0, affectionDebt: 0,
     worms: 0,
@@ -488,18 +499,29 @@ export function planRaisingGoal(input: RaisingGoalInput) {
           let attempts = parent.attempts;
           let story: string | null = null;
           let attempt = 0;
-          if (learning && day >= firstStoryDay && stats.discernment >= threshold && !(day === input.currentDay && input.today?.storyDone)
-            && (!isToday || !input.feedingReport || input.feedingReport.condition === "healthy" && !needsHealthAttention(input.feedingReport))) {
+          const additionalStories: NonNullable<TrainingDay["additionalStories"]> = [];
+          const storiesAllowed = learning && day >= firstStoryDay
+            && (!isToday || !input.feedingReport || input.feedingReport.condition === "healthy" && !needsHealthAttention(input.feedingReport));
+          const storySlots = isToday && input.today?.storyEnergy !== undefined
+            ? Math.floor(input.today.storyEnergy / RAISING.actionEnergy[50]["2"])
+            : isToday && input.today?.storyDone ? 0 : 1;
+          for (let slot = 0; slot < storySlots && storiesAllowed && attempts < attemptBudget; slot++) {
+            if (stats.discernment < threshold) break;
             const ability = pending[Math.floor(attempts / STORY_ATTEMPTS_95)];
-            story = ability.name;
-            attempt = attempts % STORY_ATTEMPTS_95 + 1;
+            if (!ability) break;
+            const storyAttempt = attempts % STORY_ATTEMPTS_95 + 1;
+            const assumedLearned = storyAttempt === STORY_ATTEMPTS_95;
+            if (story === null) {
+              story = ability.name;
+              attempt = storyAttempt;
+            } else additionalStories.push({ ability: ability.name, attempt: storyAttempt, assumedLearned });
             stats = applyRaisingStatChanges(stats, { ...zeroStats(), discernment: 1 });
             attempts++;
           }
           const entry: TrainingDay = {
             day, careId: care.id, carePoints: care.points, manualShortWalks,
             foodId: meal.foodId, foodCount: meal.foodCount, story, attempt,
-            assumedLearned: attempt === STORY_ATTEMPTS_95, before: parent.stats, after: stats,
+            assumedLearned: attempt === STORY_ATTEMPTS_95, additionalStories, before: parent.stats, after: stats,
             feeding: meal.feeding,
           };
           const cost = parent.cost + (meal.feeding?.items.length ?? meal.foodCount) + Number(care.id !== 0) * 0.5
@@ -507,7 +529,7 @@ export function planRaisingGoal(input: RaisingGoalInput) {
           const affection = meal.feeding?.affectionAfter ?? parent.affection;
           const node: SearchNode = {
             stats, parent, entry, attempts, cost, affection, fullness: meal.feeding?.fullnessAfter ?? parent.fullness,
-            // Today's remaining energy is not measured. Story success can also refill energy.
+            // Today's story energy is entered by the user; story refunds remain unknown.
             energySpent: isToday || story !== null ? 0
               : care.energy + manualShortWalks * RAISING.actionEnergy[42]["2"],
             affectionDebt: parent.affectionDebt + (meal.feeding ? Math.max(0, AFFECTION_TARGET - affection) * 0.05 : 0),

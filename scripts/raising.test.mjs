@@ -131,6 +131,48 @@ test("tracker validates histories, isolates eggs, and replays undo without disca
   assert.equal(raisingTrackerState(worms, 5).wormsFed, 3);
   const random = recordRaisingAction(chick, { kind: "food", day: 5, foodId: RAISING.foods.find(food => food.random.chance > 0).id, count: 1 }, 5);
   assert.match(raisingTrackerState(random, 5).warnings.join(" "), /Random food stat effects/);
+  let repeated = recordRaisingAction(tracking(), { kind: "story", day: 30, ability: "Bore", learned: false }, 35);
+  repeated = recordRaisingAction(repeated, { kind: "story", day: 30, ability: "Bore", learned: false }, 35);
+  assert.equal(raisingTrackerState(repeated, 35).storyAttempts.Bore, 2);
+  assert.equal(raisingTrackerState(repeated, 35).storyAttemptsToday, 0);
+});
+
+test("today's story plan uses available energy for repeat attempts and preserves attempt numbering", () => {
+  const run = (patch = {}) => planRaisingGoal(goal({
+    current: stats(0, 0, 160, 160), target: stats(), currentDay: 35,
+    today: { feedingDone: true, storyDone: false, storyEnergy: 42 }, ...patch,
+  }));
+  const plan = run();
+  const today = plan.days[0];
+  assert.equal(today.day, 35);
+  assert.equal(today.story, "Bore");
+  assert.equal(today.attempt, 1);
+  assert.equal(today.additionalStories.length, 2);
+  assert.deepEqual(today.additionalStories.map(entry => [entry.ability, entry.attempt]), [["Bore", 2], ["Bore", 3]]);
+  assert.equal(today.after.discernment, today.before.discernment + 3);
+  assert.equal(plan.days.slice(1).filter(day => day.story).every(day => day.additionalStories.length === 0), true,
+    "future days retain the conservative one-attempt forecast");
+  assert.equal(planRaisingGoal(goal({
+    current: stats(0, 0, 160, 160), target: stats(), currentDay: 35,
+    today: { feedingDone: true, storyDone: false },
+  })).days[0].additionalStories.length, 0, "without an energy report the plan limits today to one attempt");
+  assert.equal(run({ today: { feedingDone: true, storyDone: false, storyEnergy: 13 } }).days[0].story, null);
+  assert.throws(() => run({ today: { feedingDone: true, storyDone: false, storyEnergy: 101 } }), /energy.*0 to 100/);
+  assert.throws(() => run({ storyAttemptsDone: 11 }), /attempts.*0 to 10/);
+
+  const nextAbility = run({
+    storyAttemptsDone: 10,
+    today: { feedingDone: true, storyDone: true, storyEnergy: 28 },
+  }).days[0];
+  assert.equal(nextAbility.story, "Bore");
+  assert.equal(nextAbility.attempt, 11);
+  assert.equal(nextAbility.assumedLearned, true);
+  assert.deepEqual(nextAbility.additionalStories.map(entry => [entry.ability, entry.attempt]), [["Burrow", 1]]);
+  assert.equal(nextAbility.after.discernment, nextAbility.before.discernment + 2);
+  assert.equal(planRaisingGoal(goal({
+    current: stats(0, 0, 160, 160), target: stats(), currentDay: 35,
+    today: { feedingDone: true, storyDone: true, storyEnergy: 28 },
+  })).days[0].additionalStories.length, 1, "energy report overrides the old one-story completion marker");
 });
 
 test("raising has an independent immutable source pin and complete numeric tables", () => {
@@ -1201,7 +1243,7 @@ test("worker request preserves completion, treatment and tracked stats with repo
     assert.equal(request.tomorrowCareId, 3);
     assert.deepEqual(request.feedingReport.ailments, ["sick"]);
     assert.deepEqual(request.feedingReport.events, ["high-spirits"]);
-    assert.deepEqual(request.today, { feedingDone: true, storyDone: true });
+    assert.deepEqual(request.today, { feedingDone: true, storyDone: true, storyEnergy: undefined });
     assert.equal(request.feedingReport.treatmentGiven, true);
     assert.equal(request.feedingReport.medicineId, 2201);
     assert.equal(request.feedingReport.affection, 224);
@@ -1218,7 +1260,7 @@ test("worker request preserves completion, treatment and tracked stats with repo
     const trackedCleanup = effects.at(-1)();
     assert.deepEqual(request.current, stats(0, 2, 106, 116), "worker uses recorded gains rather than grade minima");
     assert.deepEqual(request.knownAbilities, ["Burrow"], "tracked abilities override stale form values");
-    assert.deepEqual(request.today, { feedingDone: true, storyDone: false }, "story completion is derived from today's actual history");
+    assert.deepEqual(request.today, { feedingDone: true, storyDone: false, storyEnergy: undefined }, "story completion is derived from today's actual history");
     trackedCleanup();
   }
 });
@@ -1240,7 +1282,7 @@ test("recording controls persist actual actions, treatment, ability success and 
       current: { strength: "0", endurance: "0", discernment: "160", receptivity: "160" },
       target: { strength: "32", endurance: "224", discernment: "160", receptivity: "224" },
       desiredAbilities: ["Bore", "Burrow"], knownAbilities: [], priority: "endurance",
-      feedingReport: { day: 35, affection: 224, fullness: 0, condition: "healthy" },
+      feedingReport: { day: 35, affection: 224, fullness: 0, condition: "healthy" }, storyEnergy: "42",
     },
     arrangedCare: { startedAt: start, days: [{ day: 36, careId: 2 }] },
   }, { startedAt: start, error: null }, "", null, now, null, { entries: [], error: null }, "", null, "", null, null];
@@ -1268,6 +1310,7 @@ test("recording controls persist actual actions, treatment, ability success and 
   assert.equal(states[0].form.feedingReport.fullness, 192);
   controls().onRecord({ kind: "story", day: 35, ability: "Bore", learned: true });
   assert.deepEqual(states[0].form.knownAbilities, ["Bore"]);
+  assert.equal(states[0].form.storyEnergy, "28", "recording conservatively subtracts the maximum story cost");
   assert.equal(raisingTrackerState(states[0].trackers[0], 35).storyDone, true);
   const confirm = find(render(), element => element.type === "button" && element.props.children === "Confirm current stat reports");
   confirm.props.onClick();
@@ -1990,7 +2033,7 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   const storyInstruction = tree => findElement(todayRow(tree), element => element.props["aria-label"] === "Today's story instruction");
   const storyView = {
     ...view, calculatedDay: 30, todayMode: true, feedingMode: true,
-    form: { ...form, knownAbilities: [], feedingReport: { affection: 224, fullness: 31, condition: "healthy", day: 30 } },
+    form: { ...form, knownAbilities: [], storyEnergy: "42", feedingReport: { affection: 224, fullness: 31, condition: "healthy", day: 30 } },
     daily: { ...schedule, days: schedule.days.map(step => step.day === 30 ? { ...step, story: "Bore" } : step) },
     calculation: { status: "success", plan: { ...result, days: result.days.map(step =>
       step.day === 30 ? { ...step, story: "Bore" } : step) } },
@@ -2009,9 +2052,9 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     const instruction = storyInstruction(tree);
     assert.ok(instruction, `${ability.name} gets a concise table instruction`);
     const text = textContent(instruction);
-    assert.ok(text.includes(`Tell a Story: ${ability.story}, once (${ability.name})`));
+    assert.ok(text.includes(`Tell a Story: ${ability.story} (${ability.name}, attempt`));
     assert.ok(text.includes(`Requires ${ability.discernment} DSC`));
-    assert.match(text, /14\+ energy and a free ability slot/);
+    assert.match(text, /Conservatively budgeted 14 of 42 available energy/);
     const reference = findElement(tree, element => element.type === "details"
       && textContent(element).startsWith("Ability preparation and learning checkpoint"));
     assert.ok(textContent(reference).includes(ability.obtain), "acquisition remains in collapsed reference");
@@ -2147,13 +2190,13 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(help, /Circuit is a specialized community build for an Elm saddle/);
   assert.match(help, /Editing those goals changes the selector to Custom goals/);
   assert.match(help, /uses your running stat estimate/);
-  assert.match(help, /these survive recalculation and app restarts/);
+  assert.match(help, /attempts survive recalculation and app restarts/);
   assert.match(help, /Calculating a plan in this app does not queue anything in game/);
   assert.match(help, /Plan 1 is the first editable block; Plan 2 runs after Plan 1 finishes, not two days from now/);
   assert.match(help, /Do not add Basic Care days to cover the delay/);
   assert.match(help, /Press Calculate plan for day N below the inputs, just above the divider before Estimated plan/);
   assert.match(help, /without replaying logged food or stories/);
-  assert.match(help, /Record food or medicine actually eaten and completed story attempts/);
+  assert.match(help, /Record every completed attempt under Recorded progress/);
   assert.match(help, /How often should I check in\?/);
   assert.match(help, /check this guide once per raising day/);
   assert.match(help, /one 24-hour period from egg hand-in/);
@@ -2163,7 +2206,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(help, /stat history is retained/);
   assert.match(help, /Within the same 24-hour period, the raising day stays the same/);
   assert.match(help, /Do not enter forecast numbers as measured stats/);
-  assert.match(help, /Logging is not an instruction to perform an action again/);
+  assert.match(help, /Check energy after each attempt/);
   assert.match(help, /on day 20 you can arrange care for day 22 onward; day 21 is already decided/);
   assert.match(help, /Check what is already scheduled in game and only change future activities if needed/);
   assert.match(help, /The app cannot see or change the trainer&#x27;s schedule, and it does not feed your bird/);

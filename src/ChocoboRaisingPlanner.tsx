@@ -75,6 +75,21 @@ const currentStats = (form: PlannerForm): RaisingStats => {
   }
   return stats;
 };
+function storyInputs(
+  form: PlannerForm,
+  trackerState: ReturnType<typeof raisingTrackerState> | undefined,
+  feedingDone: boolean,
+  storyDone: boolean,
+) {
+  const known = trackerState?.knownAbilities ?? form.knownAbilities;
+  const pending = RAISING_ABILITIES.filter(ability => form.desiredAbilities.includes(ability.name) && !known.includes(ability.name))
+    .sort((a, b) => b.discernment - a.discernment);
+  const energy = form.storyEnergy?.trim() ? number(form.storyEnergy) : undefined;
+  return {
+    today: { feedingDone, storyDone, storyEnergy: energy },
+    storyAttemptsDone: trackerState && pending.length ? trackerState.storyAttempts[pending[0].name] ?? 0 : undefined,
+  };
+}
 const statSummary = (stats: RaisingStats) => `${stats.strength} STR / ${stats.endurance} END / ${stats.discernment} DSC / ${stats.receptivity} RCP`;
 function feedingReport(form: PlannerForm, day: number): FeedingReport {
   if (day < RAISING.settings.daysToChick) return {
@@ -172,7 +187,7 @@ export default function ChocoboRaisingPlanner() {
   const input: RaisingGoalInput = {
     ...form, current: tracked?.stats ?? currentStats(form), target: parseStats(form.target), currentDay,
     knownAbilities: tracked?.knownAbilities ?? form.knownAbilities,
-    today: { feedingDone: progress.feedingDone, storyDone: tracked?.storyDone ?? progress.storyDone },
+    ...storyInputs(form, tracked, progress.feedingDone, tracked?.storyDone ?? progress.storyDone),
     feedingReport: feedingReport(form, currentDay),
     colorGoal: plannerColorGoal(form),
     tomorrowCareId: lockedCare.careId,
@@ -224,7 +239,7 @@ export default function ChocoboRaisingPlanner() {
       const request: RaisingGoalInput = {
         ...view.form, current: savedStats?.stats ?? currentStats(view.form), target: parseStats(view.form.target), currentDay,
         knownAbilities: savedStats?.knownAbilities ?? view.form.knownAbilities,
-        today: { feedingDone: savedProgress.feedingDone, storyDone: savedStats?.storyDone ?? savedProgress.storyDone },
+        ...storyInputs(view.form, savedStats, savedProgress.feedingDone, savedStats?.storyDone ?? savedProgress.storyDone),
         feedingReport: feedingReport(view.form, currentDay),
         colorGoal: plannerColorGoal(view.form),
         tomorrowCareId: tomorrowCare(view, view.calculatedStart ?? null, currentDay).careId,
@@ -314,12 +329,24 @@ export default function ChocoboRaisingPlanner() {
       const story = RAISING_STORY_KEY_ITEMS.find(item => item.ability === entry.ability);
       patch.storyKeyItems = (form.storyKeyItems ?? []).filter(id => id !== story?.id);
     }
+    if (entry.kind === "story" && entry.day === currentDay) {
+      const energy = number(form.storyEnergy ?? "");
+      if (Number.isInteger(energy) && energy >= 0 && energy <= 100) {
+        patch.storyEnergy = String(Math.max(0, energy - RAISING.actionEnergy[50]["2"]));
+        notice += " The estimate subtracts 14 energy for this attempt; check your bird's current energy in game, especially after learning or inspiration restores energy.";
+      }
+    }
     saveTracker(next, patch);
     setDailyNotice(notice);
   });
   const undoTracking = () => trackingChange(() => {
     if (!tracker?.entries.length) throw new Error("There is no recorded entry to undo.");
-    const patch: Partial<PlannerForm> = { feedingReport: undefined };
+    const last = tracker.entries[tracker.entries.length - 1];
+    const energy = number(form.storyEnergy ?? "");
+    const patch: Partial<PlannerForm> = {
+      ...(last.kind === "story" && last.day === currentDay && Number.isInteger(energy) ? { storyEnergy: String(Math.min(100, energy + RAISING.actionEnergy[50]["2"])) } : {}),
+      ...(last.kind === "food" || last.kind === "story" ? { feedingReport: undefined } : {}),
+    };
     saveTracker({ ...tracker, entries: tracker.entries.slice(0, -1) }, patch);
     setDailyNotice("Last entry removed and stats recalculated. Re-enter today's hunger, affection and condition; check story key items too.");
   });
@@ -477,6 +504,10 @@ export default function ChocoboRaisingPlanner() {
   const futureDays = plan?.days.filter(step => step.day > currentDay) ?? [];
   const todayPlan = plan?.days.find(step => step.day === currentDay);
   const todayStory = RAISING_ABILITIES.find(ability => ability.name === todayPlan?.story);
+  const todayStories = todayPlan?.story ? [
+    { ability: todayPlan.story, attempt: todayPlan.attempt, assumedLearned: todayPlan.assumedLearned },
+    ...(todayPlan.additionalStories ?? []),
+  ] : [];
   const foodTotals = plan ? trainingFoodTotals(plan.days) : [];
   const canComplete = clock.startedAt !== null && !futureStart && currentDay <= LAST_RAISING_DAY && !isCalculating;
   const report = feedingReport(form, currentDay);
@@ -517,7 +548,7 @@ export default function ChocoboRaisingPlanner() {
       <p><strong>Recommended routine: visit the home stable and check this guide once per raising day</strong> while actively raising the bird. That is one {RAISING.settings.dayLength / 3600}-hour period from egg hand-in, not every Vana'diel day or every hour. You do not need to keep the app open.</p>
       <ol>
         <li><strong>Read the report, then plan today's remaining actions.</strong> Log completed daily care, including the good or poor result if known; an unknown result uses a labeled estimate. Check health, affection, hunger and the trainer's stat descriptions. Confirm current stat reports to correct the running estimate, then calculate. An unchanged description does not mean no points were gained: confirming the same band keeps the tracked points within it. Do not enter forecast numbers as measured stats or reset the egg hand-in time.</li>
-        <li><strong>Follow today's table row.</strong> Follow it only if hunger, health, energy and Discernment allow. Record food or medicine actually eaten and completed story attempts under Recorded progress; these survive recalculation and app restarts. Mark an ability learned only when it actually succeeds. Finished feeding for today stops further meal recommendations. Logging is not an instruction to perform an action again.</li>
+        <li><strong>Follow today's table row.</strong> Follow it only if hunger, health, energy and Discernment allow. You can tell a story again the same day if energy remains; the estimate budgets 14 energy per attempt and does not count uncertain success refunds. Check energy after each attempt. Record every completed attempt under Recorded progress; each adds +1 DSC and attempts survive recalculation and app restarts. Finished feeding for today stops further meal recommendations.</li>
         <li><strong>Check the trainer's schedule.</strong> Today's care cell shows any future care block to prepare. For example, on day 20 you can arrange care for day 22 onward; day 21 is already decided. Check what is already scheduled in game and only change future activities if needed, then use Confirm care schedule. The app cannot see or change the trainer's schedule, and it does not feed your bird.</li>
       </ol>
       <p><strong>Check again sooner if something changes:</strong> an ability is learned, a stat description changes, illness or hunger prevents a planned action, or you change a goal. You do not need to recalculate after every individual food item; finish the day's routine first unless a change affects what is safe to do next.</p>
@@ -707,6 +738,13 @@ export default function ChocoboRaisingPlanner() {
             {BIRD_CONDITIONS.map(entry => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
           </select></label>
         </div>
+        {currentDay >= RAISING.settings.daysToAdolescent && <div className="raising-controls">
+          <label>Energy currently available for story attempts<input style={styles.input} type="number" min={0} max={100} step={1}
+            value={form.storyEnergy ?? ""} placeholder="Check the chocobo's current energy"
+            onChange={event => update({ storyEnergy: event.target.value })} /></label>
+          <p className="raising-small">Enter the energy remaining now, not a daily total. Each attempt costs 11-14; the plan budgets 14 per attempt and does not assume the random 10-100 energy restored after learning or inspiration. Check the actual energy after each story and update this value before recalculating.</p>
+          {!tracker && <p className="raising-small">Start Recorded progress above before attempting stories to save each attempt and keep its Discernment gain in your running estimate.</p>}
+        </div>}
         <fieldset className="raising-report-area"><legend>Ailments reported by the trainer (select all that apply)</legend>
           <div className="raising-report-options">
             {BIRD_AILMENTS.map(ailment => <label key={ailment.id}>
@@ -908,11 +946,18 @@ export default function ChocoboRaisingPlanner() {
                 </td>
                 <td>{currentDay < RAISING.settings.daysToChick ? "Egg stage: no stories."
                   : healthFirst || report.condition !== "healthy" ? "Skip stories until healthy, awake and ready."
-                  : (tracked?.storyDone ?? progress.storyDone) ? "Story attempt already recorded today."
-                  : todayStory && !input.knownAbilities.includes(todayStory.name) ? <span aria-label="Today's story instruction">
-                    Tell a Story: {todayStory.story}, once ({todayStory.name}). Requires {todayStory.discernment} DSC, {RAISING.actionEnergy[50]["2"]}+ energy and a free ability slot.
+                  : todayStories.length > 0 && todayStory ? <span aria-label="Today's story instruction">
+                    Tell a Story: {todayStories.map(story => `${RAISING_ABILITIES.find(ability => ability.name === story.ability)?.story} (${story.ability}, attempt ${story.attempt}${story.assumedLearned ? ", assumes learned" : ""})`).join("; ")}.
+                    {" "}Requires {todayStory.discernment} DSC before each attempt and a free ability slot.{" "}
+                    {input.today?.storyEnergy === undefined
+                      ? "Energy not entered; one attempt is modeled."
+                      : `Conservatively budgeted ${todayStories.length * RAISING.actionEnergy[50]["2"]} of ${input.today.storyEnergy} available energy at ${RAISING.actionEnergy[50]["2"]} per attempt; recheck after each.`}
                   </span>
-                  : "No story attempt remaining today."}</td>
+                  : (tracked?.storyDone ?? progress.storyDone) && input.today?.storyEnergy === undefined ? "Story attempt already recorded today; enter current energy to plan another if the chocobo has enough."
+                  : input.today?.storyEnergy !== undefined && input.today.storyEnergy < RAISING.actionEnergy[50]["2"]
+                    ? `Not enough energy entered for another attempt; need at least ${RAISING.actionEnergy[50]["2"]}. Check again after any learning or inspiration energy return.`
+                    : todayStory && input.knownAbilities.includes(todayStory.name) ? "Ability already learned."
+                    : "No story attempt remaining today."}</td>
                 <td>{statSummary(todayPlan?.after ?? input.current)}
                   {healthFirst && <span className="raising-stat-purpose">Treatment is not assumed to have cured the condition.</span>}
                 </td>
@@ -932,7 +977,7 @@ export default function ChocoboRaisingPlanner() {
                 : step.foodId === null ? "Recalculate with feeding reports" : <RaisingFoodText text={`${step.foodCount} ${trainingActionName({ kind: "food", id: step.foodId })} (${step.foodCount * step.days} total)`} />}
                 {healthFirst && (step.feeding?.items.length || step.foodCount > 0) ? <strong className="raising-stat-purpose">Only after confirmed recovery and a fresh hunger check.</strong> : null}
                 {step.feeding && <span className="raising-stat-purpose">Affection afterward: {step.feeding.affectionAfter}/255{step.days > 1 ? " at block end" : ""} (estimate)</span>}</td>
-              <td>{step.story ? <>{`${step.story}: ${step.firstAttempt === step.attempt ? step.attempt : `${step.firstAttempt}-${step.attempt}`}/${STORY_ATTEMPTS_95}${step.assumedLearned ? "; assumes learned at end" : ""}`}
+              <td>{step.story ? <>{`${step.story}: ${step.firstAttempt === step.attempt ? step.attempt : `${step.firstAttempt}-${step.attempt}`}/${STORY_ATTEMPTS_95}${step.assumedLearned ? "; assumes learned at end" : ""}${(step.additionalStories ?? []).map(story => `; ${story.ability} ${story.attempt}/${STORY_ATTEMPTS_95}${story.assumedLearned ? " (assumes learned)" : ""}`).join("")}`}
                 {healthFirst && <strong className="raising-stat-purpose">Only after confirmed recovery and an energy check.</strong>}</> : "-"}</td>
               <td>{statSummary(step.after)}</td>
             </tr>)}</tbody>
@@ -959,7 +1004,7 @@ export default function ChocoboRaisingPlanner() {
         <ol>{plan.pending.map(ability => <li key={ability.name}>
           <strong>{ability.name}: {ability.story}</strong> - requires {ability.discernment} DSC after the story's +1. {ability.obtain}
         </li>)}</ol>
-        <p>Tell stories from adolescence (day {RAISING.settings.daysToAdolescent}); long walks require adulthood (day {RAISING.settings.daysToAdult1}). This scenario starts attempts no earlier than day {plan.firstStoryDay}, assuming the stories have been collected, and budgets one eligible attempt per day for {STORY_ATTEMPTS_95} days per missing ability. Each attempt has a {RAISING.learnChance}% chance; {STORY_ATTEMPTS_95} attempts gives {(storyLearningProbability(STORY_ATTEMPTS_95) * 100).toFixed(1)}% for <strong>one ability</strong>, not a guarantee or a combined chance for both.</p>
+        <p>Tell stories from adolescence (day {RAISING.settings.daysToAdolescent}); long walks require adulthood (day {RAISING.settings.daysToAdult1}). This scenario starts attempts no earlier than day {plan.firstStoryDay}, assuming the stories have been collected. You can make multiple attempts in one day if energy allows; today's estimate budgets 14 energy per attempt and does not assume energy refunds, while later days conservatively show at most one attempt. Each attempt has a {RAISING.learnChance}% chance; {STORY_ATTEMPTS_95} attempts gives {(storyLearningProbability(STORY_ATTEMPTS_95) * 100).toFixed(1)}% for <strong>one ability</strong>, not a guarantee or a combined chance for both.</p>
         <p>Failed attempts retain the story. Successful learning consumes it. Stop retelling a learned ability's story: that can give inspiration instead of a new ability.</p>
         <p className="raising-small">For stat arithmetic, each ability is assumed learned on the last of its {STORY_ATTEMPTS_95} reserved attempts; every attempt adds capped +1 DSC. Real learning can happen earlier or later. If a story is not yet available or the ability is still missing, do not follow later steps that lower DSC: keep feeding suitable maintenance food such as <RaisingFoodText text="Azouph Greens" />, maintain the threshold, and recalculate. Mark abilities already learned to avoid reserving another full allowance.</p>
       </details>}

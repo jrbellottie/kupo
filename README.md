@@ -51,7 +51,7 @@ Browse clamming locations and possible rewards, with information to help manage 
 Compare chocobo digging locations and estimated returns, including ore, weather and night-drop rates under their required conditions, alongside clearly labeled base-source ability-layer references.
 
 ### Chocobo Raising
-Save your egg's start time and record food, stories, and completed care to maintain a running stat estimate, corrected by trainer reports, and plan remaining training through day 128 with digging and racing presets. An optional non-yellow goal estimates color odds and plans worm feedings from your starting egg. Training follows a pinned reference ruleset, racing advice is community-based, and live availability and outcomes may differ.
+Save your egg's start time and record food, stories, and completed care to maintain a running stat estimate, corrected by trainer reports, and plan remaining training through day 128 with digging and racing presets. The planner can budget multiple same-day story attempts from available energy. An optional non-yellow goal estimates color odds and plans worm feedings from your starting egg. Training follows a pinned reference ruleset, racing advice is community-based, and live availability and outcomes may differ.
 
 ### 🌦️ Weather
 Look ahead at estimated weather and elemental-ore opportunities, and set reminders for upcoming windows. Forecasts are not guaranteed in-game conditions.

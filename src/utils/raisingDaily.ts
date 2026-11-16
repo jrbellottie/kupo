@@ -13,6 +13,7 @@ export type PlannerForm = Omit<RaisingGoalInput, "current" | "target" | "current
   avoidYellow?: boolean;
   eggId?: string;
   wormsFed?: string;
+  storyEnergy?: string;
   lostChickClues?: LostChickClues;
   storyKeyItems?: RaisingStoryKeyItem[];
 };
@@ -46,7 +47,7 @@ export function feedingInputKey(form: PlannerForm, report: FeedingReport): strin
   return JSON.stringify([
     STAT_KEYS.map(key => form.current[key]), STAT_KEYS.map(key => form.target[key]), form.useExactStats === true,
     form.desiredAbilities, form.knownAbilities, form.priority, report.affection, report.fullness, report.condition, report.day,
-    form.avoidYellow === true, form.eggId ?? "", form.wormsFed ?? "0",
+    form.avoidYellow === true, form.eggId ?? "", form.wormsFed ?? "0", form.storyEnergy ?? "",
     report.ailments ?? [], report.treatmentGiven === true, report.medicineId ?? null, report.events ?? [], form.lostChickClues ?? null,
   ]);
 }
@@ -79,6 +80,7 @@ function isSavedDaily(value: unknown): value is SavedRaisingDaily {
   const form = value.form;
   if (!statInputs(form.current) || !statInputs(form.target) || !abilityNames(form.desiredAbilities)
     || !abilityNames(form.knownAbilities) || !STAT_KEYS.some(key => key === form.priority)
+    || (form.storyEnergy !== undefined && typeof form.storyEnergy !== "string")
     || (form.useExactStats !== undefined && typeof form.useExactStats !== "boolean")
     || (form.avoidYellow !== undefined && typeof form.avoidYellow !== "boolean")
     || (form.eggId !== undefined && typeof form.eggId !== "string")

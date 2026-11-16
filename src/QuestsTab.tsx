@@ -142,6 +142,32 @@ const tdStyle: React.CSSProperties = {
   verticalAlign: "top",
 };
 
+type BellyReward = { item: string; chance: number; estimated?: boolean };
+type BellyFish = { fish: string; rewards: BellyReward[] };
+
+// ToAU-era trade eligibility and rates from the pinned source revision
+// ace1415cf5643d8d45ff72067522d97f (Inside_the_Belly.lua and its era module).
+const INSIDE_THE_BELLY_FISH: BellyFish[] = [
+  { fish: "Bhefhel Marlin", rewards: [{ item: "Brigand's Chart", chance: 14.3 }, { item: "Pirate's Chart", chance: 4.4 }] },
+  { fish: "Cave Cherax", rewards: [{ item: "Dwarf Pugil", chance: 26.2 }] },
+  { fish: "Dark Bass", rewards: [{ item: "Green Rock", chance: 4.6 }] },
+  { fish: "Emperor Fish", rewards: [{ item: "Cuir Highboots", chance: 1, estimated: true }] },
+  { fish: "Giant Catfish", rewards: [{ item: "Earth Wand", chance: 6.2 }] },
+  { fish: "Giant Chirai", rewards: [{ item: "Spool of Twinthread", chance: 1.2 }] },
+  { fish: "Giant Donko", rewards: [{ item: "Broken Halcyon Fishing Rod", chance: 4.7 }] },
+  { fish: "Gugrusaurus", rewards: [{ item: "Saber Shoot", chance: 0.4 }] },
+  { fish: "Jungle Catfish", rewards: [{ item: "Broken Hume Fishing Rod", chance: 3 }] },
+  { fish: "Lik", rewards: [{ item: "Spool of Opal Silk", chance: 0.5 }] },
+  { fish: "Ogre Eel", rewards: [{ item: "Turquoise Ring", chance: 2.5 }] },
+  { fish: "Ryugu Titan", rewards: [{ item: "Mercurial Sword", chance: 1.3 }] },
+  { fish: "Sea Zombie", rewards: [{ item: "Drill Calamary", chance: 26.1 }] },
+  { fish: "Silver Shark", rewards: [{ item: "Trident", chance: 1.4 }] },
+  { fish: "Takitaro", rewards: [{ item: "Philosopher's Stone", chance: 2.4 }] },
+  { fish: "Titanictus", rewards: [{ item: "Ancient Sword", chance: 1.3 }, { item: "Seashell", chance: 5, estimated: true }] },
+  { fish: "Tricorn", rewards: [{ item: "Chunk of Darksteel Ore", chance: 4, estimated: true }] },
+  { fish: "Zafmlug Bass", rewards: [{ item: "Blue Rock", chance: 1.4 }] },
+];
+
 const inputStyle: React.CSSProperties = {
   background: "#0c0c0c",
   color: "#eaeaea",
@@ -374,6 +400,58 @@ function Detail({ entry, onOpen, onBack }: { entry: Entry; onOpen: (id: string) 
           ))}
         </tbody>
       </table>
+
+      {entry.id === "inside-the-belly" && (
+        <section
+          aria-labelledby="inside-belly-fish-heading"
+          style={{
+            display: "grid",
+            gap: 8,
+            padding: 12,
+            border: "1px solid rgba(255,255,255,0.12)",
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.025)",
+          }}
+        >
+          <div>
+            <h4 id="inside-belly-fish-heading" style={{ margin: "0 0 4px", fontSize: 15 }}>
+              Turn-in fish and reward chances <span style={{ color: "#9aa0b8", fontSize: 12, fontWeight: 500 }}>({INSIDE_THE_BELLY_FISH.length} fish)</span>
+            </h4>
+            <div style={{ color: "#b8bdcc", fontSize: 12, lineHeight: 1.45 }}>
+              Eligible for the ToAU-era reference ruleset. Chance is per one-fish trade; at most one listed item can drop.
+              A trade without an item reward still pays gil. Estimated rates are marked.
+            </div>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table aria-label="Inside the Belly fish and item reward chances" style={{ borderCollapse: "collapse", width: "100%", minWidth: 420 }}>
+              <thead>
+                <tr>
+                  <th scope="col" style={thStyle}>Fish</th>
+                  <th scope="col" style={thStyle}>Possible item</th>
+                  <th scope="col" style={{ ...thStyle, textAlign: "right" }}>Chance per trade</th>
+                </tr>
+              </thead>
+              {INSIDE_THE_BELLY_FISH.map((fish) => (
+                <tbody key={fish.fish}>
+                  {fish.rewards.map((reward, index) => (
+                    <tr key={reward.item}>
+                      {index === 0 && (
+                        <th scope="rowgroup" rowSpan={fish.rewards.length} style={{ ...tdStyle, textAlign: "left", fontWeight: 700, minWidth: 130 }}>
+                          {fish.fish}
+                        </th>
+                      )}
+                      <td style={tdStyle}>{reward.item}</td>
+                      <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                        {reward.chance}%{reward.estimated && <span title="Estimated rate in the source data" style={{ marginLeft: 6, color: "#e8d47e", fontSize: 11 }}>Estimate</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              ))}
+            </table>
+          </div>
+        </section>
+      )}
 
       <ChainLinks label="Previous" links={entry.previous} onOpen={onOpen} />
       <ChainLinks label="Next" links={entry.next} onOpen={onOpen} />

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   AURA_TIERS,
   calculateFurniturePlan,
@@ -11,9 +11,79 @@ import {
   type Furniture,
   type PlannedFurniture,
 } from "./utils/moghancements";
+import { loadJson, saveJson } from "./utils/storage";
 import "./MoghancementTab.css";
 
 const ELEMENT_FILTER_ALL = "all";
+const MOGHANCEMENT_UI_KEY = "kupo.moghancement.ui.v1";
+
+type MoghancementUiState = {
+  effectId: number;
+  elementId: number;
+  tierId: (typeof AURA_TIERS)[number]["id"];
+  storageTarget: number;
+  furnitureSearch: string;
+  furnitureElementFilter: string;
+  craftableOnly: boolean;
+  customPieces: PlannedFurniture[] | null;
+};
+
+const DEFAULT_UI_STATE: MoghancementUiState = {
+  effectId: 512,
+  elementId: 1,
+  tierId: "faint",
+  storageTarget: MAX_FURNITURE_STORAGE,
+  furnitureSearch: "",
+  furnitureElementFilter: "target",
+  craftableOnly: false,
+  customPieces: null,
+};
+
+function restoreUiState(raw: unknown): MoghancementUiState {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return DEFAULT_UI_STATE;
+  const saved = raw as Record<string, unknown>;
+  const furnitureById = new Map(FURNITURE.map(item => [item.id, item]));
+  const purposeLabels: PlannedFurniture["purpose"][] = ["Moghancement source", "Guild signboard", "Guild stall", "Aura support", "Storage support"];
+  const customPieces = saved.customPieces === null
+    ? null
+    : Array.isArray(saved.customPieces)
+    ? (() => {
+      const pieces = new Map<number, PlannedFurniture>();
+      for (const rawPiece of saved.customPieces as unknown[]) {
+        if (!rawPiece || typeof rawPiece !== "object") continue;
+        const piece = rawPiece as Record<string, unknown>;
+        const furnitureId = piece.furnitureId;
+        const furniture = typeof furnitureId === "number" ? furnitureById.get(furnitureId) : undefined;
+        const quantity = piece.quantity;
+        if (!furniture || !Number.isInteger(quantity) || (quantity as number) < 1) continue;
+        const existing = pieces.get(furniture.id);
+        const purpose = purposeLabels.find(label => label === piece.purpose);
+        pieces.set(furniture.id, {
+          furniture,
+          quantity: furniture.rare ? 1 : (existing?.quantity ?? 0) + (quantity as number),
+          ...(existing?.purpose || !purpose ? {} : { purpose }),
+        });
+      }
+      return [...pieces.values()];
+    })()
+    : DEFAULT_UI_STATE.customPieces;
+  const filter = saved.furnitureElementFilter;
+  const validFilter = filter === "target" || filter === ELEMENT_FILTER_ALL
+    || (typeof filter === "string" && ELEMENTS.some(item => String(item.id) === filter));
+
+  return {
+    effectId: MOGHANCEMENTS.some(item => item.id === saved.effectId) ? saved.effectId as number : DEFAULT_UI_STATE.effectId,
+    elementId: ELEMENTS.some(item => item.id === saved.elementId) ? saved.elementId as number : DEFAULT_UI_STATE.elementId,
+    tierId: AURA_TIERS.some(tier => tier.id === saved.tierId) ? saved.tierId as MoghancementUiState["tierId"] : DEFAULT_UI_STATE.tierId,
+    storageTarget: typeof saved.storageTarget === "number" && Number.isFinite(saved.storageTarget)
+    ? Math.max(1, Math.min(MAX_FURNITURE_STORAGE, saved.storageTarget))
+    : DEFAULT_UI_STATE.storageTarget,
+    furnitureSearch: typeof saved.furnitureSearch === "string" ? saved.furnitureSearch : DEFAULT_UI_STATE.furnitureSearch,
+    furnitureElementFilter: validFilter ? filter as string : DEFAULT_UI_STATE.furnitureElementFilter,
+    craftableOnly: typeof saved.craftableOnly === "boolean" ? saved.craftableOnly : DEFAULT_UI_STATE.craftableOnly,
+    customPieces,
+  };
+}
 
 function recipeSummary(furniture: Furniture): string {
   if (furniture.recipes.length === 0) return "No recipe in the reference list";
@@ -30,14 +100,22 @@ function recipeIngredients(furniture: Furniture): string {
 }
 
 export default function MoghancementTab() {
-  const [effectId, setEffectId] = useState(512);
-  const [elementId, setElementId] = useState(1);
-  const [tierId, setTierId] = useState<(typeof AURA_TIERS)[number]["id"]>("faint");
-  const [storageTarget, setStorageTarget] = useState(MAX_FURNITURE_STORAGE);
-  const [furnitureSearch, setFurnitureSearch] = useState("");
-  const [furnitureElementFilter, setFurnitureElementFilter] = useState("target");
-  const [craftableOnly, setCraftableOnly] = useState(false);
-  const [customPieces, setCustomPieces] = useState<PlannedFurniture[] | null>(null);
+  const [ui, setUi] = useState(() => restoreUiState(loadJson<unknown>(MOGHANCEMENT_UI_KEY, null)));
+  const { effectId, elementId, tierId, storageTarget, furnitureSearch, furnitureElementFilter, craftableOnly, customPieces } = ui;
+  const updateUi = <K extends keyof MoghancementUiState>(key: K, value: MoghancementUiState[K]) => {
+    setUi(current => ({ ...current, [key]: value }));
+  };
+
+  useEffect(() => {
+    saveJson(MOGHANCEMENT_UI_KEY, {
+      ...ui,
+      customPieces: ui.customPieces?.map(({ furniture, quantity, purpose }) => ({
+        furnitureId: furniture.id,
+        quantity,
+        purpose,
+      })) ?? null,
+    });
+  }, [ui]);
 
   const effect = MOGHANCEMENTS.find(item => item.id === effectId) ?? MOGHANCEMENTS[0];
   const targetTier = AURA_TIERS.find(tier => tier.id === tierId) ?? AURA_TIERS[0];
@@ -55,13 +133,15 @@ export default function MoghancementTab() {
   const planComplete = Boolean(plan?.targetReached && plan.storageTargetReached);
   const quantities = new Map(plan?.pieces.map(piece => [piece.furniture.id, piece.quantity]));
   const setQuantity = (furniture: Furniture, quantity: number) => {
-    setCustomPieces(current => {
-      const pieces = current ?? suggestedPlan?.pieces ?? [];
-      if (quantity === 0) return pieces.filter(piece => piece.furniture.id !== furniture.id);
-      if (pieces.some(piece => piece.furniture.id === furniture.id)) {
-        return pieces.map(piece => piece.furniture.id === furniture.id ? { ...piece, quantity } : piece);
+    setUi(current => {
+      const pieces = current.customPieces ?? suggestedPlan?.pieces ?? [];
+      if (quantity === 0) {
+        return { ...current, customPieces: pieces.filter(piece => piece.furniture.id !== furniture.id) };
       }
-      return [...pieces, { furniture, quantity }];
+      if (pieces.some(piece => piece.furniture.id === furniture.id)) {
+        return { ...current, customPieces: pieces.map(piece => piece.furniture.id === furniture.id ? { ...piece, quantity } : piece) };
+      }
+      return { ...current, customPieces: [...pieces, { furniture, quantity }] };
     });
   };
 
@@ -105,19 +185,19 @@ export default function MoghancementTab() {
         <div className="mogha-controls">
           <label className="mogha-field">
             <span>Moghancement</span>
-            <select value={effectId} onChange={event => setEffectId(Number(event.target.value))}>
+            <select value={effectId} onChange={event => updateUi("effectId", Number(event.target.value))}>
               {MOGHANCEMENTS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
           </label>
           <label className="mogha-field">
             <span>Dominant aura element</span>
-            <select value={elementId} onChange={event => setElementId(Number(event.target.value))}>
+            <select value={elementId} onChange={event => updateUi("elementId", Number(event.target.value))}>
               {ELEMENTS.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
             </select>
           </label>
           <label className="mogha-field">
             <span>Target aura tier</span>
-            <select value={tierId} onChange={event => setTierId(event.target.value as typeof tierId)}>
+            <select value={tierId} onChange={event => updateUi("tierId", event.target.value as typeof tierId)}>
               {AURA_TIERS.map(tier => <option key={tier.id} value={tier.id}>{tier.label} · {tier.minimum}+ points</option>)}
             </select>
           </label>
@@ -128,7 +208,7 @@ export default function MoghancementTab() {
               min={1}
               max={MAX_FURNITURE_STORAGE}
               value={storageTarget}
-              onChange={event => setStorageTarget(Math.max(1, Math.min(MAX_FURNITURE_STORAGE, Number(event.target.value) || 1)))}
+              onChange={event => updateUi("storageTarget", Math.max(1, Math.min(MAX_FURNITURE_STORAGE, Number(event.target.value) || 1)))}
             />
           </label>
         </div>
@@ -148,8 +228,8 @@ export default function MoghancementTab() {
             <h2>{customPieces === null ? "Suggested setup" : "Your setup"}</h2>
             <p>Repeat furniture for aura, add storage, and keep your Moghancement source. Quantity 0 removes an item; totals update as you edit.</p>
             <div className="mogha-setup-actions">
-              <button type="button" onClick={() => setCustomPieces(null)} disabled={customPieces === null || !suggestedPlan}>Use suggested setup</button>
-              <button type="button" onClick={() => setCustomPieces([])}>Clear setup</button>
+              <button type="button" onClick={() => updateUi("customPieces", null)} disabled={customPieces === null || !suggestedPlan}>Use suggested setup</button>
+              <button type="button" onClick={() => updateUi("customPieces", [])}>Clear setup</button>
             </div>
           </div>
           {plan && <div className="mogha-summary">
@@ -188,7 +268,7 @@ export default function MoghancementTab() {
           <div className="mogha-catalog-controls">
             <label className="mogha-field">
               <span>Element</span>
-              <select value={furnitureElementFilter} onChange={event => setFurnitureElementFilter(event.target.value)}>
+              <select value={furnitureElementFilter} onChange={event => updateUi("furnitureElementFilter", event.target.value)}>
                 <option value="target">Selected aura element ({selectedElement.name})</option>
                 <option value={ELEMENT_FILTER_ALL}>All elements</option>
                 {ELEMENTS.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
@@ -196,10 +276,10 @@ export default function MoghancementTab() {
             </label>
             <label className="mogha-field mogha-search-field">
               <span>Search</span>
-              <input value={furnitureSearch} onChange={event => setFurnitureSearch(event.target.value)} placeholder="Furniture, craft, ingredient..." />
+              <input value={furnitureSearch} onChange={event => updateUi("furnitureSearch", event.target.value)} placeholder="Furniture, craft, ingredient..." />
             </label>
             <label className="mogha-check">
-              <input type="checkbox" checked={craftableOnly} onChange={event => setCraftableOnly(event.target.checked)} />
+              <input type="checkbox" checked={craftableOnly} onChange={event => updateUi("craftableOnly", event.target.checked)} />
               Listed recipe only
             </label>
           </div>

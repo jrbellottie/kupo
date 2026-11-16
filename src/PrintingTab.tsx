@@ -1,6 +1,6 @@
 import { lazy, Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Boxes, Coins, Hammer, Search, Tags, TrendingUp } from "lucide-react";
-import { DEFAULT_PRINT_SETTINGS, HQ_GAPS, PRINT_CRAFTS, isPrintRecipeAvailable, printingChances, restorePrintSettings, printGil as gil, printUnits as units, printPct as pct, printTone as tone, type PrintSettings, type PrintSettingsUpdate } from "./utils/printing";
+import { DEFAULT_PRINT_SETTINGS, HQ_GAPS, PRINT_CRAFTS, isPrintRecipeAvailable, printingChances, restorePrintSettings, printGil as gil, printUnits as units, printPct as pct, printTone as tone, type PrintRecipe, type PrintSettings, type PrintSettingsUpdate } from "./utils/printing";
 import { createPrintingChain, chainTierCosts, chainBatchAllocation, type ChainNode, type SourceChoice, type SourceChoices } from "./utils/printingChain";
 import { createPrintingPlanner } from "./utils/printingPlanner";
 import { PRINT_SKILL_CAP, reachablePrintTiers, printOutcomeSkillRequirements, printTierComparisons, selectPrintTier } from "./utils/printingTiers";
@@ -80,7 +80,7 @@ function IngredientSource({ node, demand, parentQuantity, branchColor, state, pr
 }
 
 export default function PrintingTab() {
-  const views = ["calculator", "quantities", "desynthesis", "prices"] as const;
+  const views = ["calculator", "quantities", "hq-tiers", "desynthesis", "prices"] as const;
   const [view, setView] = useState<typeof views[number]>(() => peekNavQuery("printing") ? "calculator" : loadJson("kupo.profits.view.v1", "calculator"));
   const [settings, setSettings] = useState(() => restorePrintSettings(loadJson<Partial<PrintSettings>>("kupo.profits.settings.v1",
     peekRestoredTabState<State>("printing")?.settings ?? loadJson<Partial<State>>("kupo.printing.v1", {}).settings ?? {})));
@@ -98,13 +98,105 @@ export default function PrintingTab() {
       const next = views[event.key === "Home" ? 0 : event.key === "End" ? views.length - 1 : (index + (event.key === "ArrowLeft" ? -1 : 1) + views.length) % views.length];
       setView(next);
       document.getElementById(`profits-tab-${next}`)?.focus();
-    }}>{tab === "prices" ? <Tags size={16} /> : tab === "quantities" ? <Boxes size={16} /> : <Hammer size={16} />}{tab === "calculator" ? "Crafting" : tab === "quantities" ? "Quantities" : tab === "desynthesis" ? "Desynthesis" : "Prices"}</button>)}</div>
+    }}>{tab === "prices" ? <Tags size={16} /> : tab === "quantities" ? <Boxes size={16} /> : tab === "hq-tiers" ? <TrendingUp size={16} /> : <Hammer size={16} />}{tab === "calculator" ? "Crafting" : tab === "quantities" ? "Quantities" : tab === "hq-tiers" ? "HQ Tiers" : tab === "desynthesis" ? "Desynthesis" : "Prices"}</button>)}</div>
     </CollapsibleSection>
     {view === "calculator" && <div className="print-price-unit"><PriceUnitSelector value={priceUnit} onChange={setPriceUnit} /></div>}
     <div id={`profits-panel-${view}`} role="tabpanel" aria-labelledby={`profits-tab-${view}`}>
-      {view === "calculator" ? <PrintingCalculator settings={settings} onSettingsChange={setting} priceUnit={priceUnit} /> : view === "quantities" ? <PrintQuantityView settings={settings} onSettingsChange={setting} /> : view === "desynthesis" ? <DesynthesisView settings={settings} onSettingsChange={setting} /> : <Suspense fallback={<p className="print-muted">Loading prices...</p>}><PricesTab /></Suspense>}
+      {view === "calculator" ? <PrintingCalculator settings={settings} onSettingsChange={setting} priceUnit={priceUnit} /> : view === "quantities" ? <PrintQuantityView settings={settings} onSettingsChange={setting} /> : view === "hq-tiers" ? <HqTiersView settings={settings} onSettingsChange={setting} /> : view === "desynthesis" ? <DesynthesisView settings={settings} onSettingsChange={setting} /> : <Suspense fallback={<p className="print-muted">Loading prices...</p>}><PricesTab /></Suspense>}
     </div>
   </section>;
+}
+
+const HQ_TIER_RANGES = [
+  { tier: 0, range: "+0 to +10 over recipe level" },
+  { tier: 1, range: "+11 to +30 over recipe level" },
+  { tier: 2, range: "+31 to +50 over recipe level" },
+  { tier: 3, range: "+51 or more over recipe level" },
+] as const;
+
+type HqTierEntry = { recipe: PrintRecipe; tier: number; requirements: ReturnType<typeof printingChances>["requirements"] };
+
+function HqTiersView({ settings, onSettingsChange }: { settings: PrintSettings; onSettingsChange: (patch: PrintSettingsUpdate) => void }) {
+  const [query, setQuery] = useState("");
+  const [craft, setCraft] = useState("");
+  const [selectedTier, setSelectedTier] = useState(0);
+  const [limit, setLimit] = useState(100);
+  const deferredQuery = useDeferredValue(query.trim().toLowerCase());
+  const tierGroups = useMemo(() => {
+    const groups: HqTierEntry[][] = [[], [], [], []];
+    let belowTierZero = 0;
+    if (settings.skillMode !== "character") return { groups, belowTierZero };
+    const matches = PRINT_RECIPES.filter((recipe) => {
+      if (craft && recipe.craft !== craft) return false;
+      if (!deferredQuery) return true;
+      return [
+        recipe.res.n,
+        recipe.craft,
+        recipe.era,
+        ...recipe.ing.map((item) => item.n),
+        ...(recipe.subs ?? []).map((sub) => sub.c),
+      ].some((value) => value.toLowerCase().includes(deferredQuery));
+    });
+    for (const recipe of matches) {
+      const chances = printingChances(recipe, settings);
+      if (chances.tier < 0) {
+        belowTierZero += 1;
+        continue;
+      }
+      groups[chances.tier].push({ recipe, tier: chances.tier, requirements: chances.requirements });
+    }
+    for (const group of groups) {
+      group.sort((a, b) => a.recipe.res.n.localeCompare(b.recipe.res.n)
+        || a.recipe.craft.localeCompare(b.recipe.craft)
+        || a.recipe.lvl - b.recipe.lvl);
+    }
+    return { groups, belowTierZero };
+  }, [craft, deferredQuery, settings]);
+  const selectedRecipes = tierGroups.groups[selectedTier];
+
+  useEffect(() => setLimit(100), [query, craft]);
+
+  return <div className="print-hq-tiers">
+    <CraftingLevels settings={settings} onChange={onSettingsChange} />
+    <p className="print-muted print-hq-explanation">HQ tier uses your effective skill surplus over the recipe level. The lowest surplus across the main craft and any required subcraft sets the tier. Skill bonuses are included.</p>
+    {settings.skillMode !== "character" ? (
+      <div className="print-empty"><p>Turn on “Use my actual skill” above to see recipes grouped by your entered crafting levels.</p></div>
+    ) : <>
+      <div className="print-hq-filters">
+        <label><span><Search size={15} /> Search recipes</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Output, ingredient, or craft" /></label>
+        <label>Craft<select value={craft} onChange={(event) => setCraft(event.target.value)}><option value="">All crafts</option>{PRINT_CRAFTS.map((item) => <option key={item}>{item}</option>)}</select></label>
+      </div>
+      <p className="print-muted">{tierGroups.groups.reduce((total, group) => total + group.length, 0)} recipes in HQ tiers · {tierGroups.belowTierZero} below tier 0 for these filters.</p>
+      <div className="print-hq-tier-grid" role="group" aria-label="Select HQ tier">
+        {HQ_TIER_RANGES.map(({ tier, range }) => (
+          <button type="button" key={tier} aria-pressed={selectedTier === tier} onClick={() => { setSelectedTier(tier); setLimit(100); }}>
+            <strong>Tier {tier}</strong><span>{range}</span><small>{tierGroups.groups[tier].length} recipes</small>
+          </button>
+        ))}
+      </div>
+      {selectedRecipes.length === 0 ? <div className="print-empty"><p>No recipes in this tier match the current skills and filters.</p></div> : <>
+        <div className="print-list-title">Showing {Math.min(limit, selectedRecipes.length)} of {selectedRecipes.length} tier {selectedTier} recipes</div>
+        <div className="print-table-wrap">
+          <table className="print-hq-table">
+            <thead><tr><th>Output</th><th>Recipe</th><th>Effective skill / cap</th><th>Era</th></tr></thead>
+            <tbody>{selectedRecipes.slice(0, limit).map(({ recipe, requirements }) => (
+              <tr key={recipe.id}>
+                <td><strong>{recipe.res.n}</strong>{recipe.ki && <small>Key item required</small>}</td>
+                <td>{recipe.craft} {recipe.lvl}{recipe.subs?.map((sub) => <small key={`${sub.c}-${sub.l}`}>{sub.c} {sub.l}</small>)}</td>
+                <td>{requirements.map((requirement) => (
+                  <span className="print-hq-requirement" key={requirement.craft}>
+                    {requirement.craft} {requirement.effective} / {requirement.cap} ({requirement.gap >= 0 ? "+" : ""}{requirement.gap})
+                  </span>
+                ))}</td>
+                <td>{recipe.era || "Base"}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+        {selectedRecipes.length > limit && <button type="button" className="print-command" onClick={() => setLimit((current) => Math.min(current + 100, selectedRecipes.length))}>Show 100 more</button>}
+      </>}
+    </>}
+  </div>;
 }
 
 function PrintingCalculator({ settings, onSettingsChange: setting, priceUnit }: { settings: PrintSettings; onSettingsChange: (patch: PrintSettingsUpdate) => void; priceUnit: ProfitPriceUnit }) {

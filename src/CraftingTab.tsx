@@ -1191,7 +1191,7 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
                         <td style={tdStyle}>{formatGuildPointCap(r.res.n)}</td>
                         <td style={tdStyle}>{r.craft}</td>
                         <td style={tdStyle}>{r.lvl}</td>
-                        <td style={tdStyle}>{r.crystal}</td>
+                        <td style={{ ...tdStyle, color: CRYSTAL_COLORS[r.crystal] }}>{r.crystal}</td>
                         <td style={{ ...tdStyle, ...(r.era === "WotG" ? { color: "#D8B04B" } : {}) }}>
                           {eraLabel(r.era)}
                         </td>

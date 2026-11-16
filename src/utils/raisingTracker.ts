@@ -131,6 +131,10 @@ export function raisingTrackerState(tracker: RaisingTracker, currentDay: number)
   return {
     stats, knownAbilities, wormsFed, warnings: [...warnings], missingCareDays,
     storyDone: tracker.entries.some(entry => entry.day === currentDay && entry.kind === "story"),
+    storyAttemptsToday: tracker.entries.filter(entry => entry.day === currentDay && entry.kind === "story").length,
+    storyAttempts: Object.fromEntries(RAISING_ABILITIES.map(ability => [
+      ability.name, tracker.entries.filter(entry => entry.kind === "story" && entry.ability === ability.name && !entry.learned).length,
+    ])),
   };
 }
 

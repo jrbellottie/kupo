@@ -15,7 +15,7 @@ const actions = [
   { id: 42, name: "Short Walk", stage: "Chick", effect: "Local trainer encounters, items and the lost-chick mini-quest. Energy spent lowers chick fullness at the next daily update. Not the daily Take a Walk care plan." },
   { id: 43, name: "Regular Walk", stage: "Adolescent", effect: "Trainer/rival encounters and items. The first regular walk meets the rivals, unlocking Compete with Others." },
   { id: 44, name: "Long Walk", stage: "Adult", effect: "More trainer encounters, including Brutus. Dietmund can appear after Save My Son; this alone does not verify a story reward." },
-  { id: 50, name: "Tell a Story", stage: "Adolescent", effect: "A selected ability story adds +1 DSC before its threshold check. A successful learning/inspiration roll consumes the story and restores 10-100 energy." },
+  { id: 50, name: "Tell a Story", stage: "Adolescent", effect: "You can tell stories repeatedly while energy allows; each attempt adds +1 DSC before its threshold check and costs 11-14 energy. Successful learning or inspiration consumes the story and restores 10-100 energy; check energy again before continuing." },
   { id: 51, name: "Scold", stage: "Chick", effect: "Lowers affection by 10, clears spoiled behavior and wakes a sleeping bird if it has enough energy. Chocotonic is the immediate waking food alternative." },
   { id: 52, name: "Compete with Others", stage: "Adolescent + rivals met", effect: "Estimated 50% win chance; +1 affection and a pending boredom cure. Three wins earn the Happy Chocobo story." },
 ] as const;

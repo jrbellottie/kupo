@@ -622,6 +622,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
   );
   const [sSortKey, setSSortKey] = useState<SpotKey>(initialUi.sSortKey);
   const [sSortDir, setSSortDir] = useState<SortDir>(initialUi.sSortDir);
+  const [spotVisibleRows, setSpotVisibleRows] = useState(MAX_VISIBLE_ROWS);
 
   // ---- Practical skill-up combinations ----
   const [uSkill, setUSkill] = useState(initialUi.uSkill);
@@ -1489,7 +1490,11 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
             : mode === "spots"
               ? `${spotResults.length.toLocaleString()} calculated fishing combinations`
               : `${results.length.toLocaleString()} of ${BAIT.length.toLocaleString()} entries`}
-          {results.length > MAX_VISIBLE_ROWS ? ` (showing first ${MAX_VISIBLE_ROWS} — refine filters)` : ""}
+          {mode === "spots" && spotResults.length > spotVisibleRows
+            ? ` (showing first ${spotVisibleRows.toLocaleString()} — refine filters or show more)`
+            : mode !== "spots" && results.length > MAX_VISIBLE_ROWS
+              ? ` (showing first ${MAX_VISIBLE_ROWS} — refine filters)`
+              : ""}
         </div>
       </div>
 
@@ -1992,7 +1997,7 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
                     </td>
                   </tr>
                 ) : (
-                  spotResults.slice(0, MAX_VISIBLE_ROWS).map((p, i) => {
+                  spotResults.slice(0, spotVisibleRows).map((p, i) => {
                     const rowKey = `spots|${p.zone}|${p.area}|${p.fish}|${p.bait}|${p.rod}|${i}`;
                     const selected = selectedRowKey === rowKey;
                     const expanded = expandedSpotKey === rowKey;
@@ -2404,6 +2409,13 @@ export default function BaitTab({ cal = DEFAULT_CALIBRATION, mode: activeMode, o
               </tbody>
             </table>
           )}
+          {mode === "spots" && spotResults.length > spotVisibleRows && <button
+            type="button"
+            style={styles.buttonCompact}
+            onClick={() => setSpotVisibleRows((current) => Math.min(current + MAX_VISIBLE_ROWS, spotResults.length))}
+          >
+            Show {Math.min(MAX_VISIBLE_ROWS, spotResults.length - spotVisibleRows).toLocaleString()} more results
+          </button>}
         </div>
       </div>
     </section>
