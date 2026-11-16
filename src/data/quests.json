@@ -22347,21 +22347,21 @@
    "startNpc": "Zaldon",
    "startZone": "Selbina",
    "startCoord": "H-9",
-   "requirements": "Minimum total of 30 Fishing Skill (includes gear and synthesis support bonuses)",
+   "requirements": "Complete The Real Gift; total Fishing skill 30 or higher (including gear and support bonuses) to begin and make the first turn-in.",
    "fame": null,
    "fameArea": null,
    "level": null,
    "items": [
-    "Various fish (see below)."
+    "One eligible fish per trade (see the turn-in table)."
    ],
    "keyItems": [],
    "titles": [
-    "Cordon Bleu Fisher (Giant Catfish)",
+    "Cordon Bleu Fisher (Giant Catfish or Ogre Eel)",
     "Ace Angler (Silver Shark)",
     "Lu Shang-like Fisher King (Titanictus)"
    ],
    "repeatable": true,
-   "reward": "Varies; see below; Notable:; Brigand's Chart (from Bhefhel Marlin); Pirate's Chart (from Bhefhel Marlin); Saber Shoot (from Gugrusaurus); Opal Silk (from Lik); Puffin Ring (from Crocodilos); Noddy Ring (from Pelazoea); Shaper's Shawl (from Matsya)",
+   "reward": "Gil for every accepted fish, a chance at an item, and titles for certain fish. Notable items: Brigand's Chart and Pirate's Chart (Bhefhel Marlin), Saber Shoot (Gugrusaurus), and Opal Silk (Lik). See the tables for all rewards and later-era restrictions.",
    "previous": [
     {
      "name": "The Real Gift",
@@ -22383,44 +22383,35 @@
     }
    ],
    "walkthrough": [
-    "Talk to Zaldon with a minimum total of 30 fishing skill to begin the quest.",
-    "  See the Fishing page for gear that can boost your fishing skill, allowing you to accept the quest with as little as 22 fishing skill.",
-    "If there is an item in the fish he'll give it to you and he'll give you some gil for compensation for taking the fish. Larger fish have increased odds of providing the item.",
-    "  Some of these items are used in the quests Indomitable Spirit, Brigand's Chart, and Pirate's Chart.",
-    "When questing the Ebisu Fishing Rod you DO NOT have to have the Serpent Rumors prior to getting your items. You do, however, have to have Serpent Rumors in order to catch the Lik and Gugrusaurus. And to start Indomitable Spirit to get the Ebisu Fishing Rod.",
-    "## The Fish List",
-    "Those listed with Skill 100 and above are considered \"legendary\" fish.",
-    "! Fish !!Skill !!Gil Reward !!Possible Item(s)",
-    "2x Aurora Bass",
-    "3x Aurora Bass",
-    "Plumb Boots",
-    "Mildewy Ingot",
-    "Venom Dust",
-    "Venom Dust",
-    "Mithran Fishing Rod",
-    "Riftcinder",
-    "<!-- |-",
-    "-->",
-    "## Drop Rates While Keeping Charts",
-    "It is wellknown that if you store either a Pirate's Chart or a Brigand's Chart in your inventory and continue trading Zaldon marlins that you will eventually receive the other chart from him. What is not known is whether this affects the drop rate of the second chart. Obviously, the game must check your inventory in order to know that you are holding the chart. Thus, there are two possibilities:",
-    "The game checks your inventory, sees that you are holding a chart, then gives you the other one. In this case, the drop rate of the chart when holding should be equal to the combined drop rates for both charts when not holding.",
-    "The game checks your inventory, sees that you are holding a chart, then drops the chart without informing you. In other words, the drop rates for the charts are independent of each other. In this case, the drop rate when holding a chart will be equal to the drop rate of the chart when not holding.",
-    "Clearly, the first case is preferable. It would mean that players can hold on to a chart without fear that they are silently missing out on obtaining more. The way to determine which is happening is to also keep track of drop rates when holding charts. A preliminary study posted on [http://www.titanictus.com/viewtopic.php?t=1881 Titanictus.com] showed that the drop rate when holding is equal to the drop rate when not holding, meaning the second case is how the game actually works. The sample size of that experiment was too small to be conclusive though.",
-    "If you trade marlins without holding on to a chart, please post those drop rates in the table above. If, however, you trade marlins to Zaldon while holding a chart in your inventory, please post the drop rates below.",
-    "Pirate's Chart (While holding a Brigand's Chart in your inventory) -",
-    "Brigand's Chart (While holding a Pirate's Chart in your inventory) -",
-    "## Update History",
-    "November 2021. Larger fish now have an increased chance of providing an item. New fish added to the accepted list.",
-    "## References",
-    "[https://www.ffxiah.com/forum/topic/56349/new-guttable-fish-nov-2021-update FFXIAH forum thread on Nov 2021 changes]."
+    "Complete The Real Gift, then talk to Zaldon in Selbina (H-9) with at least 30 total Fishing skill, including gear and support bonuses.",
+    "Trade exactly one eligible fish at a time. The first accepted trade completes the quest, even if no item is found. Further turn-ins are repeatable and do not require 30 Fishing skill after completion.",
+    "Every accepted trade pays the listed gil and can award at most one item result. Quantities are shown separately. Fish size does not change the item chance.",
+    "Giant Catfish and Ogre Eel award Cordon Bleu Fisher; Silver Shark awards Ace Angler; Titanictus awards Lu Shang-like Fisher King. These titles do not require an item drop.",
+    "You can obtain Saber Shoot and Opal Silk before learning Serpent Rumors; that key item is needed to catch Lik and Gugrusaurus yourself and to start Indomitable Spirit.",
+    "Holding either chart does not redirect its reward roll to the other chart. Make inventory room and avoid trading for a Rare item you already hold: the fish is consumed before the reward is delivered.",
+    "Turnabaligi is not accepted under the ToAU ruleset. Its later-era rewards are Dark Ore (1%), Ice Ore (1.4%), and Water Ore (1.4%), plus 340 gil per accepted trade. The era override requires WotG for this turn-in; blocked fish are kept.",
+    "The later-era reference table lists additional fish in the base quest script, not extra eligible ToAU turn-ins. Live-server expansion settings or custom changes may differ."
    ],
    "client": "Zaldon (Fishermen's Guild Salesroom, Selbina)",
    "summary": "Some fish in Vana'diel like to eat shiny objects. If you catch one, let Zaldon cut it open for you.",
    "coords": [
     "H-9"
    ],
-   "mapRefs": [],
-   "stepRefs": [],
+   "mapRefs": [
+    {
+     "zone": "Selbina",
+     "mapNo": null,
+     "pos": "H-9"
+    }
+   ],
+   "stepRefs": [
+    {
+     "step": 0,
+     "zone": "Selbina",
+     "mapNo": null,
+     "pos": "H-9"
+    }
+   ],
    "headingRefs": [],
    "url": "https://ffxiclopedia.fandom.com/wiki/Inside_the_Belly"
   },

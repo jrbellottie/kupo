@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { CollapsibleSection } from "./ScreenControls";
 import { loadJson, saveJson } from "./utils/storage";
 import questData from "./data/quests.json";
+import bellyData from "./data/insideBelly.json";
 import mapData from "./data/maps.json";
 import MapView, { MapDef } from "./MapView";
 import { captureScrollPosition, restoreScrollPosition, type ScrollPosition } from "./utils/scrollPosition";
@@ -70,7 +71,8 @@ const SEARCH = new Map(
   ALL.map((e) => [
     e.id,
     [e.name, e.number, e.startNpc, e.startZone, e.startCoord, e.requirements, e.reward, e.client, e.summary,
-      ...e.items, ...e.keyItems, ...e.titles, ...e.walkthrough]
+      ...e.items, ...e.keyItems, ...e.titles, ...e.walkthrough,
+      ...(e.id === "inside-the-belly" ? bellyData.fish.flatMap(fish => [fish.fish, ...fish.rewards.map(reward => reward.item)]) : [])]
       .filter(Boolean)
       .join("\n")
       .toLowerCase(),
@@ -142,31 +144,46 @@ const tdStyle: React.CSSProperties = {
   verticalAlign: "top",
 };
 
-type BellyReward = { item: string; chance: number; estimated?: boolean };
-type BellyFish = { fish: string; rewards: BellyReward[] };
+type BellyReward = { item: string; chance: number; min?: number; max?: number; estimated?: boolean };
+type BellyFish = { fish: string; era: string; gil: number; title?: string; rewards: BellyReward[] };
+const BELLY_ELIGIBLE = bellyData.fish.filter(fish => fish.era === "ToAU");
+const BELLY_LATER = bellyData.fish.filter(fish => fish.era !== "ToAU");
 
-// ToAU-era trade eligibility and rates from the pinned source revision
-// ace1415cf5643d8d45ff72067522d97f (Inside_the_Belly.lua and its era module).
-const INSIDE_THE_BELLY_FISH: BellyFish[] = [
-  { fish: "Bhefhel Marlin", rewards: [{ item: "Brigand's Chart", chance: 14.3 }, { item: "Pirate's Chart", chance: 4.4 }] },
-  { fish: "Cave Cherax", rewards: [{ item: "Dwarf Pugil", chance: 26.2 }] },
-  { fish: "Dark Bass", rewards: [{ item: "Green Rock", chance: 4.6 }] },
-  { fish: "Emperor Fish", rewards: [{ item: "Cuir Highboots", chance: 1, estimated: true }] },
-  { fish: "Giant Catfish", rewards: [{ item: "Earth Wand", chance: 6.2 }] },
-  { fish: "Giant Chirai", rewards: [{ item: "Spool of Twinthread", chance: 1.2 }] },
-  { fish: "Giant Donko", rewards: [{ item: "Broken Halcyon Fishing Rod", chance: 4.7 }] },
-  { fish: "Gugrusaurus", rewards: [{ item: "Saber Shoot", chance: 0.4 }] },
-  { fish: "Jungle Catfish", rewards: [{ item: "Broken Hume Fishing Rod", chance: 3 }] },
-  { fish: "Lik", rewards: [{ item: "Spool of Opal Silk", chance: 0.5 }] },
-  { fish: "Ogre Eel", rewards: [{ item: "Turquoise Ring", chance: 2.5 }] },
-  { fish: "Ryugu Titan", rewards: [{ item: "Mercurial Sword", chance: 1.3 }] },
-  { fish: "Sea Zombie", rewards: [{ item: "Drill Calamary", chance: 26.1 }] },
-  { fish: "Silver Shark", rewards: [{ item: "Trident", chance: 1.4 }] },
-  { fish: "Takitaro", rewards: [{ item: "Philosopher's Stone", chance: 2.4 }] },
-  { fish: "Titanictus", rewards: [{ item: "Ancient Sword", chance: 1.3 }, { item: "Seashell", chance: 5, estimated: true }] },
-  { fish: "Tricorn", rewards: [{ item: "Chunk of Darksteel Ore", chance: 4, estimated: true }] },
-  { fish: "Zafmlug Bass", rewards: [{ item: "Blue Rock", chance: 1.4 }] },
-];
+function BellyTable({ fish, later = false }: { fish: BellyFish[]; later?: boolean }) {
+  return (
+    <div style={{ overflowX: "auto" }}>
+      <table aria-label={later ? "Inside the Belly later-era rewards (not eligible in ToAU)" : "Inside the Belly eligible fish and rewards"} style={{ borderCollapse: "collapse", width: "100%", minWidth: 620 }}>
+        <thead>
+          <tr>
+            <th scope="col" style={thStyle}>Fish</th>
+            {later && <th scope="col" style={thStyle}>Era gate</th>}
+            <th scope="col" style={{ ...thStyle, textAlign: "right" }}>Gil per trade</th>
+            <th scope="col" style={thStyle}>Possible item</th>
+            <th scope="col" style={{ ...thStyle, textAlign: "right" }}>Quantity</th>
+            <th scope="col" style={{ ...thStyle, textAlign: "right" }}>Chance per trade</th>
+          </tr>
+        </thead>
+        <tbody>
+          {fish.flatMap((entry, fishIndex) => entry.rewards.map((reward, index) => (
+            <tr key={`${entry.fish}-${index}`} style={{ background: fishIndex % 2 === 0 ? "rgba(255,255,255,0.025)" : undefined }}>
+              <th scope="row" style={{ ...tdStyle, textAlign: "left", fontWeight: 700 }}>
+                {entry.fish}
+                {entry.title && <div style={{ color: "#b8bdcc", fontSize: 11, fontWeight: 400 }}>Title: {entry.title}</div>}
+              </th>
+              {later && <td style={tdStyle}>{entry.era}</td>}
+              <td style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>{entry.gil.toLocaleString()}</td>
+              <td style={tdStyle}>{reward.item}</td>
+              <td style={{ ...tdStyle, textAlign: "right" }}>{reward.min == null ? 1 : reward.min === reward.max ? reward.min : `${reward.min}-${reward.max}`}</td>
+              <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
+                {reward.chance}%{reward.estimated && <span title="The source marks this configured rate as an estimate" style={{ marginLeft: 6, color: "#e8d47e", fontSize: 11 }}>Estimate</span>}
+              </td>
+            </tr>
+          )))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
 
 const inputStyle: React.CSSProperties = {
   background: "#0c0c0c",
@@ -415,40 +432,33 @@ function Detail({ entry, onOpen, onBack }: { entry: Entry; onOpen: (id: string) 
         >
           <div>
             <h4 id="inside-belly-fish-heading" style={{ margin: "0 0 4px", fontSize: 15 }}>
-              Turn-in fish and reward chances <span style={{ color: "#9aa0b8", fontSize: 12, fontWeight: 500 }}>({INSIDE_THE_BELLY_FISH.length} fish)</span>
+              Eligible turn-ins <span style={{ color: "#9aa0b8", fontSize: 12, fontWeight: 500 }}>({BELLY_ELIGIBLE.length} fish, ToAU)</span>
             </h4>
             <div style={{ color: "#b8bdcc", fontSize: 12, lineHeight: 1.45 }}>
-              Eligible for the ToAU-era reference ruleset. Chance is per one-fish trade; at most one listed item can drop.
-              A trade without an item reward still pays gil. Estimated rates are marked.
+              Trade one fish at a time. Each accepted trade pays gil and rolls at most one item result; repeated rows are alternatives, not extra gil payments.
+              The remaining chance gives gil only. Fish size does not affect the roll. Rates marked Estimate are configured values that the source labels as guesses.
             </div>
           </div>
-          <div style={{ overflowX: "auto" }}>
-            <table aria-label="Inside the Belly fish and item reward chances" style={{ borderCollapse: "collapse", width: "100%", minWidth: 420 }}>
-              <thead>
-                <tr>
-                  <th scope="col" style={thStyle}>Fish</th>
-                  <th scope="col" style={thStyle}>Possible item</th>
-                  <th scope="col" style={{ ...thStyle, textAlign: "right" }}>Chance per trade</th>
-                </tr>
-              </thead>
-              {INSIDE_THE_BELLY_FISH.map((fish) => (
-                <tbody key={fish.fish}>
-                  {fish.rewards.map((reward, index) => (
-                    <tr key={reward.item}>
-                      {index === 0 && (
-                        <th scope="rowgroup" rowSpan={fish.rewards.length} style={{ ...tdStyle, textAlign: "left", fontWeight: 700, minWidth: 130 }}>
-                          {fish.fish}
-                        </th>
-                      )}
-                      <td style={tdStyle}>{reward.item}</td>
-                      <td style={{ ...tdStyle, textAlign: "right", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>
-                        {reward.chance}%{reward.estimated && <span title="Estimated rate in the source data" style={{ marginLeft: 6, color: "#e8d47e", fontSize: 11 }}>Estimate</span>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              ))}
-            </table>
+          <BellyTable fish={BELLY_ELIGIBLE} />
+          <div style={{ color: "#e8d47e", fontSize: 13, lineHeight: 1.45 }}>
+            Turnabaligi is not accepted in ToAU. Its Dark Ore (1%), Ice Ore (1.4%), and Water Ore (1.4%) rewards require the WotG era gate.
+            Blocked fish are not consumed.
+          </div>
+          <details>
+            <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 700, padding: "6px 0" }}>
+              Later-era reference: {BELLY_LATER.length} fish - not eligible in ToAU
+            </summary>
+            <p style={{ color: "#b8bdcc", fontSize: 12, lineHeight: 1.45 }}>
+              These are base-script rewards, not additional ToAU turn-ins. Era gate is the expansion required by the override,
+              not necessarily the fish's release expansion. Live-server settings or custom changes may differ.
+            </p>
+            <BellyTable fish={BELLY_LATER} later />
+          </details>
+          <div style={{ color: "#9aa0b8", fontSize: 12 }}>
+            Source checked {bellyData.source.checked}:{" "}
+            <a href={`${bellyData.source.repository}/blob/${bellyData.source.revision}/${bellyData.source.questPath}`} target="_blank" rel="noreferrer" style={{ color: "#7ec4e8" }}>Quest rewards</a>
+            {" · "}
+            <a href={`${bellyData.source.repository}/blob/${bellyData.source.revision}/${bellyData.source.eraPath}`} target="_blank" rel="noreferrer" style={{ color: "#7ec4e8" }}>Era restrictions</a>
           </div>
         </section>
       )}

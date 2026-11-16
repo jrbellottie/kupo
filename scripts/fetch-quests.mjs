@@ -9,7 +9,7 @@
 //
 // Usage: node scripts/fetch-quests.mjs            (full run)
 //        LIMIT=10 node scripts/fetch-quests.mjs   (parse only first N pages per category - testing)
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const EDEN = "https://classicffxi.fandom.com/api.php";
@@ -1181,6 +1181,11 @@ for (const e of all) {
 console.log(`\nChain links: ${linked} resolved, ${dangling} unresolved (kept as names)`);
 
 // Write -------------------------------------------------------------------------------------------
+// Keep source-verified quest mechanics separate from the later-retail wiki import.
+const belly = JSON.parse(await readFile(new URL("../src/data/insideBelly.json", import.meta.url), "utf8"));
+const bellyQuest = quests.find(entry => entry.id === "inside-the-belly");
+if (bellyQuest) Object.assign(bellyQuest, belly.quest);
+
 quests.sort((a, b) => a.group.localeCompare(b.group) || a.name.localeCompare(b.name));
 const numKey = (n) => (n ? n.split("-").map((x) => x.padStart(3, "0")).join(".") : "999");
 missions.sort((a, b) => a.group.localeCompare(b.group) || numKey(a.number).localeCompare(numKey(b.number)) || a.name.localeCompare(b.name));
