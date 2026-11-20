@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { styles } from "./styles";
 import RaisingFoodText from "./RaisingFoodText";
-import { RAISING, STAT_KEYS, STAT_LABELS } from "./utils/chocoboRaising";
+import { RAISING, STAT_KEYS, STAT_LABELS, STAT_BANDS, statRank } from "./utils/chocoboRaising";
 import { RAISING_ABILITIES, LAST_RAISING_DAY } from "./utils/chocoboRaisingPlanner";
 import { raisingRecordLabel, raisingTrackerState, type RaisingRecord, type RaisingTracker } from "./utils/raisingTracker";
 
@@ -37,18 +37,26 @@ export default function RaisingProgressTracker({ tracker, currentDay, canRecord,
     else if (kind === "story") onRecord({ kind, day, ability, learned });
     else onRecord({ kind, day, careId: selectedCareId, result: careResult });
   };
-  return <section aria-label="Recorded raising progress" style={styles.subCard}>
+  return <section aria-label="Recorded raising progress" className="raising-panel raising-panel-progress">
     <h4>Recorded progress</h4>
     {tracker && state ? <>
-      <p><strong>Running stat estimate</strong> from your day {tracker.day} starting report and {tracker.entries.length} saved entries. Calculating or restarting does not reset it.</p>
+      <p>Trainer descriptions are ranges, not exact values. Edits above update this record automatically; logged actions carry the estimate forward.</p>
       <div className="raising-table-wrap"><table aria-label="Tracked current stats">
         <thead><tr>{STAT_KEYS.map(key => <th key={key}>{STAT_LABELS[key]}</th>)}</tr></thead>
-        <tbody><tr>{STAT_KEYS.map(key => <td key={key}>{state.stats[key]}</td>)}</tr></tbody>
+        <tbody><tr>{STAT_KEYS.map(key => {
+          const report = state.reports[key];
+          const band = STAT_BANDS[statRank(report.value)];
+          return <td key={key}>
+            <strong>{report.exact ? `${report.value} (exact report)` : `${band.description} (${band.min}-${band.max})`}</strong>
+            <span className="raising-stat-purpose">Reported day {report.day}</span>
+            <span className="raising-stat-estimate">Estimate now: {state.stats[key]}</span>
+          </td>;
+        })}</tr></tbody>
       </table></div>
       <p>Learned: <strong>{state.knownAbilities.join(", ") || "none recorded"}</strong>. Owning a story is not the same as learning its ability.</p>
       {state.warnings.length > 0 && <ul className="raising-small">{state.warnings.map(warning => <li key={warning}>{warning}</li>)}</ul>}
-      {state.missingCareDays.length > 0 && <p role="status" className="raising-notice">Care not recorded for days {state.missingCareDays.join(", ")}. Log the completed care from the trainer's reports, including missed days, or confirm current stat descriptions below. Queued care is not automatically counted as completed.</p>}
-    </> : <p>Start from the stat descriptions or exact values entered below, after that day's care and before the actions you want to log. For earlier actions, choose an earlier starting-report day and enter the reports from then. Old calculations were not action logs and cannot recover unrecorded gains.</p>}
+      {state.missingCareDays.length > 0 && <p role="status" className="raising-notice">Care not recorded for days {state.missingCareDays.join(", ")}. Log completed care or update the trainer descriptions above. Scheduled care is not counted as completed.</p>}
+    </> : <p>Start from the stat descriptions or exact values entered above, after that day's care and before the actions you want to log. For earlier actions, choose an earlier starting-report day and enter the reports from then. Old calculations were not action logs and cannot recover unrecorded gains.</p>}
     <form onSubmit={event => { event.preventDefault(); submit(); }}>
       <div className="raising-controls">
         <label>{tracker ? "Action day" : "Starting-report day"}<input style={styles.input} type="number"
@@ -91,7 +99,7 @@ export default function RaisingProgressTracker({ tracker, currentDay, canRecord,
           </>}
         </>}
       </div>
-      {tracker && kind === "food" && <p className="raising-small">Record only items actually eaten, in feeding order. This logs what happened; it is not a feeding recommendation. Random stat effects remain unknown; confirm descriptions afterward. Historical food does not change today's hunger report.</p>}
+      {tracker && kind === "food" && <p className="raising-small">Record only items actually eaten, in feeding order. This logs what happened; it is not a feeding recommendation. Random stat effects remain unknown; update descriptions afterward. Historical food does not change today's hunger report.</p>}
       {tracker && kind === "story" && <p className="raising-small">Each completed ability-story attempt adds 1 DSC before caps, even when learning fails. Check success only if the ability was learned; an inspiration without learning is not a learned ability.</p>}
       <button style={styles.buttonCompact} type="submit" disabled={!canRecord}>{tracker ? "Record completed action" : "Start tracking from these reports"}</button>
     </form>

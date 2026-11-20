@@ -5,7 +5,7 @@ export type RaisingRecord = { day: number } & (
   | { kind: "food"; foodId: number; count: number; forgottenAbility?: string }
   | { kind: "story"; ability: string; learned: boolean }
   | { kind: "care"; careId: number; result: "unknown" | "poor" | "good" }
-  | { kind: "report"; stats: RaisingStats; exact: boolean }
+  | { kind: "report"; stats: RaisingStats; exact: boolean; keys?: (keyof RaisingStats)[] }
   | { kind: "abilities"; abilities: string[] }
 );
 export type RaisingTracker = {
@@ -35,7 +35,9 @@ function validEntry(value: unknown): value is RaisingRecord {
       && (value.forgottenAbility === undefined || RAISING_ABILITIES.some(ability => ability.name === value.forgottenAbility));
     case "story": return RAISING_ABILITIES.some(ability => ability.name === value.ability) && typeof value.learned === "boolean";
     case "care": return RAISING.plans.some(plan => plan.id === value.careId) && ["unknown", "poor", "good"].includes(String(value.result));
-    case "report": return validStats(value.stats) && typeof value.exact === "boolean";
+    case "report": return validStats(value.stats) && typeof value.exact === "boolean"
+      && (value.keys === undefined || Array.isArray(value.keys) && value.keys.length > 0
+        && value.keys.every(key => STAT_KEYS.includes(key)) && new Set(value.keys).size === value.keys.length);
     case "abilities": return abilities(value.abilities);
     default: return false;
   }
@@ -58,13 +60,21 @@ export function validRaisingTrackers(value: unknown): value is RaisingTracker[] 
   }
 }
 
-export function reconcileRaisingStats(current: RaisingStats, report: RaisingStats, exact: boolean): RaisingStats {
+export function reconcileRaisingStats(current: RaisingStats, report: RaisingStats, exact: boolean, keys: readonly (keyof RaisingStats)[] = STAT_KEYS): RaisingStats {
   if (!validStats(report)) throw new Error("Stat reports must fit the individual and combined stat caps.");
-  if (exact) return { ...report };
-  const minimum = { ...report };
-  for (const key of STAT_KEYS) minimum[key] = STAT_BANDS[Math.floor(report[key] / 32)].min;
+  const minimum = { ...current };
+  const maximum = { ...current };
+  for (const key of STAT_KEYS) {
+    if (!keys.includes(key)) continue;
+    const value = report[key];
+    minimum[key] = exact ? value : STAT_BANDS[Math.floor(value / 32)].min;
+    maximum[key] = exact ? value : minimum[key] + 31;
+  }
+  if (STAT_KEYS.reduce((sum, key) => sum + minimum[key], 0) > RAISING.settings.statGrowthCap) {
+    throw new Error("These stat reports cannot fit the combined stat cap. Check the other descriptions or exact values.");
+  }
   const result = { ...current };
-  for (const key of STAT_KEYS) result[key] = Math.max(minimum[key], Math.min(minimum[key] + 31, result[key]));
+  for (const key of STAT_KEYS) result[key] = Math.max(minimum[key], Math.min(maximum[key], result[key]));
   // Grade reports constrain the estimate jointly; their maxima cannot all be assumed at the total cap.
   let excess = STAT_KEYS.reduce((sum, key) => sum + result[key], 0) - RAISING.settings.statGrowthCap;
   for (const key of [...STAT_KEYS].reverse()) {
@@ -83,14 +93,16 @@ export function raisingTrackerState(tracker: RaisingTracker, currentDay: number)
   const careDays = new Set<number>();
   const entries = tracker.entries.map((entry, index) => ({ entry, index }))
     .sort((a, b) => a.entry.day - b.entry.day || Number(b.entry.kind === "care") - Number(a.entry.kind === "care") || a.index - b.index);
-  let reportDay = tracker.day;
+  const reports = Object.fromEntries(STAT_KEYS.map(key => [key, {
+    value: tracker.initial[key], exact: tracker.exact, day: tracker.day,
+  }])) as Record<keyof RaisingStats, { value: number; exact: boolean; day: number }>;
   if (!tracker.exact) warnings.add("The starting description hides the exact points; this remains an estimate.");
   for (const { entry } of entries) {
     if (entry.day < tracker.day) throw new Error("Actions cannot predate the starting report.");
     if (entry.day > currentDay) continue;
     if (entry.kind === "report") {
-      stats = reconcileRaisingStats(stats, entry.stats, entry.exact);
-      reportDay = entry.day;
+      stats = reconcileRaisingStats(stats, entry.stats, entry.exact, entry.keys);
+      for (const key of entry.keys ?? STAT_KEYS) reports[key] = { value: entry.stats[key], exact: entry.exact, day: entry.day };
     } else if (entry.kind === "abilities") {
       knownAbilities = [...entry.abilities];
     } else if (entry.kind === "food") {
@@ -104,7 +116,7 @@ export function raisingTrackerState(tracker: RaisingTracker, currentDay: number)
       }
       for (let item = 0; item < entry.count; item++) stats = applyRaisingStatChanges(stats, food.stats);
       if (food.rerollGene && entry.day < RAISING.settings.daysToAdolescent) wormsFed += entry.count;
-      if (food.random.chance > 0) warnings.add("Random food stat effects are unknown and are not added. Confirm the trainer's descriptions afterward.");
+      if (food.random.chance > 0) warnings.add("Random food stat effects are unknown and are not added. Update the trainer's descriptions afterward.");
     } else if (entry.kind === "story") {
       if (entry.day < RAISING.settings.daysToAdolescent) throw new Error("Stories require an adolescent or adult chocobo.");
       stats = applyRaisingStatChanges(stats, { strength: 0, endurance: 0, discernment: 1, receptivity: 0 });
@@ -125,11 +137,12 @@ export function raisingTrackerState(tracker: RaisingTracker, currentDay: number)
     }
   }
   const missingCareDays: number[] = [];
+  const reportDay = Math.min(...STAT_KEYS.map(key => reports[key].day));
   for (let value = reportDay + 1; value <= Math.min(currentDay, LAST_RAISING_DAY); value++) {
     if (!careDays.has(value)) missingCareDays.push(value);
   }
   return {
-    stats, knownAbilities, wormsFed, warnings: [...warnings], missingCareDays,
+    stats, reports, knownAbilities, wormsFed, warnings: [...warnings], missingCareDays,
     storyDone: tracker.entries.some(entry => entry.day === currentDay && entry.kind === "story"),
     storyAttemptsToday: tracker.entries.filter(entry => entry.day === currentDay && entry.kind === "story").length,
     storyAttempts: Object.fromEntries(RAISING_ABILITIES.map(ability => [

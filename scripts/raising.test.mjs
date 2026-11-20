@@ -84,6 +84,33 @@ test("trainer corrections preserve points inside bands and reconcile the combine
   assert.throws(() => reconcileRaisingStats(stats(), stats(255, 255, 255, 255), true), /caps/);
 });
 
+test("individual trainer edits correct the selected band without replaying stale reports for other stats", () => {
+  let tracker = tracking({ day: 39, initial: stats(0, 32, 164, 164) });
+  tracker = recordRaisingAction(tracker, {
+    kind: "report", day: 39, stats: stats(0, 0, 0, 192), exact: false, keys: ["receptivity"],
+  }, 39);
+  assert.deepEqual(raisingTrackerState(tracker, 39).stats, stats(0, 32, 164, 192));
+  assert.deepEqual(raisingTrackerState(tracker, 39).reports.receptivity, { value: 192, exact: false, day: 39 });
+  tracker = recordRaisingAction(tracker, { kind: "food", day: 39, foodId: 5608, count: 2 }, 39);
+  const earned = raisingTrackerState(tracker, 39).stats;
+  tracker = recordRaisingAction(tracker, {
+    kind: "report", day: 40, stats: stats(0, 0, 160, 0), exact: false, keys: ["discernment"],
+  }, 40);
+  assert.deepEqual(raisingTrackerState(tracker, 40).stats, earned);
+  assert.deepEqual(raisingTrackerState(tracker, 40).missingCareDays, [40], "one stat report does not imply all daily care is accounted for");
+  assert.deepEqual(raisingTrackerState(tracker, 40).reports.receptivity, { value: 192, exact: false, day: 39 });
+  tracker = recordRaisingAction(tracker, {
+    kind: "report", day: 40, stats: stats(0, 0, 180, 0), exact: true, keys: ["discernment"],
+  }, 40);
+  assert.equal(raisingTrackerState(tracker, 40).stats.discernment, 180);
+  assert.equal(validRaisingTrackers(JSON.parse(JSON.stringify([tracker]))), true);
+  for (const keys of [[], ["invalid"], ["strength", "strength"]]) {
+    assert.throws(() => recordRaisingAction(tracker, { kind: "report", day: 40, stats: stats(), exact: false, keys }, 40), /valid action/);
+  }
+  assert.throws(() => reconcileRaisingStats(stats(32, 224, 160, 224), stats(0, 0, 192, 0), false, ["discernment"]), /combined stat cap/);
+  assert.deepEqual(reconcileRaisingStats(stats(0, 32, 164, 196), stats(0, 0, 180, 0), true, ["discernment"]), stats(0, 32, 180, 196));
+});
+
 test("day-35 planner uses accumulated stats and actual learned abilities, not old grade minimums", () => {
   let tracker = tracking({ initial: stats(0, 0, 160, 224) });
   tracker = recordRaisingAction(tracker, { kind: "story", day: 30, ability: "Bore", learned: true }, 35);
@@ -1211,13 +1238,18 @@ test("worker request preserves completion, treatment and tracked stats with repo
   let stateIndex;
   const effects = [];
   let request;
+  let worker;
   const module = { exports: {} };
   new Function("require", "module", "exports", "Worker", outputFiles[0].text)(
     name => name === "react" ? {
       ...React, useId: () => "color-worker-test", useEffect: callback => { effects.push(callback); },
-      useState: () => [states[stateIndex++], () => {}],
+      useState: () => {
+        const index = stateIndex++;
+        return [states[index], value => { states[index] = typeof value === "function" ? value(states[index]) : value; }];
+      },
     } : require(name), module, module.exports,
     class {
+      constructor() { worker = this; }
       postMessage(input) { request = input; }
       terminate() {}
     },
@@ -1261,6 +1293,15 @@ test("worker request preserves completion, treatment and tracked stats with repo
     assert.deepEqual(request.current, stats(0, 2, 106, 116), "worker uses recorded gains rather than grade minima");
     assert.deepEqual(request.knownAbilities, ["Burrow"], "tracked abilities override stale form values");
     assert.deepEqual(request.today, { feedingDone: true, storyDone: false, storyEnergy: undefined }, "story completion is derived from today's actual history");
+    const days = Array.from({ length: 111 }, (_, index) => ({ day: 18 + index, careId: 2, foodId: null, foodCount: 0, story: null }));
+    worker.onmessage({ data: { status: "success", plan: { days } } });
+    assert.deepEqual(states[0].arrangedCare.days, [
+      { day: 19, careId: 3 },
+      ...Array.from({ length: 7 }, (_, index) => ({ day: 20 + index, careId: 2 })),
+    ], "a successful calculation remembers only the editable Plan 1 block and preserves tomorrow's correction");
+    const saved = parseSavedRaisingDaily(JSON.stringify(states[0]));
+    assert.equal(tomorrowCare(saved, 0, 19).careId, 2, "the followed schedule survives reload and rollover without confirmation");
+    assert.equal(saved.trackers[0].entries.length, 1, "remembering a schedule does not invent completed care");
     trackedCleanup();
   }
 });
@@ -1312,9 +1353,25 @@ test("recording controls persist actual actions, treatment, ability success and 
   assert.deepEqual(states[0].form.knownAbilities, ["Bore"]);
   assert.equal(states[0].form.storyEnergy, "28", "recording conservatively subtracts the maximum story cost");
   assert.equal(raisingTrackerState(states[0].trackers[0], 35).storyDone, true);
-  const confirm = find(render(), element => element.type === "button" && element.props.children === "Confirm current stat reports");
-  confirm.props.onClick();
+  assert.equal(find(render(), element => element.type === "button" && element.props.children === "Confirm current stat reports"), undefined);
+  const description = name => find(render(), element => element.props["aria-label"] === `Current ${name} description`);
+  description("Discernment").props.onChange({ target: { value: "160" } });
   assert.deepEqual(raisingTrackerState(states[0].trackers[0], 35).stats, stats(0, 0, 165, 164));
+  description("Receptivity").props.onChange({ target: { value: "192" } });
+  assert.deepEqual(raisingTrackerState(states[0].trackers[0], 35).stats, stats(0, 0, 165, 192), "editing Outstanding updates the tracker immediately");
+  assert.equal(states[0].calculatedDay, null);
+  controls().onUndo();
+  assert.equal(description("Receptivity").props.value, 160, "undo restores the report selector along with the tracked estimate");
+  const children = React.Children.toArray(render().props.children);
+  const recordingIndex = children.findIndex(element => element.type.name === "RaisingProgressTracker");
+  assert.ok(find(children[recordingIndex + 1], element => element.type === "button" && String(element.props.children).startsWith("Calculate plan for day")));
+  const stories = find(render(), element => element.props["aria-label"] === "Ability story key items");
+  assert.equal(stories.type, "details");
+  const learned = find(render(), element => element.type === "fieldset" && React.Children.toArray(element.props.children)[0]?.props.children === "Already learned (occupies a slot)");
+  find(learned, element => element.type === "label" && React.Children.toArray(element.props.children).includes("Burrow")).props.children[0].props.onChange();
+  assert.equal(find(render(), element => element.props["aria-label"] === "Ability story key items").props.open, false);
+  controls().onUndo();
+  assert.equal(find(render(), element => element.props["aria-label"] === "Chocobo color goal").props.open, undefined);
   controls().onRecord({ kind: "food", day: 35, foodId: 2201, count: 1 });
   assert.equal(states[0].form.feedingReport.treatmentGiven, true);
   assert.equal(states[0].form.feedingReport.medicineId, 2201);
@@ -1346,6 +1403,9 @@ test("recording controls persist actual actions, treatment, ability success and 
   assert.equal(states[0].trackers[0].entries.length, count, "duplicate care has no side effects");
   assert.ok(find(render(), element => element.props.role === "alert" && String(element.props.children).includes("already recorded")));
   assert.equal(errorLog.mock.callCount(), 1);
+
+  assert.equal(states[0].form.priority, "endurance", "removing the priority control preserves the existing planner priority");
+  assert.equal(find(render(), element => element.type === "label" && React.Children.toArray(element.props.children).includes("Most important stat")), undefined);
 });
 
 test("food totals combine repeated mixed meals by item without double-counting legacy fields", () => {
@@ -1766,34 +1826,8 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   states[4] = start + 4 * day;
   tree = render();
   assert.doesNotMatch(textContent(tree), /What to do today/);
-  assert.equal(careButton(tree).props.disabled, false);
-  assert.equal(careButton(tree).props.children, "Confirm care schedule");
-  careButton(tree).props.onClick();
-  const careKey = todayCare(schedule, 4).key;
-  assert.equal(states[0].progress.careKey, careKey);
-  assert.equal(states[0].arrangedCare.days[0].day, 6, "checking care records its future execution days");
-  assert.equal(states[0].arrangedCare.days[0].careId, todayCare(schedule, 4).careId);
-  assert.equal(states[0].calculation, view.calculation, "checking care does not discard the calculated plan");
-  assert.equal(careButton(render()).props.children, "Clear care confirmation");
-  states[0] = { ...parseSavedRaisingDaily(JSON.stringify(states[0])), calculatedDay: null };
-  assert.equal(careButton(render()).props.children, "Clear care confirmation", "saved care confirmation survives restoration");
-  careButton(render()).props.onClick();
-  assert.equal(states[0].progress.careKey, null);
-  assert.deepEqual(states[0].arrangedCare.days, [], "unchecking removes that block's confirmation");
-  assert.equal(careButton(render()).props.children, "Confirm care schedule");
-  careButton(render()).props.onClick();
-  states[0] = { ...states[0], daily: { ...schedule, days: schedule.days.map(step =>
-    step.day === 6 ? { ...step, careId: step.careId === 0 ? 3 : 0 } : step) } };
-  assert.equal(careButton(render()).props.children, "Confirm care schedule", "a changed care block needs checking again");
-  states[0] = { ...states[0], daily: schedule };
-  states[4] = start + 5 * day;
-  assert.equal(careButton(render()).props.children, "Confirm care schedule", "care confirmation resets on a new raising day");
-  const previousProgress = states[0].progress;
-  clickTime = start + 6 * day;
-  careButton(render()).props.onClick();
-  assert.equal(states[0].progress, previousProgress, "a click after rollover cannot mark yesterday's care complete");
-  assert.match(states[5], /raising day changed/);
-  for (const age of [3, 127, 128, 129]) {
+  assert.equal(careButton(tree), undefined, "recommended care needs no confirmation button");
+  for (const age of [3, 4, 39, 127, 128, 129]) {
     states[4] = start + age * day;
     tree = render();
     assert.equal(careButton(tree), undefined);
@@ -1806,12 +1840,12 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
   reportSelect(render(), "Already-scheduled activity").props.onChange({ target: { value: "3" } });
   assert.equal(reportSelect(render(), "Already-scheduled activity").props.value, 3, "can correct care before entering feeding reports");
   assert.deepEqual(tomorrowCare(states[0], start, 6), { careId: 3, source: "confirmed" });
-  assert.match(textContent(render()), /Recorded as arranged or corrected by you/);
+  assert.match(textContent(render()), /Recommended care is assumed followed/);
   states[0] = { ...states[0], daily: { ...schedule, feedingInputs: "old feeding inputs" } };
   reportSelect(render(), "Already-scheduled activity").props.onChange({ target: { value: "2" } });
   assert.equal(states[0].daily.feedingInputs, undefined, "correcting care requires refreshed food recommendations");
   states[0] = { ...view, calculatedDay: null, daily: schedule };
-  assert.match(textContent(render()), /Unconfirmed estimate from your last calculated plan/);
+  assert.match(textContent(render()), /Following your last calculated recommendation/);
 
   states = [{ ...view, calculatedDay: null, form: { ...form,
     feedingReport: { day: 6, affection: 224, fullness: 255, condition: "unwell" },
@@ -2091,7 +2125,7 @@ test("refresh calculates from click-time age, preserves inputs and rejects retir
     days: result.days.map(step => ({ ...step, story: null })) } } };
   assert.equal(storyInstruction(render()), undefined, "instruction appears only when a story attempt is scheduled");
   states[0] = { ...storyView, progress: { startedAt: start, day: 30, feedingDone: true, storyDone: true, careKey: null } };
-  assert.equal(storyInstruction(render()), undefined, "saved story completion suppresses repeat instructions");
+  assert.ok(storyInstruction(render()), "available energy still permits another scheduled story after an earlier attempt");
   states[0] = { ...storyView, form: { ...storyView.form, feedingReport: { ...storyView.form.feedingReport, events: ["high-spirits"] } } };
   findElement(render(), element => element.type === "button" && element.props.children === "Clear start time").props.onClick();
   assert.equal(states[0].form.feedingReport, undefined, "switching away from an egg clears its daily reports");
@@ -2200,7 +2234,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(help, /How often should I check in\?/);
   assert.match(help, /check this guide once per raising day/);
   assert.match(help, /one 24-hour period from egg hand-in/);
-  assert.match(help, /confirming the same band keeps the tracked points within it/);
+  assert.match(help, /reporting the same band keeps the tracked points within it/);
   assert.match(help, /Leaving the app open/);
   assert.match(help, /the raising day updates automatically/);
   assert.match(help, /stat history is retained/);
@@ -2264,7 +2298,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(html, /four care-plan blocks of 1-7 days/);
   assert.match(html, /day N \+ 2/);
   assert.match(html, /Food penalties do not stop/);
-  assert.match(html, /<label>Most important stat<select/);
+  assert.doesNotMatch(html, /Most important stat|Each stat edit updates Recorded progress|Care-plan losses are included before day 64/);
   assert.match(html, /Egg hand-in date and time \(local\)/);
   assert.match(html, /type="datetime-local"/);
   assert.match(html, /Use current time/);
@@ -2285,7 +2319,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(html, /Follow the table&#x27;s Today row/);
   assert.match(help, /One timeline through day 128/);
   assert.match(help, /you cannot choose that roll in game/);
-  assert.match(html, /It does not change your targets/);
+  assert.doesNotMatch(html, /It does not change your targets/);
   assert.doesNotMatch(html, /<label>Priority stat|<label>Age during final care-plan training|Assume care training happens|35 or 65 care days/);
   assert.match(html, /Read quantities as totals, not a daily diet/);
   assert.match(html, /already-learned or inherited ability/);
@@ -2298,7 +2332,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(html, /<input type="checkbox"\/>Use exact current stats/);
   assert.match(html, /Possible current range/);
   assert.match(html, /0-31 points/);
-  assert.match(html, /Starting estimate: 0/);
+  assert.match(html, /Planning estimate: 0/);
   assert.match(html, /Impressive \(A\)/);
   assert.match(html, /First-class \(SS\)/);
   assert.match(html, /not a guaranteed worst-case forecast/);
@@ -2317,7 +2351,7 @@ test("tab renders food reference, default digging goals and source caveats offli
   assert.match(desiredAbilities, /<input type="checkbox" checked=""\/>Bore/);
   assert.match(desiredAbilities, /<input type="checkbox" checked=""\/>Burrow/);
   assert.equal((desiredAbilities.match(/checked=""/g) ?? []).length, 2);
-  assert.match(html, /value="endurance" selected="">Endurance/);
+  assert.doesNotMatch(html, /value="endurance" selected="">Endurance/);
   for (const [label, value] of [["Strength", 32], ["Endurance", 224], ["Discernment", 160], ["Receptivity", 224]]) {
     assert.match(html, new RegExp(`aria-label="Target ${label}"[^>]*value="${value}"`));
   }
@@ -2422,7 +2456,7 @@ test("restored planner state requires an explicit opt-in for exact current stats
   const legacy = module.exports.render();
   assert.match(legacy, /<input type="checkbox"\/>Use exact current stats/);
   assert.match(legacy, /aria-label="Current Strength description"/);
-  assert.match(legacy, /Starting estimate: 160/);
+  assert.match(legacy, /Planning estimate: 160/);
   assert.doesNotMatch(legacy, /role="alert"/, "640 estimated points are valid even though the legacy raw numbers total 692");
   assert.doesNotMatch(legacy, /Old exact-stat calculation/, "discard calculations based on the old implicit exact mode");
   for (const useExactStats of [false, true]) {
@@ -2431,12 +2465,12 @@ test("restored planner state requires an explicit opt-in for exact current stats
     if (useExactStats) {
       assert.match(html, /<input type="checkbox" checked=""\/>Use exact current stats/);
       assert.match(html, /aria-label="Current Strength"/);
-      assert.match(html, /173 \(exact override\)/);
+      assert.match(html, /173 \(exact input\)/);
       assert.match(html, /role="alert"/, "explicit exact numbers still receive total-cap validation");
     } else {
       assert.match(html, /<input type="checkbox"\/>Use exact current stats/);
       assert.match(html, /aria-label="Current Strength description"/);
-      assert.match(html, /Starting estimate: 160/);
+      assert.match(html, /Planning estimate: 160/);
       assert.doesNotMatch(html, /role="alert"/);
     }
   }
@@ -2454,7 +2488,7 @@ test("restored planner state requires an explicit opt-in for exact current stats
   }
   assert.match(migrated, /value="endurance" selected="">Endurance/);
   assert.match(migrated, /<input type="checkbox"\/>Use exact current stats/);
-  assert.match(migrated, /Starting estimate: 160/, "current stat reports are retained");
+  assert.match(migrated, /Planning estimate: 160/, "current stat reports are retained");
   const known = migrated.match(/<fieldset><legend>Already learned \(occupies a slot\)<\/legend>[\s\S]*?<\/fieldset>/)?.[0];
   assert.match(known, /<input type="checkbox" checked=""\/>Bore/, "learned abilities are retained");
   assert.doesNotMatch(migrated, /Old physical-build calculation/);

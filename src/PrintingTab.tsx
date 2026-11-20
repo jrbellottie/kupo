@@ -7,6 +7,7 @@ import { PRINT_SKILL_CAP, reachablePrintTiers, printOutcomeSkillRequirements, pr
 import { PRINT_RECIPES, printItemKey, printBuyPrice, printSellPrice, printVendorPrice, type PriceBook } from "./utils/printingData";
 import { normalizeItemName, findableName } from "./utils/itemLinks";
 import { loadJson, saveJson } from "./utils/storage";
+import { usePrintSettings } from "./utils/printSettingsStore";
 import { itemPrices, useItemPrices } from "./utils/itemPrices";
 import { BreakLossSettings, CraftingLevels, NumberField, PriceUnitSelector, ProfitCostField, ProfitDualPriceField, ProfitMetrics, type ProfitPriceUnit } from "./ProfitControls";
 import DesynthesisView from "./DesynthesisView";
@@ -82,12 +83,11 @@ function IngredientSource({ node, demand, parentQuantity, branchColor, state, pr
 export default function PrintingTab() {
   const views = ["calculator", "quantities", "hq-tiers", "desynthesis", "prices"] as const;
   const [view, setView] = useState<typeof views[number]>(() => peekNavQuery("printing") ? "calculator" : loadJson("kupo.profits.view.v1", "calculator"));
-  const [settings, setSettings] = useState(() => restorePrintSettings(loadJson<Partial<PrintSettings>>("kupo.profits.settings.v1",
-    peekRestoredTabState<State>("printing")?.settings ?? loadJson<Partial<State>>("kupo.printing.v1", {}).settings ?? {})));
+  const [settings, setting] = usePrintSettings(
+    peekRestoredTabState<State>("printing")?.settings ?? loadJson<Partial<State>>("kupo.printing.v1", {}).settings ?? {}
+  );
   const [priceUnit, setPriceUnit] = useState<ProfitPriceUnit>(() => loadJson("kupo.profits.price-unit.v1", "each"));
-  const setting = (patch: PrintSettingsUpdate) => setSettings((previous) => ({ ...previous, ...(typeof patch === "function" ? patch(previous) : patch) }));
   useEffect(() => saveJson("kupo.profits.view.v1", view), [view]);
-  useEffect(() => saveJson("kupo.profits.settings.v1", settings), [settings]);
   useEffect(() => saveJson("kupo.profits.price-unit.v1", priceUnit), [priceUnit]);
   return <section className="printing-tab">
     <header className="print-heading"><h2><Coins size={23} /> Profits</h2><span className="print-muted">NPC / AH sales</span>{hasBackTab() && <button className="print-command" onClick={goBackTab}><ArrowLeft size={16} /> Back</button>}</header>

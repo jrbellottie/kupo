@@ -5,6 +5,12 @@ import { CollapsibleSection, useTableViewportHeight } from "./ScreenControls";
 import recipesData from "./data/recipes.json";
 import { loadJson, saveJson } from "./utils/storage";
 import { craftSkillupStats } from "./utils/craftingSkillup";
+import { estimateCraftMaterials } from "./utils/craftMaterialEstimate";
+import { CraftingLevels } from "./ProfitControls";
+import { createPrintingChain, type ChainNode } from "./utils/printingChain";
+import { printItem, printItemKey } from "./utils/printingData";
+import { AH_CRAFT_CATEGORY, CRAFT_COLORS } from "./utils/craftColors";
+import { usePrintSettings } from "./utils/printSettingsStore";
 import { formatGuildPointCap, getGuildPointItemsToCap } from "./utils/guildPoints";
 import { findableName, normalizeItemName } from "./utils/itemLinks";
 import { getPurification, purificationMatches } from "./utils/purification";
@@ -13,6 +19,7 @@ import { captureScrollPosition, restoreScrollPosition, type ScrollPosition } fro
 import { rememberTabState, peekRestoredTabState } from "./utils/tabNav";
 import GuildSellingTab, { type GuildTimerControls } from "./GuildSellingTab";
 import { WEEKDAY_COLORS } from "./utils/weekday";
+import "./PrintingTab.css";
 
 type RecipeItem = { n: string; q: number };
 type RecipeSub = { c: string; l: number };
@@ -82,7 +89,7 @@ const CRYSTAL_COLORS: Record<(typeof CRYSTAL_OPTIONS)[number], string> = {
 };
 const ERA_OPTIONS = ["Base", "RotZ", "CoP", "ToAU", "WotG"];
 
-type Mode = "recipes" | "planner" | "guilds";
+type Mode = "recipes" | "planner" | "calculator" | "guilds";
 type SortDir = "asc" | "desc";
 type RecipeKey = "res" | "craft" | "lvl" | "crystal" | "era" | "gpItemsToCap";
 type PlannerKey =
@@ -189,6 +196,53 @@ const plannerToggleStyle: React.CSSProperties = {
   cursor: "pointer",
   whiteSpace: "nowrap",
 };
+
+function CraftIngredientBreakdown({ node, quantity }: { node: ChainNode; quantity: number }) {
+  const required = Math.ceil(Math.max(0, quantity));
+  const recipe = node.recipe;
+  if (!recipe || !Number.isFinite(node.yield) || node.yield <= 0) {
+    return (
+      <li>
+        {formatMaterialAmount(node.name, required)} — {node.issue ?? "buy or obtain; no usable recipe at these skills"}
+      </li>
+    );
+  }
+
+  const attempts = Math.ceil(required / node.yield);
+  return (
+    <li>
+      <details>
+        <summary>
+          {formatMaterialAmount(node.name, required)} — about {attempts} {recipe.craft} synths (cap {recipe.lvl})
+        </summary>
+        {node.issue && <div style={{ ...styles.sub, color: "#ff9c7a", marginTop: 6 }}>{node.issue}</div>}
+        {node.children.length > 0 && (
+          <ul style={{ margin: "6px 0 0", paddingLeft: 22 }}>
+            {node.children.map((child) => (
+              <CraftIngredientBreakdown
+                key={child.node.key}
+                node={child.node}
+                quantity={child.quantity * attempts}
+              />
+            ))}
+          </ul>
+        )}
+      </details>
+    </li>
+  );
+}
+
+function formatMaterialAmount(name: string, quantity: number): React.ReactNode {
+  const item = printItem(name);
+  const stackSize = item?.stack ?? 1;
+  const crystal = CRYSTAL_OPTIONS.find((element) => name === `${element} Crystal`);
+  const craft = item ? AH_CRAFT_CATEGORY[item.category] : undefined;
+  const color = crystal ? CRYSTAL_COLORS[crystal] : craft ? CRAFT_COLORS[craft] : undefined;
+  const itemName = <span style={color ? { color } : undefined}>{name}</span>;
+  if (stackSize <= 1) return <>{quantity} × {itemName}</>;
+  const stacks = Math.ceil(quantity / stackSize);
+  return <>{quantity} × {itemName} ({stacks} stacks of {stackSize})</>;
+}
 
 const thStyle: React.CSSProperties = {
   position: "sticky",
@@ -342,6 +396,14 @@ type CraftingUiState = {
   pHideKeyItem: boolean;
   pSortKey: PlannerKey;
   pSortDir: SortDir;
+  calcSkill: string;
+  calcTarget: string;
+  calcCraft: string;
+  calcSearch: string;
+  calcRecipeId: string;
+  calcSupport: boolean;
+  calcSupportStrength: string;
+  calcLoop: boolean;
 };
 
 const defaultUi: CraftingUiState = {
@@ -373,6 +435,14 @@ const defaultUi: CraftingUiState = {
   pHideKeyItem: false,
   pSortKey: "expectedPerSynth",
   pSortDir: "desc",
+  calcSkill: "0",
+  calcTarget: "",
+  calcCraft: "",
+  calcSearch: "",
+  calcRecipeId: "",
+  calcSupport: false,
+  calcSupportStrength: "3",
+  calcLoop: false,
 };
 
 export default function CraftingTab(timerControls: GuildTimerControls) {
@@ -410,7 +480,7 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
     return { ...defaultUi, ...loaded, ...navOverride };
   }, []);
 
-  const [mode, setMode] = useState<Mode>(initialUi.mode === "guilds" ? "guilds" : initialUi.mode === "recipes" ? "recipes" : "planner");
+  const [mode, setMode] = useState<Mode>(initialUi.mode === "guilds" ? "guilds" : initialUi.mode === "recipes" ? "recipes" : initialUi.mode === "calculator" ? "calculator" : "planner");
   const [includeWotg, setIncludeWotg] = useState(initialUi.includeWotg);
 
   const [rGlobal, setRGlobal] = useState(initialUi.rGlobal);
@@ -440,6 +510,15 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
   const [pHideKeyItem, setPHideKeyItem] = useState(initialUi.pHideKeyItem);
   const [pSortKey, setPSortKey] = useState<PlannerKey>(initialUi.pSortKey);
   const [pSortDir, setPSortDir] = useState<SortDir>(initialUi.pSortDir);
+  const [calcSkill, setCalcSkill] = useState(initialUi.calcSkill);
+  const [calcTarget, setCalcTarget] = useState(initialUi.calcTarget);
+  const [calcCraft, setCalcCraft] = useState(initialUi.calcCraft);
+  const [calcSearch, setCalcSearch] = useState(initialUi.calcSearch);
+  const [calcRecipeId, setCalcRecipeId] = useState(initialUi.calcRecipeId);
+  const [calcSupport, setCalcSupport] = useState(initialUi.calcSupport);
+  const [calcSupportStrength, setCalcSupportStrength] = useState(initialUi.calcSupportStrength);
+  const [calcLoop, setCalcLoop] = useState(initialUi.calcLoop);
+  const [ingredientCraftSettings, updateIngredientCraftSettings] = usePrintSettings();
 
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(restored?.selectedRowKey ?? null);
 
@@ -473,6 +552,14 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
       pHideKeyItem,
       pSortKey,
       pSortDir,
+      calcSkill,
+      calcTarget,
+      calcCraft,
+      calcSearch,
+      calcRecipeId,
+      calcSupport,
+      calcSupportStrength,
+      calcLoop,
     } satisfies CraftingUiState;
     saveJson(CRAFTING_UI_KEY, ui);
     rememberTabState("crafting", { ui, selectedRowKey });
@@ -481,6 +568,7 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
     mode, includeWotg,
     rGlobal, rResult, rIngredient, rCraft, rCrystal, rEra, rLvlMin, rLvlMax, rIncludeDesynth, rSortKey, rSortDir,
     pCraft, pSkill, pSupport, pGearMain, pGearSub, pMogh, pGlobal, pIngredient, pMinSuccess, pLvlMin, pLvlMax, pIncludeDesynth, pHideKeyItem, pSortKey, pSortDir,
+    calcSkill, calcTarget, calcCraft, calcSearch, calcRecipeId, calcSupport, calcSupportStrength, calcLoop,
   ]);
 
   const eraFiltered = useMemo(
@@ -814,8 +902,95 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
     return rows;
   }, [eraFiltered, skillTenths, pCraft, supportBonus, pGlobal, pIngredient, pMinSuccess, pLvlMin, pLvlMax, pIncludeDesynth, pHideKeyItem, pSortKey, pSortDir]);
 
-  const results = mode === "recipes" ? recipeResults : plannerResults;
-  const visibleCount = results.length;
+  const calcSkillTenths = calcSkill.trim() === "" ? null : parseSkillTenths(calcSkill);
+  const calculatorOptions = useMemo(() => {
+    const query = calcSearch.trim().toLowerCase();
+    const matchesCraftAndSkill = (recipe: Recipe) =>
+      recipe.craft === calcCraft && (calcSkillTenths === null || recipe.lvl * 10 > calcSkillTenths);
+    const options = eraFiltered.filter((recipe) => recipe.d !== 1 && matchesCraftAndSkill(recipe) && (!query ||
+      recipe.res.n.toLowerCase().includes(query) ||
+      recipe.craft.toLowerCase().includes(query) ||
+      recipe.ing.some((ingredient) => ingredient.n.toLowerCase().includes(query)) ||
+      recipe.hq.some((result) => result.n.toLowerCase().includes(query))));
+    const selected = eraFiltered.find((recipe) => String(recipe.id) === calcRecipeId);
+    if (selected && selected.d !== 1 && matchesCraftAndSkill(selected) && !options.some((recipe) => recipe.id === selected.id)) options.unshift(selected);
+    return options.slice(0, 200);
+  }, [eraFiltered, calcSearch, calcRecipeId, calcCraft, calcSkillTenths]);
+
+  const calculatorRecipe = calculatorOptions.find((recipe) => String(recipe.id) === calcRecipeId);
+  const calculatorDesynth = calculatorRecipe
+    ? eraFiltered.find((recipe) => recipe.d === 1 && recipe.craft === calculatorRecipe.craft && recipe.ing[0]?.n === calculatorRecipe.res.n) ?? null
+    : null;
+  const calcTargetTenths = calcTarget.trim() === "" ? null : parseSkillTenths(calcTarget);
+  const calculatorEstimate = useMemo(() => calculatorRecipe && calcSkillTenths !== null && calcTargetTenths !== null
+    ? estimateCraftMaterials(
+        calculatorRecipe,
+        calcSkillTenths,
+        calcTargetTenths,
+        calcSupport ? Number(calcSupportStrength) : 0,
+        calcLoop ? calculatorDesynth : null,
+      )
+    : null,
+  [calculatorRecipe, calcSkillTenths, calcTargetTenths, calcSupport, calcSupportStrength, calcLoop, calculatorDesynth]);
+  const ingredientBreakdowns = useMemo(() => {
+    if (!calculatorEstimate?.reachable || !calculatorEstimate.materials.length) return [];
+    const settings = { ...ingredientCraftSettings, skillMode: "character" as const };
+    const chain = createPrintingChain(
+      eraFiltered.filter((recipe) => recipe.d !== 1),
+      settings,
+      () => null,
+      () => null,
+      printItemKey,
+    );
+    return calculatorEstimate.materials.map((material) => ({
+      material,
+      node: chain.resolve(material.name),
+    }));
+  }, [calculatorEstimate, eraFiltered, ingredientCraftSettings]);
+  const rawIngredientPlan = useMemo(() => {
+    type RawMaterial = { key: string; name: string; quantity: number };
+    const allTotals = new Map<string, RawMaterial>();
+    const groups = ingredientBreakdowns.map(({ material, node }) => {
+      const groupTotals = new Map<string, RawMaterial>();
+      const collectRawMaterials = (currentNode: ChainNode, quantity: number, totals: Map<string, RawMaterial>) => {
+        if (!currentNode.recipe || !Number.isFinite(currentNode.yield) || currentNode.yield <= 0) {
+          const previous = totals.get(currentNode.key);
+          totals.set(currentNode.key, {
+            key: currentNode.key,
+            name: previous?.name ?? currentNode.name,
+            quantity: (previous?.quantity ?? 0) + quantity,
+          });
+          return;
+        }
+
+        const required = Math.ceil(Math.max(0, quantity));
+        const attempts = Math.ceil(required / currentNode.yield);
+        for (const child of currentNode.children) {
+          collectRawMaterials(child.node, child.quantity * attempts, totals);
+        }
+      };
+
+      collectRawMaterials(node, material.quantity, groupTotals);
+      for (const rawMaterial of groupTotals.values()) {
+        const previous = allTotals.get(rawMaterial.key);
+        allTotals.set(rawMaterial.key, {
+          ...rawMaterial,
+          quantity: (previous?.quantity ?? 0) + rawMaterial.quantity,
+        });
+      }
+      return {
+        material,
+        node,
+        materials: [...groupTotals.values()].sort((first, second) => second.quantity - first.quantity),
+      };
+    });
+
+    return {
+      groups,
+      totals: [...allTotals.values()].sort((first, second) => second.quantity - first.quantity),
+    };
+  }, [ingredientBreakdowns]);
+  const visibleCount = mode === "recipes" ? recipeResults.length : mode === "planner" ? plannerResults.length : 0;
 
   const selectFilter = (
     label: string,
@@ -900,10 +1075,10 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
     <section style={styles.card}>
       <div style={styles.titleRow}>
         <h3 style={styles.h3}>
-          {mode === "guilds" ? "Crafting Guilds" : mode === "recipes" ? "Crafting Recipes (ToAU Era)" : "Crafting Skill-up Planner"}
+          {mode === "guilds" ? "Crafting Guilds" : mode === "recipes" ? "Crafting Recipes (ToAU Era)" : mode === "calculator" ? "Ingredient Calculator" : "Crafting Skill-up Planner"}
         </h3>
         <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
-          {mode !== "guilds" && <div style={styles.sub}>
+          {(mode === "recipes" || mode === "planner") && <div style={styles.sub}>
             {`${visibleCount.toLocaleString()} of ${eraFiltered.length.toLocaleString()} recipes${
               visibleCount > MAX_VISIBLE_ROWS ? ` (showing first ${MAX_VISIBLE_ROWS} — refine filters)` : ""
             }`}
@@ -937,6 +1112,12 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
             onClick={() => setMode("planner")}
           >
             Skill-up planner
+          </button>
+          <button
+            style={mode === "calculator" ? styles.buttonPrimaryCompact : styles.buttonCompact}
+            onClick={() => setMode("calculator")}
+          >
+            Ingredient calculator
           </button>
           <button
             style={mode === "guilds" ? styles.buttonPrimaryCompact : styles.buttonCompact}
@@ -1003,6 +1184,91 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
               <span style={{ color: "#7ec4e8", fontWeight: 700 }}>blue</span> ingredients (and ⚔) jump to the Items
               tab showing every way to get them.
             </div>
+          </div>
+        ) : mode === "calculator" ? (
+          <div style={styles.subCard}>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div style={{ ...styles.field, width: 160 }}>
+                <div style={styles.label}>Craft</div>
+                <select
+                  style={styles.selectCompact}
+                  value={calcCraft}
+                  onChange={(event) => {
+                    setCalcCraft(event.target.value);
+                    setCalcRecipeId("");
+                  }}
+                >
+                  <option style={optionBaseStyle} value="">Choose a craft</option>
+                  {CRAFTS.map((craft) => (
+                    <option key={craft} style={optionBaseStyle} value={craft}>{craft}</option>
+                  ))}
+                </select>
+              </div>
+              {numberFilter("Current skill", calcSkill, setCalcSkill, "e.g. 45.0", 120)}
+              {numberFilter("Target skill", calcTarget, setCalcTarget, "e.g. 50.0", 120)}
+              {textFilter("Find recipe or item", calcSearch, setCalcSearch, "e.g. Mythic Pole", 240)}
+              <div style={{ ...styles.field, width: 340, maxWidth: "100%" }}>
+                <div style={styles.label}>Recipe / item to craft</div>
+                <select
+                  style={styles.selectCompact}
+                  value={calculatorOptions.some((recipe) => String(recipe.id) === calcRecipeId) ? calcRecipeId : ""}
+                  onChange={(event) => setCalcRecipeId(event.target.value)}
+                >
+                  <option style={optionBaseStyle} value="">Choose a recipe above current skill</option>
+                  {calculatorOptions.map((recipe) => (
+                    <option key={recipe.id} style={optionBaseStyle} value={String(recipe.id)}>
+                      {recipe.craft}: {recipe.res.n} (cap {recipe.lvl})
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <label style={plannerToggleStyle} title="Improves synth success and lowers break chance.">
+                <input type="checkbox" checked={calcSupport} onChange={(event) => setCalcSupport(event.target.checked)} />
+                Image support
+              </label>
+              <div style={{ ...styles.field, width: 150 }}>
+                <div style={styles.label}>Support strength</div>
+                <select
+                  style={styles.selectCompact}
+                  value={calcSupportStrength}
+                  disabled={!calcSupport}
+                  onChange={(event) => setCalcSupportStrength(event.target.value)}
+                >
+                  <option style={optionBaseStyle} value="1">Basic (+1)</option>
+                  <option style={optionBaseStyle} value="3">Advanced (+3)</option>
+                </select>
+              </div>
+              <label
+                style={plannerToggleStyle}
+                title={calculatorDesynth ? "After each successful craft, attempt the matching desynthesis before continuing." : "No matching desynthesis recipe is listed for this result."}
+              >
+                <input
+                  type="checkbox"
+                  checked={calcLoop && Boolean(calculatorDesynth)}
+                  disabled={!calculatorDesynth}
+                  onChange={(event) => setCalcLoop(event.target.checked)}
+                />
+                Craft → desynth loop
+              </label>
+              {wotgCheckbox}
+            </div>
+            <div style={{ marginTop: 8, ...styles.sub }}>
+              Expected material totals account for skill-up chances and gains changing at each tenth of skill, synth breaks,
+              support, recipe sub-craft checks, and the app’s break-loss rule. Main recipe sub-craft requirements are assumed
+              sufficient. Desynthesis recovery is not credited because recipe data lists possible yields but not their probabilities.
+            </div>
+            <details className="printing-tab" style={{ marginTop: 10 }}>
+              <summary style={{ cursor: "pointer", color: "#ccc" }}>Craft levels for ingredient crafts</summary>
+              <div style={{ marginTop: 8, ...styles.sub }}>
+                These levels and bonuses are shared with Profits → Quantities and saved automatically. They are used to
+                estimate crafting and break losses for ingredients.
+              </div>
+              <CraftingLevels
+                settings={ingredientCraftSettings}
+                onChange={updateIngredientCraftSettings}
+                planning={false}
+              />
+            </details>
           </div>
         ) : (
           <div style={styles.subCard}>
@@ -1126,7 +1392,115 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
         )}
         </CollapsibleSection>
 
-        <div
+        {mode === "calculator" ? (
+          <div style={{ ...styles.subCard, display: "grid", gap: 12 }}>
+            {!calculatorRecipe ? (
+              <div style={styles.sub}>Choose a recipe and enter current and target skill to estimate materials.</div>
+            ) : calcSkillTenths === null || calcTargetTenths === null ? (
+              <div style={{ ...styles.sub, color: "#ff9c7a" }}>Enter valid current and target skill values (0–110).</div>
+            ) : !calculatorEstimate?.reachable ? (
+              <div style={{ ...styles.sub, color: "#ff9c7a" }}>
+                This target cannot be reached with the selected recipe. Check that the target is above current skill but
+                no higher than its cap{calcLoop && calculatorDesynth ? ` or the desynthesis cap (${calculatorDesynth.lvl})` : ""}, and that the recipe is craftable at your current skill.
+              </div>
+            ) : (
+              <>
+                <div>
+                  <strong>Expected materials to reach {(calcTargetTenths / 10).toFixed(1)} skill</strong>
+                </div>
+                <div style={styles.sub}>
+                  {calculatorRecipe.craft}: {calculatorRecipe.res.n} (cap {calculatorRecipe.lvl}) ·{" "}
+                  {calculatorEstimate.craftAttempts.toFixed(1)} craft attempts
+                  {calcLoop ? ` · ${calculatorEstimate.desynthAttempts.toFixed(1)} desynth attempts` : ""} ·{" "}
+                  {calculatorEstimate.breakRateAtStart.toFixed(1)}% break chance at starting skill.
+                  Break chance and skill-up rate are recalculated as skill rises.
+                </div>
+                <div>
+                  <strong>Materials to prepare (rounded up)</strong>
+                  {calculatorEstimate.materials.length ? (
+                    <ul style={{ margin: "6px 0 0", paddingLeft: 22 }}>
+                      {calculatorEstimate.materials
+                        .slice()
+                        .sort((a, b) => b.quantity - a.quantity)
+                        .map((material) => (
+                          <li key={material.name}>
+                            {formatMaterialAmount(material.name, Math.ceil(material.quantity))}
+                          </li>
+                        ))}
+                    </ul>
+                  ) : <div style={styles.sub}>No materials needed.</div>}
+                </div>
+                {ingredientBreakdowns.length > 0 && (
+                  <details>
+                    <summary style={{ cursor: "pointer", color: "#ccc" }}>Crafting breakdown for ingredients</summary>
+                    <div style={{ marginTop: 8, ...styles.sub }}>
+                      Ingredient recipes use your saved craft levels and bonuses. Recipe paths are selected automatically;
+                      synth counts are rounded up to whole attempts, and raw item totals are rounded up when preparing.
+                    </div>
+                    <ul style={{ margin: "6px 0 0", paddingLeft: 22 }}>
+                      {ingredientBreakdowns.map(({ material, node }) => (
+                        <CraftIngredientBreakdown key={material.name} node={node} quantity={material.quantity} />
+                      ))}
+                    </ul>
+                    <div style={{ marginTop: 10 }}>
+                      <strong>Combined raw materials to obtain, grouped by ingredient</strong>
+                      <ul style={{ margin: "6px 0 0", paddingLeft: 22 }}>
+                        {rawIngredientPlan.groups.map(({ material, node, materials }) => (
+                          <li key={material.name}>
+                            <details>
+                              <summary>
+                                {formatMaterialAmount(material.name, Math.ceil(material.quantity))}
+                                {node.recipe ? ` — ${node.recipe.craft} recipe` : ""}
+                              </summary>
+                              <ul style={{ margin: "6px 0 0", paddingLeft: 22 }}>
+                                {materials.map((rawMaterial) => (
+                                  <li key={rawMaterial.key}>
+                                    {formatMaterialAmount(rawMaterial.name, Math.ceil(rawMaterial.quantity))}
+                                  </li>
+                                ))}
+                              </ul>
+                            </details>
+                          </li>
+                        ))}
+                      </ul>
+                      <details style={{ marginTop: 8 }}>
+                        <summary>All raw materials combined</summary>
+                        <ul style={{ margin: "6px 0 0", paddingLeft: 22 }}>
+                          {rawIngredientPlan.totals.map((material) => (
+                            <li key={material.key}>
+                              {formatMaterialAmount(material.name, Math.ceil(material.quantity))}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8, ...styles.sub }}>
+                        Auction House craft categories:
+                        {CRAFTS.map((craft) => (
+                          <span key={craft} style={{ color: CRAFT_COLORS[craft] }}>{craft}</span>
+                        ))}
+                        <span>Crystals use element colors.</span>
+                      </div>
+                    </div>
+                  </details>
+                )}
+                {calcLoop && calculatorDesynth && (
+                  <div style={styles.sub}>
+                    The loop uses about {calculatorEstimate.desynthInputs.toFixed(2)} crafted{" "}
+                    {calculatorRecipe.res.n} as desynth inputs per run. Possible desynth yields:{" "}
+                    {[calculatorDesynth.res, ...calculatorDesynth.hq].map((item) => item.n).filter((name, index, names) => names.indexOf(name) === index).join(", ")}.
+                    Yield probabilities are not in the recipe data, so recovered ingredients are not subtracted from these gross totals.
+                  </div>
+                )}
+                <div style={styles.sub}>
+                  Estimates are expected values, not guarantees. They include stochastic skill-up gains, success and break
+                  outcomes, and the modeled material loss on breaks. Sub-craft skill is assumed sufficient. The loop
+                  assumes the selected recipe’s base result is desynthesized after each successful craft; HQ output paths
+                  and recovered materials are not modeled.
+                </div>
+              </>
+            )}
+          </div>
+        ) : <div
           ref={resultsRef}
           style={{
             border: "1px solid rgba(255,255,255,0.10)",
@@ -1297,7 +1671,7 @@ export default function CraftingTab(timerControls: GuildTimerControls) {
               </tbody>
             </table>
           )}
-        </div>
+        </div>}
         </>}
       </div>
     </section>

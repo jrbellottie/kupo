@@ -55,6 +55,28 @@
 .raising-planner, .raising-planner form, .raising-plan-result, .raising-plan-result > section { display: grid; gap: 12px; min-width: 0; }
 .raising-planner input[type="number"] { width: 120px; box-sizing: border-box; }
 .raising-stat-purpose { display: block; font-size: 11px; color: #bbb; font-weight: 400; margin-top: 4px; }
+.raising-stat-estimate { display: block; margin-top: 6px; color: #b7dfef; font-size: 12px; }
+.raising .raising-panel {
+  --raising-accent: #789aac;
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--raising-accent) 40%, #333);
+  border-left: 4px solid var(--raising-accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--raising-accent) 7%, #111);
+}
+.raising details.raising-panel { display: block; }
+.raising .raising-panel > h4, .raising .raising-panel > summary { color: var(--raising-accent); }
+.raising .raising-panel-start { --raising-accent: #92a8bd; }
+.raising .raising-panel-color { --raising-accent: #cf9bcf; }
+.raising .raising-panel-goals { --raising-accent: #dab773; }
+.raising .raising-panel-care { --raising-accent: #bdad83; }
+.raising .raising-panel-reports { --raising-accent: #87c6a0; }
+.raising .raising-panel-stories { --raising-accent: #b4a1db; }
+.raising .raising-panel-stats { --raising-accent: #86b9e3; }
+.raising .raising-panel-progress { --raising-accent: #70c5c6; }
 .raising-ability-groups { display: flex; flex-wrap: wrap; gap: 12px; }
 .raising-ability-groups fieldset { display: flex; flex-wrap: wrap; gap: 10px 16px; flex: 1 1 250px; min-width: 0; border: 1px solid #444; border-radius: 8px; padding: 12px; }
 .raising-ability-groups legend { font-size: 12px; padding: 0 4px; }

@@ -11,6 +11,7 @@ import { ArrowLeft } from "lucide-react";
 import { navigateToTab, peekNavQuery, hasBackTab, goBackTab } from "./utils/tabNav";
 import { rememberTabState, peekRestoredTabState } from "./utils/tabNav";
 import { getItemSources, sourceBadges, allSourcedItems, questRewardsFor, recipesUsingItem } from "./utils/itemSources";
+import { CRAFT_COLORS } from "./utils/craftColors";
 import dropsData from "./data/drops.json";
 import NpcLink from "./NpcLink";
 import { NPCS } from "./utils/npcs";
@@ -359,17 +360,6 @@ const chipLinkStyle: React.CSSProperties = {
   cursor: "pointer",
   color: "#7ec4e8",
   borderColor: "rgba(126,196,232,0.45)",
-};
-
-const CRAFT_COLORS: Record<string, string> = {
-  Woodworking: "#8fd18f",
-  Smithing: "#b6c7db",
-  Goldsmithing: "#e8d47e",
-  Clothcraft: "#c9a2ff",
-  Leathercraft: "#efa975",
-  Bonecraft: "#eee2c6",
-  Alchemy: "#70d8ce",
-  Cooking: "#f19bb5",
 };
 
 function craftChipStyle(craft: string): React.CSSProperties {

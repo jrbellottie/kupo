@@ -45,6 +45,12 @@ const SKILLUP_AMOUNT_WEIGHTS: number[][] = [
 
 const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
 
+/** Probability distribution for the +0.1 through +0.5 gain when a skill-up occurs. */
+export function craftSkillupAmountDistribution(skillTenths: number, gap: number): number[] {
+  if (skillTenths >= 600) return [1, 0, 0, 0, 0];
+  return SKILLUP_AMOUNT_WEIGHTS[clamp(gap, 0, 14)].map((weight) => weight / 100);
+}
+
 /** Chance a normal synth completes, before mods: 95% at/below cap, then drops with the gap. */
 export function synthSuccessPct(gap: number): number {
   let rate = 95;
@@ -69,9 +75,9 @@ export function eraSkillupChance(skillTenths: number): number {
 /** Average gain per skill-up in points; only +0.1 can happen at skill 60.0+. */
 export function averageGainPerSkillup(skillTenths: number, gap: number): number {
   if (skillTenths >= 600) return 0.1;
-  const weights = SKILLUP_AMOUNT_WEIGHTS[clamp(gap, 0, 14)];
+  const weights = craftSkillupAmountDistribution(skillTenths, gap);
   let tenths = 0;
-  for (let i = 0; i < weights.length; i++) tenths += (weights[i] / 100) * (i + 1);
+  for (let i = 0; i < weights.length; i++) tenths += weights[i] * (i + 1);
   return tenths / 10;
 }
 
